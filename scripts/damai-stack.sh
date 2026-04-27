@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+PRO_DIR="$ROOT_DIR/damai-pro"
+AI_DIR="$ROOT_DIR/damai-ai"
+COMPOSE_FILE="$PRO_DIR/docker-compose.yml"
+STATE_DIR="${DAMAI_STACK_STATE_DIR:-${TMPDIR:-/tmp}/damai-stack}"
+PID_DIR="$STATE_DIR/pids"
+LOG_DIR="$STATE_DIR/logs"
+SHARDING_DIR="$STATE_DIR/shardingsphere"
+STARTUP_TIMEOUT_SECONDS="${DAMAI_STARTUP_TIMEOUT_SECONDS:-240}"
+FRONTEND_TIMEOUT_SECONDS="${DAMAI_FRONTEND_TIMEOUT_SECONDS:-120}"
+mkdir -p "$PID_DIR" "$LOG_DIR" "$SHARDING_DIR"
+log(){ printf '[damai-stack] %s\n' "$*"; }
+die(){ printf '[damai-stack] %s\n' "$*" >&2; exit 1; }
+usage(){ echo "Usage: bash scripts/damai-stack.sh {start|stop|status} [--skip-build] [--skip-db-init] [--force-db-init] [--skip-npm-install] [--skip-frontend] [--skip-docker] [--keep-docker]"; }
+load_env_file(){ local f="$1" line key value; [[ -f "$f" ]] || return 0; while IFS= read -r line || [[ -n "$line" ]]; do line="${line%$'\r'}"; [[ -z "$line" || ${line:0:1} == "#" || $line != *=* ]] && continue; key="${line%%=*}"; value="${line#*=}"; [[ $key =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue; printf -v "$key" '%s' "$value"; export "$key"; done < "$f"; }
+need(){ command -v "$1" >/dev/null 2>&1 || die "Missing command: $1"; }
+port_listening(){ ss -ltn "( sport = :$1 )" 2>/dev/null | grep -q LISTEN; }
+pid_alive(){ [[ -f "$1" ]] && kill -0 "$(cat "$1")" 2>/dev/null; }
+wait_for_port(){ local port="$1" timeout="$2" end; end=$((SECONDS + timeout)); until port_listening "$port"; do (( SECONDS < end )) || return 1; sleep 2; done; }
+wait_for_http(){ local url="$1" timeout="$2" end code; end=$((SECONDS + timeout)); while (( SECONDS < end )); do code="$(curl -sS -L -H 'Connection: close' --connect-timeout 3 --max-time 10 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || true)"; [[ "$code" =~ ^[23][0-9][0-9]$ ]] && return 0; sleep 3; done; return 1; }
+wait_ready(){ local name="$1" mode="$2" target="$3" timeout="$4"; if [[ "$mode" == http ]]; then wait_for_http "$target" "$timeout" || die "$name not ready: $target"; else wait_for_port "$target" "$timeout" || die "$name not ready on port $target"; fi; log "$name ready"; }
+compose(){ docker compose --env-file "$PRO_DIR/.env" -f "$COMPOSE_FILE" --profile ai "$@"; }
+mysql_exec(){ compose exec -T mysql mysql --default-character-set=utf8mb4 -N -uroot "-p${DAMAI_MYSQL_ROOT_PASSWORD:-root}" -e "$1"; }
+ stop_managed_processes(){ for n in damai-ai-vue damai-pro-vue3 damai-mcp-metrics-service damai-mcp-log-service damai-core-service damai-gateway-service damai-migrate-service damai-order-service damai-pay-service damai-program-service damai-user-service damai-customize-service damai-base-data-service damai-admin-service; do stop_one "$n"; done; }
+ reset_databases(){ log "Stopping managed services before database reset"; stop_managed_processes; log "Resetting local databases"; mysql_exec "DROP DATABASE IF EXISTS damai_ai; DROP DATABASE IF EXISTS seata; DROP DATABASE IF EXISTS damai_base_data; DROP DATABASE IF EXISTS damai_customize; DROP DATABASE IF EXISTS damai_order_0; DROP DATABASE IF EXISTS damai_order_1; DROP DATABASE IF EXISTS damai_pay_0; DROP DATABASE IF EXISTS damai_pay_1; DROP DATABASE IF EXISTS damai_program_0; DROP DATABASE IF EXISTS damai_program_1; DROP DATABASE IF EXISTS damai_user_0; DROP DATABASE IF EXISTS damai_user_1;" >/dev/null; }
+seata_db_initialized(){ local a; a="$(mysql_exec "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='seata' AND TABLE_NAME IN ('global_table','branch_table','lock_table','distributed_lock');" 2>/dev/null | tr -d '\r[:space:]' || true)"; [[ "$a" == "4" ]]; }
+ai_db_initialized(){ local a; a="$(mysql_exec "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='damai_ai' AND TABLE_NAME='d_chat_type_history';" 2>/dev/null | tr -d '\r[:space:]' || true)"; [[ "$a" == "1" ]]; }
+service_jar(){ find "$1/target" -maxdepth 1 -type f -name '*.jar' ! -name 'original-*' ! -name '*-sources.jar' -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d' ' -f2-; }
+start_bg(){ local name="$1" port="$2" mode="$3" target="$4" timeout="$5" cwd="$6" pidfile logfile; shift 6; pidfile="$PID_DIR/$name.pid"; logfile="$LOG_DIR/$name.log"; if pid_alive "$pidfile"; then log "$name already running (PID $(cat "$pidfile"))"; elif port_listening "$port"; then log "Reusing existing $name on $port"; rm -f "$pidfile"; else log "Starting $name"; ( cd "$cwd"; nohup "$@" >>"$logfile" 2>&1 & echo $! > "$pidfile" ); fi; wait_ready "$name" "$mode" "$target" "$timeout"; }
+stop_one(){ local name="$1" pidfile pid; pidfile="$PID_DIR/$name.pid"; if pid_alive "$pidfile"; then pid="$(cat "$pidfile")"; log "Stopping $name ($pid)"; kill "$pid" 2>/dev/null || true; for _ in {1..20}; do kill -0 "$pid" 2>/dev/null || break; sleep 1; done; kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true; fi; rm -f "$pidfile"; }
+status_one(){ local name="$1" port="$2" pidfile; pidfile="$PID_DIR/$name.pid"; if pid_alive "$pidfile"; then echo "$name: running(pid $(cat "$pidfile"))"; elif port_listening "$port"; then echo "$name: running(external,$port)"; else echo "$name: stopped"; fi; }
+print_addresses(){
+  load_env_file "$PRO_DIR/.env"
+  load_env_file "$AI_DIR/.env"
+  echo
+  echo "Project URLs:"
+  echo "  damai-pro frontend:   http://127.0.0.1:5173"
+  echo "  damai-ai frontend:    http://127.0.0.1:5174"
+  echo "  gateway:              http://127.0.0.1:6085"
+  echo "  ai core:              http://127.0.0.1:${DAMAI_AI_PORT:-6089}"
+  echo "  admin:                http://127.0.0.1:10082"
+  echo "  nacos:                http://127.0.0.1:${DAMAI_NACOS_PORT:-18848}/nacos"
+  echo "  sentinel:             http://127.0.0.1:${DAMAI_SENTINEL_PORT:-8082}"
+  echo "  prometheus:           http://127.0.0.1:${DAMAI_PROMETHEUS_PORT:-9090}"
+  echo "  elasticsearch:        http://127.0.0.1:${DAMAI_ES_PORT:-19200}"
+  echo "  ollama:               http://127.0.0.1:${DAMAI_OLLAMA_PORT:-11434}"
+  echo "  mcp log sse:          http://127.0.0.1:${DAMAI_AI_MCP_LOG_PORT:-8085}/sse"
+  echo "  mcp metrics sse:      http://127.0.0.1:${DAMAI_AI_MCP_METRICS_PORT:-8086}/sse"
+  echo "  logs:                 $LOG_DIR"
+}
+gen_shard(){ python3 - "$1" "$2" "${DAMAI_MYSQL_HOST:-127.0.0.1}" "${DAMAI_MYSQL_PORT:-13306}" "${DAMAI_MYSQL_USERNAME:-root}" "${DAMAI_MYSQL_PASSWORD:-root}" <<'PY'
+from pathlib import Path
+import re,sys
+src,dst,host,port,user,pwd=sys.argv[1:]
+text=Path(src).read_text()
+text=re.sub(r'jdbc:mysql://127\.0\.0\.1:13306/',f'jdbc:mysql://{host}:{port}/',text)
+text=text.replace('username: root',f'username: {user}')
+text=text.replace('password: root',f'password: {pwd}')
+Path(dst).write_text(text)
+PY
+}
+setup_sharding(){ gen_shard "$PRO_DIR/damai-server/damai-user-service/src/main/resources/shardingsphere-user-local.yaml" "$SHARDING_DIR/shardingsphere-user-local.yaml"; gen_shard "$PRO_DIR/damai-server/damai-order-service/src/main/resources/shardingsphere-order-local.yaml" "$SHARDING_DIR/shardingsphere-order-local.yaml"; gen_shard "$PRO_DIR/damai-server/damai-program-service/src/main/resources/shardingsphere-program-local.yaml" "$SHARDING_DIR/shardingsphere-program-local.yaml"; gen_shard "$PRO_DIR/damai-server/damai-pay-service/src/main/resources/shardingsphere-pay-local.yaml" "$SHARDING_DIR/shardingsphere-pay-local.yaml"; gen_shard "$PRO_DIR/damai-server/damai-migrate-service/src/main/resources/shardingsphere-migrate-local.yaml" "$SHARDING_DIR/shardingsphere-migrate-local.yaml"; export DAMAI_USER_SHARDING_URL="jdbc:shardingsphere:absolutepath:$SHARDING_DIR/shardingsphere-user-local.yaml"; export DAMAI_ORDER_SHARDING_URL="jdbc:shardingsphere:absolutepath:$SHARDING_DIR/shardingsphere-order-local.yaml"; export DAMAI_PROGRAM_SHARDING_URL="jdbc:shardingsphere:absolutepath:$SHARDING_DIR/shardingsphere-program-local.yaml"; export DAMAI_PAY_SHARDING_URL="jdbc:shardingsphere:absolutepath:$SHARDING_DIR/shardingsphere-pay-local.yaml"; export DAMAI_MIGRATE_SHARDING_URL="jdbc:shardingsphere:absolutepath:$SHARDING_DIR/shardingsphere-migrate-local.yaml"; }
+db_initialized(){ local a b c d e f; a="$(mysql_exec "SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME IN ('damai_ai','damai_base_data','damai_customize','damai_order_0','damai_order_1','damai_pay_0','damai_pay_1','damai_program_0','damai_program_1','damai_user_0','damai_user_1');" 2>/dev/null | tr -d '\r[:space:]' || true)"; b="$(mysql_exec "SELECT COUNT(*) FROM damai_base_data.d_channel_data WHERE code='0001';" 2>/dev/null | tr -d '\r[:space:]' || true)"; c="$(mysql_exec "SELECT COUNT(*) FROM damai_program_0.d_program_category UNION ALL SELECT COUNT(*) FROM damai_program_1.d_program_category;" 2>/dev/null | awk '{sum+=$1} END {print sum+0}' || true)"; d="$(mysql_exec "SELECT COUNT(*) FROM damai_program_0.d_program_0 WHERE id=4 AND title='于文文「魔方视界」巡回演唱会';" 2>/dev/null | tr -d '\r[:space:]' || true)"; e="$(mysql_exec "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='seata' AND TABLE_NAME IN ('global_table','branch_table','lock_table','distributed_lock');" 2>/dev/null | tr -d '\r[:space:]' || true)"; f="$(mysql_exec "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='damai_ai' AND TABLE_NAME='d_chat_type_history';" 2>/dev/null | tr -d '\r[:space:]' || true)"; [[ "$a" == "11" && "$b" == "1" && "$c" == "42" && "$d" == "1" && "$e" == "4" && "$f" == "1" ]]; }
+init_db(){ local f force="${1:-0}"; log "Initializing databases"; [[ "$force" == "1" ]] && reset_databases; for f in "$PRO_DIR/sql/cloud/1_damai_cloud_create_database.sql"; do compose exec -T mysql mysql --default-character-set=utf8mb4 -uroot "-p${DAMAI_MYSQL_ROOT_PASSWORD:-root}" < "$f"; done; while IFS= read -r f; do compose exec -T mysql mysql --default-character-set=utf8mb4 -uroot "-p${DAMAI_MYSQL_ROOT_PASSWORD:-root}" < "$f"; done < <(find "$PRO_DIR/sql/cloud" -maxdepth 1 -type f ! -name '1_damai_cloud_create_database.sql' | sort); while IFS= read -r f; do compose exec -T mysql mysql --default-character-set=utf8mb4 -uroot "-p${DAMAI_MYSQL_ROOT_PASSWORD:-root}" < "$f"; done < <(find "$PRO_DIR/sql" -type f -name '*.sql' ! -path "$PRO_DIR/sql/cloud/*" ! -path "$PRO_DIR/sql/seata/*" | sort); if [[ "$force" == "1" ]] || ! seata_db_initialized; then compose exec -T mysql mysql --default-character-set=utf8mb4 -uroot "-p${DAMAI_MYSQL_ROOT_PASSWORD:-root}" < "$PRO_DIR/sql/seata/seata_server_mysql.sql"; fi; if [[ "$force" == "1" ]] || ! ai_db_initialized; then compose exec -T mysql mysql --default-character-set=utf8mb4 -uroot "-p${DAMAI_MYSQL_ROOT_PASSWORD:-root}" < "$AI_DIR/sql/damai_ai.sql"; fi; db_initialized || die "Database initialization verification failed"; }
+ensure_npm(){ [[ -d "$1/node_modules" ]] || ( cd "$1" && npm install ); }
+start_stack(){ local SKIP_BUILD=0 SKIP_DB_INIT=0 FORCE_DB_INIT=0 SKIP_NPM_INSTALL=0 SKIP_FRONTEND=0 SKIP_DOCKER=0 arg jar name module port mode target profile; for arg in "$@"; do case "$arg" in --skip-build) SKIP_BUILD=1;; --skip-db-init) SKIP_DB_INIT=1;; --force-db-init) FORCE_DB_INIT=1;; --skip-npm-install) SKIP_NPM_INSTALL=1;; --skip-frontend) SKIP_FRONTEND=1;; --skip-docker) SKIP_DOCKER=1;; *) die "Unknown option: $arg";; esac; done; for c in docker java mvn node npm curl ss python3; do need "$c"; done; load_env_file "$PRO_DIR/.env"; load_env_file "$AI_DIR/.env"; export SPRING_BOOT_ADMIN_CLIENT_URL="http://127.0.0.1:10082" SPRING_BOOT_ADMIN_CLIENT_USERNAME="admin" SPRING_BOOT_ADMIN_CLIENT_PASSWORD="admin"; setup_sharding; if [[ $SKIP_DOCKER -eq 0 ]]; then compose up -d; fi; wait_for_port "${DAMAI_MYSQL_PORT:-13306}" 180 || die "MySQL not ready"; if [[ $SKIP_DB_INIT -eq 0 ]]; then if [[ $FORCE_DB_INIT -eq 1 ]]; then init_db 1; elif ! db_initialized; then init_db 0; else log "Database initialization verified"; fi; fi; wait_for_http "http://127.0.0.1:${DAMAI_NACOS_PORT:-18848}/nacos/actuator/health" 180 || die "Nacos not ready"; wait_for_port "${DAMAI_REDIS_PORT:-16379}" 120 || die "Redis not ready"; wait_for_port "${DAMAI_KAFKA_PORT:-19092}" 180 || die "Kafka not ready"; wait_for_http "http://elastic:${DAMAI_ES_PASSWORD:-elastic}@127.0.0.1:${DAMAI_ES_PORT:-19200}/_cluster/health" 180 || die "Elasticsearch not ready"; wait_for_port "${DAMAI_SEATA_PORT:-8091}" 180 || die "Seata not ready"; wait_for_http "http://127.0.0.1:${DAMAI_SENTINEL_PORT:-8082}" 180 || die "Sentinel not ready"; wait_for_port "${DAMAI_PROMETHEUS_PORT:-9090}" 120 || die "Prometheus not ready"; wait_for_port "${DAMAI_OLLAMA_PORT:-11434}" 120 || die "Ollama not ready"; if [[ $SKIP_BUILD -eq 0 ]]; then ( cd "$ROOT_DIR" && mvn -f "$ROOT_DIR/pom.xml" -DskipTests package ); fi; while IFS='|' read -r name module port mode target profile; do [[ -n "$name" ]] || continue; jar="$(service_jar "$module")"; [[ -n "$jar" ]] || die "No jar for $name"; if [[ -n "$profile" ]]; then start_bg "$name" "$port" "$mode" "$target" "$STARTUP_TIMEOUT_SECONDS" "$module" java -jar "$jar" "--spring.profiles.active=$profile"; else start_bg "$name" "$port" "$mode" "$target" "$STARTUP_TIMEOUT_SECONDS" "$module" java -jar "$jar"; fi; done <<EOF
+ damai-admin-service|$PRO_DIR/damai-server/damai-admin-service|10082|http|http://127.0.0.1:10082/login|
+ damai-base-data-service|$PRO_DIR/damai-server/damai-base-data-service|6083|http|http://127.0.0.1:6083/actuator/health|local
+ damai-customize-service|$PRO_DIR/damai-server/damai-customize-service|6084|http|http://127.0.0.1:6084/actuator/health|local
+ damai-user-service|$PRO_DIR/damai-server/damai-user-service|6082|http|http://127.0.0.1:6082/actuator/health|local
+ damai-program-service|$PRO_DIR/damai-server/damai-program-service|6086|http|http://127.0.0.1:6086/actuator/health|local
+ damai-pay-service|$PRO_DIR/damai-server/damai-pay-service|6087|http|http://127.0.0.1:6087/actuator/health|local
+ damai-order-service|$PRO_DIR/damai-server/damai-order-service|8081|http|http://127.0.0.1:8081/actuator/health|local
+ damai-migrate-service|$PRO_DIR/damai-server/damai-migrate-service|6088|http|http://127.0.0.1:6088/actuator/health|local
+ damai-gateway-service|$PRO_DIR/damai-server/damai-gateway-service|6085|http|http://127.0.0.1:6085/actuator/health|pro
+ damai-core-service|$AI_DIR/damai-core-service|6089|http|http://127.0.0.1:6089/actuator/health|
+ damai-mcp-log-service|$AI_DIR/damai-mcp-server/damai-mcp-log-service|8085|port|8085|
+ damai-mcp-metrics-service|$AI_DIR/damai-mcp-server/damai-mcp-metrics-service|8086|port|8086|
+EOF
+ if [[ $SKIP_FRONTEND -eq 0 ]]; then [[ $SKIP_NPM_INSTALL -eq 1 ]] || ensure_npm "$PRO_DIR/vue3"; [[ $SKIP_NPM_INSTALL -eq 1 ]] || ensure_npm "$AI_DIR/vue"; start_bg "damai-pro-vue3" 5173 http "http://127.0.0.1:5173/index.html" "$FRONTEND_TIMEOUT_SECONDS" "$PRO_DIR/vue3" npm run dev -- --host 127.0.0.1 --port 5173; start_bg "damai-ai-vue" 5174 http "http://127.0.0.1:5174" "$FRONTEND_TIMEOUT_SECONDS" "$AI_DIR/vue" npm run dev -- --host 127.0.0.1 --port 5174; fi; log "Started. Logs: $LOG_DIR"; print_addresses; }
+stop_stack(){ local KEEP_DOCKER=0 arg; for arg in "$@"; do case "$arg" in --keep-docker) KEEP_DOCKER=1;; *) die "Unknown option: $arg";; esac; done; for n in damai-ai-vue damai-pro-vue3 damai-mcp-metrics-service damai-mcp-log-service damai-core-service damai-gateway-service damai-migrate-service damai-order-service damai-pay-service damai-program-service damai-user-service damai-customize-service damai-base-data-service damai-admin-service; do stop_one "$n"; done; [[ $KEEP_DOCKER -eq 1 ]] || compose down || true; log "Stopped"; }
+status_stack(){ for n in damai-admin-service:10082 damai-base-data-service:6083 damai-customize-service:6084 damai-user-service:6082 damai-program-service:6086 damai-pay-service:6087 damai-order-service:8081 damai-migrate-service:6088 damai-gateway-service:6085 damai-core-service:6089 damai-mcp-log-service:8085 damai-mcp-metrics-service:8086 damai-pro-vue3:5173 damai-ai-vue:5174; do status_one "${n%%:*}" "${n##*:}"; done; compose ps || true; print_addresses; }
+cmd="${1:-}"; shift || true
+case "$cmd" in start) start_stack "$@";; stop) stop_stack "$@";; status) status_stack;; *) usage; exit 1;; esac

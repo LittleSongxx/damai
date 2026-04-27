@@ -1,0 +1,215 @@
+name: damai
+
+services:
+  mysql:
+    image: mysql:${DAMAI_MYSQL_VERSION}
+    restart: unless-stopped
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --init-connect=SET NAMES utf8mb4
+    environment:
+      TZ: ${DAMAI_TIMEZONE}
+      MYSQL_ROOT_PASSWORD: ${DAMAI_MYSQL_ROOT_PASSWORD}
+    ports:
+      - "${DAMAI_MYSQL_PORT:-3306}:3306"
+    volumes:
+      - damai-mysql-data:/var/lib/mysql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mysqladmin ping -h 127.0.0.1 -uroot -p${DAMAI_MYSQL_ROOT_PASSWORD}
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+    networks:
+      - damai
+
+  redis:
+    image: redis:7.2-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+    ports:
+      - "${DAMAI_REDIS_PORT:-6379}:6379"
+    volumes:
+      - damai-redis-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    networks:
+      - damai
+
+  nacos:
+    image: nacos/nacos-server:${DAMAI_NACOS_VERSION}
+    restart: unless-stopped
+    environment:
+      TZ: ${DAMAI_TIMEZONE}
+      MODE: standalone
+      PREFER_HOST_MODE: hostname
+      NACOS_AUTH_ENABLE: "true"
+      NACOS_AUTH_IDENTITY_KEY: serverIdentity
+      NACOS_AUTH_IDENTITY_VALUE: security
+      NACOS_AUTH_TOKEN: ${DAMAI_NACOS_AUTH_TOKEN}
+      JVM_XMS: 512m
+      JVM_XMX: 512m
+      JVM_XMN: 256m
+    ports:
+      - "${DAMAI_NACOS_PORT:-8848}:8848"
+      - "${DAMAI_NACOS_GRPC_PORT:-9848}:9848"
+      - "${DAMAI_NACOS_RAFT_PORT:-9849}:9849"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://127.0.0.1:8848/nacos/actuator/health >/dev/null || exit 1
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+    networks:
+      - damai
+
+  kafka:
+    image: apache/kafka:${DAMAI_KAFKA_VERSION}
+    restart: unless-stopped
+    environment:
+      TZ: ${DAMAI_TIMEZONE}
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,EXTERNAL://:9094,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://127.0.0.1:9092,EXTERNAL://127.0.0.1:${DAMAI_KAFKA_PORT:-9092}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    ports:
+      - "${DAMAI_KAFKA_PORT:-9092}:9094"
+    volumes:
+      - damai-kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - /opt/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:9092 --list >/dev/null 2>&1
+      interval: 15s
+      timeout: 10s
+      retries: 15
+      start_period: 25s
+    networks:
+      - damai
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${DAMAI_ES_VERSION}
+    restart: unless-stopped
+    environment:
+      TZ: ${DAMAI_TIMEZONE}
+      discovery.type: single-node
+      xpack.security.enabled: "true"
+      ELASTIC_PASSWORD: ${DAMAI_ES_PASSWORD}
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    ports:
+      - "${DAMAI_ES_PORT:-9200}:9200"
+    volumes:
+      - damai-es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS -u elastic:${DAMAI_ES_PASSWORD} http://127.0.0.1:9200/_cluster/health >/dev/null || exit 1
+      interval: 20s
+      timeout: 10s
+      retries: 20
+      start_period: 45s
+    networks:
+      - damai
+
+  seata:
+    image: seataio/seata-server:${DAMAI_SEATA_VERSION}
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      TZ: ${DAMAI_TIMEZONE}
+      SEATA_CONFIG_NAME: file:/seata-server/resources/registry
+    ports:
+      - "${DAMAI_SEATA_CONSOLE_PORT:-7091}:7091"
+      - "${DAMAI_SEATA_PORT:-8091}:8091"
+    volumes:
+      - ./docker/seata/registry.conf:/seata-server/resources/registry.conf:ro
+      - ./docker/seata/file.conf:/seata-server/resources/file.conf:ro
+    networks:
+      - damai
+
+  sentinel:
+    image: ${DAMAI_SENTINEL_IMAGE}
+    restart: unless-stopped
+    ports:
+      - "${DAMAI_SENTINEL_PORT:-8082}:8858"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -qO- http://127.0.0.1:8858 >/dev/null 2>&1 || exit 1
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks:
+      - damai
+
+  prometheus:
+    image: prom/prometheus:${DAMAI_PROMETHEUS_VERSION:-v2.54.1}
+    restart: unless-stopped
+    profiles:
+      - ai
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+    ports:
+      - "${DAMAI_PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - damai-prometheus-data:/prometheus
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    networks:
+      - damai
+
+  ollama:
+    image: ollama/ollama:${DAMAI_OLLAMA_VERSION:-0.5.7}
+    restart: unless-stopped
+    profiles:
+      - ai
+    ports:
+      - "${DAMAI_OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - damai-ollama-data:/root/.ollama
+    networks:
+      - damai
+
+networks:
+  damai:
+    name: damai-network
+
+volumes:
+  damai-mysql-data:
+  damai-redis-data:
+  damai-kafka-data:
+  damai-es-data:
+  damai-prometheus-data:
+  damai-ollama-data:

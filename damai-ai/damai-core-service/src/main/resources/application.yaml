@@ -1,0 +1,123 @@
+server:
+  port: ${DAMAI_AI_PORT:6089}
+  servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
+spring:
+  application:
+    name: damai-ai
+  main:
+    allow-bean-definition-overriding: true
+  mvc:
+    pathmatch:
+      matching-strategy: ant_path_matcher
+    servlet:
+      load-on-startup: 1
+    jackson:
+      time-zone: GMT+8
+      date-format: yyyy-MM-dd HH:mm:ss
+      generator:
+        WRITE_NUMBERS_AS_STRINGS: true
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${DAMAI_AI_MYSQL_URL:jdbc:mysql://${DAMAI_MYSQL_HOST:127.0.0.1}:${DAMAI_MYSQL_PORT:13306}/damai_ai?serverTimezone=Asia/Shanghai&useSSL=false&useUnicode=true&characterEncoding=utf-8&zeroDateTimeBehavior=convertToNull&transformedBitIsBoolean=true&tinyInt1isBit=false&allowPublicKeyRetrieval=true&allowMultiQueries=true&useServerPrepStmts=false}
+    username: ${DAMAI_AI_MYSQL_USERNAME:${DAMAI_MYSQL_USERNAME:root}}
+    password: ${DAMAI_AI_MYSQL_PASSWORD:${DAMAI_MYSQL_PASSWORD:root}}
+  ai:
+    chat:
+      memory:
+        repository:
+          jdbc:
+            initialize-schema: always
+            platform: mariadb
+    ollama:
+      base-url: ${DAMAI_AI_OLLAMA_BASE_URL:http://127.0.0.1:11434}
+      chat:
+        model: ${DAMAI_AI_OLLAMA_CHAT_MODEL:deepseek-r1:7b}
+    openai:
+      base-url: ${DAMAI_AI_OPENAI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
+      api-key: ${DAMAI_AI_ALIBABA_API_KEY:}
+      chat:
+        options:
+          model: ${DAMAI_AI_OPENAI_CHAT_MODEL:qwen-max-latest}
+      embedding:
+        options:
+          model: ${DAMAI_AI_OPENAI_EMBEDDING_MODEL:text-embedding-v3}
+          dimensions: ${DAMAI_AI_OPENAI_EMBEDDING_DIMENSIONS:1024}
+    deepseek:
+      base-url: ${DAMAI_AI_DEEPSEEK_BASE_URL:https://api.deepseek.com}
+      api-key: ${DAMAI_AI_DEEPSEEK_API_KEY:}
+      chat:
+        options:
+          model: ${DAMAI_AI_DEEPSEEK_CHAT_MODEL:deepseek-chat}
+    # stdio 和 sse 两种模式不能同时使用，使用一种必须把另一种注释掉
+#    mcp:
+#      client:
+#        stdio:
+#          servers-configuration: classpath:mcp-servers.json
+#        sse:
+#          connections:
+#            damai-log:
+#              url: ${DAMAI_AI_MCP_LOG_URL:http://127.0.0.1:8085}
+#            damai-metrics:
+#              url: ${DAMAI_AI_MCP_METRICS_URL:http://127.0.0.1:8086}
+easy-es:
+  #默认为true,若为false则认为不启用本框架
+  enable: true
+  # es的连接地址,必须含端口
+  address : ${DAMAI_ES_ADDR:127.0.0.1:19200}
+  #账号,若无 则可省略此行配置
+  username: ${DAMAI_ES_USERNAME:elastic}
+  #密码,若无 则可省略此行配置
+  password: ${DAMAI_ES_PASSWORD:elastic}
+  global-config:
+    db-config:
+      #索引前缀
+      index-prefix: damai-
+mybatis-plus:
+  mapper-locations: classpath:mapper/*.xml
+  global-config:
+    db-config:
+      logic-delete-field: status
+      logic-delete-value: 0
+      logic-not-delete-value: 1
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    local-cache-scope: statement  
+management:
+  metrics:
+    tags:
+      application: damai-ai
+  endpoint:
+    health:
+      show-details: always
+  endpoints:
+    web:
+      exposure:
+        include: '*'
+  health:
+    elasticsearch:
+      enabled: false
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+# AI可观测性配置 - 模型价格（单位：元/1K tokens）
+# 参考价格，请以各厂商官网为准
+ai:
+  observability:
+    pricing:
+      deepseek-chat:
+        input: 0.001
+        output: 0.002
+      qwen-max-latest:
+        input: 0.02
+        output: 0.06
+      gpt-4:
+        input: 0.21
+        output: 0.42
+      "[gpt-3.5-turbo]":
+        input: 0.0035
+        output: 0.014
