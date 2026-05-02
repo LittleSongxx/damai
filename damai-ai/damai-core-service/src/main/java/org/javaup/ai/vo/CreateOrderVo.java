@@ -10,6 +10,14 @@ import lombok.Data;
 @Data
 public class CreateOrderVo {
 
+    private Boolean approvalRequired;
+
+    private String approvalId;
+
+    private String runId;
+
+    private String previewSummary;
+
     private String orderNumber;
     
     private String orderListAddress;

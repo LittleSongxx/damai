@@ -1,6 +1,8 @@
 package org.javaup.ai.advisor;
 
 import lombok.extern.slf4j.Slf4j;
+import org.javaup.ai.context.AiRequestContext;
+import org.javaup.ai.context.AiRequestContextHolder;
 import org.javaup.ai.entity.AiTrace;
 import org.javaup.ai.enums.ChatType;
 import org.javaup.ai.service.AiObservabilityService;
@@ -36,6 +38,7 @@ public class AiObservabilityAdvisor implements BaseChatMemoryAdvisor {
     private static final String CTX_START_TIME = "observability_start_time";
     private static final String CTX_TRACE_ID = "observability_trace_id";
     private static final String CTX_USER_INPUT = "observability_user_input";
+    private static final String CTX_RUN_ID = "observability_run_id";
     
     private AiObservabilityAdvisor(int order, AiObservabilityService observabilityService, 
                                     String modelName, String requestType) {
@@ -58,6 +61,9 @@ public class AiObservabilityAdvisor implements BaseChatMemoryAdvisor {
         newContext.put(CTX_START_TIME, System.currentTimeMillis());
         newContext.put(CTX_TRACE_ID, traceId);
         newContext.put(CTX_USER_INPUT, truncate(userMessage, 500));
+        AiRequestContextHolder.getOptional()
+                .map(AiRequestContext::getRunId)
+                .ifPresent(runId -> newContext.put(CTX_RUN_ID, runId));
         
         return ChatClientRequest.builder()
                 .prompt(request.prompt())
@@ -72,6 +78,7 @@ public class AiObservabilityAdvisor implements BaseChatMemoryAdvisor {
         Long startTime = (Long) context.get(CTX_START_TIME);
         String traceId = (String) context.get(CTX_TRACE_ID);
         String userInput = (String) context.get(CTX_USER_INPUT);
+        String runId = (String) context.get(CTX_RUN_ID);
         
         // 防御性检查
         if (startTime == null || traceId == null) {
@@ -93,6 +100,12 @@ public class AiObservabilityAdvisor implements BaseChatMemoryAdvisor {
             trace.setLatencyMs(latencyMs);
             trace.setUserInput(userInput);
             trace.setSuccess(true);
+            trace.setRunId(runId);
+            AiRequestContextHolder.getOptional().ifPresent(requestContext -> {
+                if (requestContext.getUser() != null) {
+                    trace.setUserId(requestContext.getUser().getUserId());
+                }
+            });
             
             if (chatResponse != null && chatResponse.getMetadata() != null && 
                     chatResponse.getMetadata().getUsage() != null) {

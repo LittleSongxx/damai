@@ -20,7 +20,13 @@
           <div class="num">订单号: {{order.orderNumber}}</div>
           <ul>
             <li>
-            <img :src="order.programItemPicture" alt="">
+            <ProgramPoster
+              :src="order.programItemPicture"
+              :title="order.programTitle"
+              :subtitle="order.programPlace"
+              badge="订单海报"
+              class="poster poster--order"
+            />
             <div class="project">
               <div class="title">{{order.programTitle}}</div>
               <div class="content">演出场次: {{order.programShowTime}}</div>
@@ -55,6 +61,7 @@ import {ref, onMounted, getCurrentInstance, nextTick, reactive} from 'vue'
 import MenuSideBar from '../../components/menuSidebar/index'
 import Header from '../../components/header/index'
 import Footer from '../../components/footer/index'
+import ProgramPoster from '@/components/programPoster/index'
 import {useRoute,useRouter} from 'vue-router'
 import {cancelOrderApi, getOrderListApi} from '@/api/order.js'
 import {ElMessage} from "element-plus";
@@ -185,7 +192,7 @@ onMounted(() => {
           padding-left: 20px;
           padding-top:13px;
           border-right: 1px solid #ebebeb;
-          img{
+          :deep(.poster--order) {
             width: 62px;
             height: 80px;
             float: left;

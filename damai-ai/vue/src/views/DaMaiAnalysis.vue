@@ -1,678 +1,556 @@
 <template>
-  <div class="analysis-service" :class="{ 'dark': isDark }">
-    <div class="chat-container">
-      <div class="sidebar">
-        <div class="history-header">
-          <h2>聊天记录</h2>
-          <button class="new-chat" @click="startNewChat">
-            <PlusIcon class="icon" :size="24" />
-            新的聊天
-          </button>
-        </div>
-        <div class="history-list">
-          <div 
-            v-for="chat in chatHistory" 
-            :key="`${chat.id}-${chat.title}`"
+  <div class="workspace workspace--analysis">
+    <aside class="history-pane">
+      <div class="history-pane__top">
+        <p class="eyebrow">Ops Copilot</p>
+        <h2>运维会话</h2>
+        <button class="ghost-button" @click="startNewChat">新建分析</button>
+      </div>
+
+      <div class="history-pane__hint">
+        这里会保留每一轮日志、指标和排障总结，便于回看每次运维判断链路。
+      </div>
+
+      <div class="history-list">
+        <div v-for="chat in chatHistory" :key="chat.id" class="history-row">
+          <button
             class="history-item"
-            :class="{ 'active': currentChatId === chat.id }"
+            :class="{ active: currentChatId === chat.id }"
             @click="loadChat(chat.id)"
           >
-            <ChatBubbleIcon class="icon" :size="24" />
-            <span class="title">{{ chat.title || '新的对话' }}</span>
-            <button 
-              class="delete-btn" 
-              @click.stop="deleteChat(chat.id)"
-              title="删除对话"
-            >
-              <TrashIcon class="icon" :size="20" />
+            <span class="history-item__title">{{ chat.title || '新的运维分析' }}</span>
+            <span class="history-item__meta">{{ chat.workflowStatus || '未开始' }}</span>
+          </button>
+          <button class="delete-button" title="删除对话" @click="deleteCurrentChat(chat.id)">删</button>
+        </div>
+      </div>
+    </aside>
+
+    <section class="chat-pane">
+      <header class="chat-hero">
+        <div>
+          <p class="eyebrow">MCP Diagnostics</p>
+          <h1>运维助手</h1>
+          <p class="chat-hero__desc">适合按现象、服务名、时间范围或 traceId 追查，日志和指标会按步骤串起来再给结论。</p>
+        </div>
+        <div class="hero-badges">
+          <span class="hero-badge">日志</span>
+          <span class="hero-badge">指标</span>
+          <span class="hero-badge">诊断建议</span>
+        </div>
+      </header>
+
+      <div class="chat-layout">
+        <div class="chat-main">
+          <div class="messages" ref="messagesRef">
+            <div v-if="!currentMessages.length" class="empty-state">
+              <p class="eyebrow">建议输入</p>
+              <h2>先描述异常，再补服务名或 traceId</h2>
+              <p>我会优先拉取证据，再做推断，而不是直接输出结论。</p>
+              <div class="starter-grid">
+                <button
+                  v-for="prompt in starterPrompts"
+                  :key="prompt"
+                  class="starter-chip"
+                  @click="sendMessage(prompt)"
+                >
+                  {{ prompt }}
+                </button>
+              </div>
+            </div>
+
+            <Chat
+              v-for="(message, index) in currentMessages"
+              :key="`${message.role}-${index}`"
+              :message="message"
+            />
+          </div>
+
+          <div class="composer">
+            <textarea
+              ref="inputRef"
+              v-model="userInput"
+              rows="1"
+              placeholder="例如：订单服务 12:00 之后超时明显增多，帮我看下可能原因。"
+              @input="adjustTextareaHeight"
+              @keydown.enter.prevent="sendMessage()"
+            />
+            <button class="send-button" :disabled="isStreaming || !userInput.trim()" @click="sendMessage()">
+              {{ isStreaming ? '分析中' : '发送' }}
             </button>
           </div>
         </div>
-      </div>
-      
-      <div class="chat-main">
-        <div class="service-header">
-          <div class="service-info">
-            <DamaiAnalysisIcon class="avatar" :size="48" />
-            <div class="info">
-              <h3>麦小维</h3>
-              <p>大麦系统运维分析助手</p>
-            </div>
-          </div>
-        </div>
 
-        <div class="messages" ref="messagesRef">
-          <Chat
-            v-for="(message, index) in currentMessages"
-            :key="index"
-            :message="message"
-            :is-stream="isStreaming && index === currentMessages.length - 1"
-          />
-        </div>
-        
-        <div class="input-area">
-          <textarea
-            v-model="userInput"
-            @keydown.enter.prevent="sendMessage()"
-            placeholder="请描述您需要查询的日志、分析的问题，或需要的监控指标..."
-            rows="1"
-            ref="inputRef"
-          ></textarea>
-          <button 
-            class="send-button" 
-            @click="sendMessage()"
-            :disabled="isStreaming || !userInput.trim()"
-          >
-            <SendIcon class="icon" :size="40" />
-          </button>
-        </div>
+        <aside class="meta-pane">
+          <section class="meta-card">
+            <p class="eyebrow">Workflow</p>
+            <h3>分析步骤</h3>
+            <p v-if="!workflowSteps.length" class="empty-text">还没有分析步骤，先发起一轮排障提问。</p>
+            <ol v-else class="step-list">
+              <li v-for="step in workflowSteps" :key="step.id">
+                <span>{{ step.stepKey }}</span>
+                <strong>{{ step.stepStatus }}</strong>
+              </li>
+            </ol>
+          </section>
+
+          <section class="meta-card">
+            <p class="eyebrow">Run State</p>
+            <h3>会话状态</h3>
+            <div class="meta-stat">
+              <span>当前 Chat ID</span>
+              <strong>{{ currentChatId || '-' }}</strong>
+            </div>
+            <div class="meta-stat">
+              <span>当前 Run ID</span>
+              <strong>{{ currentRunId || '-' }}</strong>
+            </div>
+            <div class="meta-stat">
+              <span>步骤数</span>
+              <strong>{{ workflowSteps.length }}</strong>
+            </div>
+          </section>
+
+          <section class="meta-card">
+            <p class="eyebrow">How To Ask</p>
+            <h3>输入建议</h3>
+            <ul class="tips-list">
+              <li>带上服务名，比如 `order-service`、`gateway-service`。</li>
+              <li>尽量补时间范围或错误关键字，减少无关日志噪声。</li>
+              <li>如果有 traceId，直接给 traceId，定位会更快。</li>
+            </ul>
+          </section>
+
+          <section v-if="errorMessage" class="meta-card error-card">
+            <p class="eyebrow">Problem</p>
+            <h3>错误信息</h3>
+            <p>{{ errorMessage }}</p>
+          </section>
+        </aside>
       </div>
-    </div>
+    </section>
   </div>
 </template>
 
 <script setup>
-import {nextTick, onMounted, ref, triggerRef} from 'vue'
-import {useDark} from '@vueuse/core'
-import {marked} from 'marked'
-import DOMPurify from 'dompurify'
+import { onMounted } from 'vue'
 import Chat from '../components/Chat.vue'
-import {chatAPI} from '../api/api'
-import DamaiAnalysisIcon from '../components/icons/DamaiAnalysisIcon.vue'
-import ChatBubbleIcon from '../components/icons/ChatBubbleIcon.vue'
-import PlusIcon from '../components/icons/PlusIcon.vue'
-import SendIcon from '../components/icons/SendIcon.vue'
-import TrashIcon from '../components/icons/TrashIcon.vue'
+import { chatAPI, ensureAuthenticated } from '../api/api'
+import { useAiChat } from '../composables/useAiChat'
 
-const isDark = useDark()
-const messagesRef = ref(null)
-const inputRef = ref(null)
-const userInput = ref('')
-const isStreaming = ref(false)
-const currentChatId = ref(null)
-const currentMessages = ref([])
-const chatHistory = ref([])
-const titleUpdateTimer = ref(null)
+const starterPrompts = [
+  'gateway-service 最近 10 分钟的错误日志有哪些？',
+  'order-service 从 12:00 开始 RT 飙高，帮我判断可能原因。',
+  '给我查 traceId=trace-demo-001 的日志链路。',
+  '帮我看一下当前 JVM 堆内存和 GC 是否异常。'
+]
 
-// ChatType.ANALYSIS 的 code 值为 4
-const CHAT_TYPE = 4
-
-// 配置 marked
-marked.setOptions({
-  breaks: true,
-  gfm: true,
-  sanitize: false
+const {
+  messagesRef,
+  inputRef,
+  userInput,
+  isStreaming,
+  currentChatId,
+  currentMessages,
+  chatHistory,
+  workflowSteps,
+  currentRunId,
+  errorMessage,
+  adjustTextareaHeight,
+  loadChatHistory,
+  loadChat,
+  startNewChat,
+  deleteChat,
+  sendMessage
+} = useAiChat({
+  chatType: 4,
+  sendMessageApi: chatAPI.sendAnalysisMessage,
+  newChatTitle: '新的运维分析'
 })
 
-// 自动调整输入框高度
-const adjustTextareaHeight = () => {
-  const textarea = inputRef.value
-  if (textarea) {
-    textarea.style.height = 'auto'
-    textarea.style.height = textarea.scrollHeight + 'px'
-  }
-}
-
-// 滚动到底部
-const scrollToBottom = async () => {
-  await nextTick()
-  if (messagesRef.value) {
-    messagesRef.value.scrollTop = messagesRef.value.scrollHeight
-  }
-}
-
-// 发送消息
-const sendMessage = async (content) => {
-  if (isStreaming.value || (!content && !userInput.value.trim())) return
-  
-  const messageContent = content || userInput.value.trim()
-  
-  // 添加用户消息
-  const userMessage = {
-    role: 'user',
-    content: messageContent,
-    timestamp: new Date()
-  }
-  currentMessages.value.push(userMessage)
-  
-  if (!content) {
-    userInput.value = ''
-    adjustTextareaHeight()
-  }
-  await scrollToBottom()
-  
-  // 添加助手消息占位
-  const assistantMessage = {
-    role: 'assistant',
-    content: '',
-    timestamp: new Date(),
-    isMarkdown: true
-  }
-  currentMessages.value.push(assistantMessage)
-  isStreaming.value = true
-  
-  let totalContent = ''
-  
-  try {
-    // 调用 MCP 分析接口
-    const reader = await chatAPI.sendAnalysisMessage(messageContent, currentChatId.value)
-    const decoder = new TextDecoder('utf-8')
-    
-    while (true) {
-      try {
-        const { value, done } = await reader.read()
-        if (done) break
-        
-        totalContent += decoder.decode(value)
-        
-        await nextTick(() => {
-          const updatedMessage = {
-            ...assistantMessage,
-            content: totalContent,
-            isMarkdown: true
-          }
-          const lastIndex = currentMessages.value.length - 1
-          currentMessages.value.splice(lastIndex, 1, updatedMessage)
-        })
-        await scrollToBottom()
-      } catch (readError) {
-        console.error('读取流错误:', readError)
-        break
-      }
-    }
-
-    checkAndUpdateChatTitles()
-
-  } catch (error) {
-    console.error('发送消息失败:', error)
-    assistantMessage.content = '抱歉，发生了错误，请稍后重试。'
-  } finally {
-    isStreaming.value = false
-    await scrollToBottom()
-  }
-}
-
-// 加载特定对话
-const loadChat = async (chatId) => {
-  currentChatId.value = chatId
-  try {
-    const messages = await chatAPI.chatHistoryMessageList(chatId, CHAT_TYPE)
-    currentMessages.value = messages.map(msg => ({
-      ...msg,
-      isMarkdown: msg.role === 'assistant'
-    }))
-  } catch (error) {
-    console.error('加载对话消息失败:', error)
-    currentMessages.value = []
-  }
-}
-
-// 加载聊天历史
-const loadChatHistory = async () => {
-  try {
-    const history = await chatAPI.chatTypeHistoryList(CHAT_TYPE)
-    chatHistory.value = history || []
-    if (history && history.length > 0) {
-      await loadChat(history[0].id)
-    } else {
-      await startNewChat()
-    }
-  } catch (error) {
-    console.error('加载聊天历史失败:', error)
-    chatHistory.value = []
-    await startNewChat()
-  }
-}
-
-// 开始新对话
-const startNewChat = async () => {
-  const newChatId = Date.now().toString()
-  currentChatId.value = newChatId
-  currentMessages.value = []
-  
-  const newChat = {
-    id: newChatId,
-    title: '新的对话'
-  }
-  chatHistory.value = [newChat, ...chatHistory.value]
-}
-
-// 删除对话
-const deleteChat = async (chatId) => {
-  if (!confirm('确定要删除这个对话吗？')) {
+const deleteCurrentChat = async (chatId) => {
+  if (!window.confirm('确定删除这条运维分析记录吗？')) {
     return
   }
-  
-  try {
-    await chatAPI.deleteChat(chatId, CHAT_TYPE)
-    chatHistory.value = chatHistory.value.filter(chat => chat.id !== chatId)
-    
-    if (currentChatId.value === chatId) {
-      await startNewChat()
-    }
-  } catch (error) {
-    console.error('删除对话失败:', error)
-    alert('删除对话失败，请稍后重试')
-  }
+  await deleteChat(chatId)
 }
 
-// 检查并更新聊天标题
-const checkAndUpdateChatTitles = async () => {
-  try {
-    const hasNewChatTitle = chatHistory.value.some(chat => 
-      chat.title === '新的对话' || chat.title === '新的聊天'
-    )
-    
-    if (!hasNewChatTitle) {
-      return
-    }
-    
-    const chatListData = await chatAPI.chatTypeHistoryList(CHAT_TYPE)
-    
-    if (!chatListData || (Array.isArray(chatListData) && chatListData.length === 0)) {
-      return
-    }
-    
-    if (Array.isArray(chatListData)) {
-      let hasUpdated = false
-      
-      for (let i = 0; i < chatHistory.value.length; i++) {
-        const chat = chatHistory.value[i]
-        const matchedChat = chatListData.find(apiChat => apiChat.id === chat.id)
-        
-        if (matchedChat && matchedChat.title && matchedChat.title.trim()) {
-          chatHistory.value[i] = { 
-            ...chat, 
-            title: matchedChat.title 
-          }
-          hasUpdated = true
-        }
-      }
-      
-      if (hasUpdated) {
-        triggerRef(chatHistory)
-        await nextTick()
-      }
-    }
-  } catch (error) {
-    console.error('检查并更新聊天标题失败:', error)
+onMounted(async () => {
+  if (!ensureAuthenticated()) {
+    return
   }
-}
-
-onMounted(() => {
-  loadChatHistory()
-  adjustTextareaHeight()
-  checkAndUpdateChatTitles()
+  await loadChatHistory()
 })
 </script>
 
 <style scoped lang="scss">
-.analysis-service {
-  position: fixed;
-  inset: 64px 0 0 0;
+.workspace {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 18px;
+  min-height: calc(100vh - 160px);
+}
+
+.history-pane,
+.chat-pane,
+.meta-card {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
+}
+
+.history-pane {
+  padding: 20px;
+  background:
+    linear-gradient(180deg, rgba(32, 27, 58, 0.96), rgba(26, 29, 68, 0.9)),
+    linear-gradient(155deg, rgba(104, 93, 224, 0.2), transparent 36%);
+  color: var(--text-inverse);
+}
+
+.history-pane__top,
+.history-list,
+.meta-pane {
   display: flex;
-  background: var(--bg-color);
-  overflow: hidden;
+  flex-direction: column;
+}
 
-  .chat-container {
-    flex: 1;
-    display: flex;
-    max-width: 1800px;
-    width: 100%;
-    margin: 0 auto;
-    padding: 1.5rem 2rem;
-    gap: 1.5rem;
-    height: 100%;
-    overflow: hidden;
+.history-pane__top {
+  gap: 10px;
+}
+
+.history-pane__top h2,
+.meta-card h3,
+.chat-hero h1 {
+  margin: 0;
+}
+
+.history-pane__hint {
+  margin: 18px 0 20px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(247, 248, 252, 0.76);
+  font-size: 0.94rem;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 0.76rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+
+.history-pane .eyebrow {
+  color: rgba(247, 248, 252, 0.56);
+}
+
+.history-list {
+  gap: 10px;
+}
+
+.history-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  gap: 8px;
+}
+
+.history-item {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  text-align: left;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+  transition: 180ms ease;
+}
+
+.history-item:hover,
+.history-item.active {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.history-item__title {
+  font-weight: 700;
+}
+
+.history-item__meta {
+  font-size: 0.82rem;
+  color: rgba(247, 248, 252, 0.68);
+}
+
+.chat-pane {
+  padding: 20px;
+  background: var(--surface-color);
+  backdrop-filter: blur(18px);
+}
+
+.chat-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px 24px;
+  margin-bottom: 18px;
+  border: 1px solid rgba(104, 93, 224, 0.18);
+  border-radius: 24px;
+  background:
+    linear-gradient(135deg, rgba(104, 93, 224, 0.18), rgba(47, 167, 212, 0.08)),
+    var(--surface-strong);
+}
+
+.chat-hero__desc {
+  margin: 8px 0 0;
+  max-width: 700px;
+  color: var(--text-soft);
+}
+
+.hero-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.hero-badge {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.76);
+  color: #5f53d8;
+  font-size: 0.86rem;
+  font-weight: 700;
+  border: 1px solid rgba(18, 32, 63, 0.08);
+}
+
+.chat-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 18px;
+}
+
+.chat-main,
+.meta-pane {
+  display: flex;
+  flex-direction: column;
+}
+
+.messages {
+  min-height: 600px;
+  max-height: calc(100vh - 380px);
+  overflow-y: auto;
+  padding: 18px;
+  border: 1px solid var(--border-color);
+  border-radius: 24px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(255, 255, 255, 0.95)),
+    radial-gradient(circle at top right, rgba(104, 93, 224, 0.08), transparent 32%);
+}
+
+.empty-state {
+  max-width: 760px;
+  padding: 14px 4px;
+}
+
+.empty-state h2 {
+  margin: 6px 0 8px;
+  font-size: clamp(1.8rem, 2vw, 2.4rem);
+}
+
+.empty-state p:not(.eyebrow) {
+  margin: 0;
+  color: var(--text-soft);
+}
+
+.starter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.starter-chip {
+  padding: 16px 18px;
+  text-align: left;
+  border: 1px solid rgba(18, 32, 63, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.84);
+  color: var(--text-color);
+  cursor: pointer;
+  transition: 180ms ease;
+}
+
+.starter-chip:hover {
+  transform: translateY(-1px);
+  border-color: rgba(104, 93, 224, 0.24);
+  box-shadow: 0 14px 30px rgba(17, 28, 52, 0.08);
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: flex-end;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.composer textarea {
+  min-height: 62px;
+  max-height: 180px;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-color);
+}
+
+.send-button,
+.ghost-button,
+.delete-button {
+  border: none;
+  cursor: pointer;
+  transition: 180ms ease;
+}
+
+.send-button {
+  padding: 14px 20px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #655ae0, #2f8fdb);
+  color: #fff;
+  font-weight: 800;
+  box-shadow: 0 18px 30px rgba(101, 90, 224, 0.2);
+}
+
+.send-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.ghost-button {
+  padding: 11px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.74);
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+}
+
+.ghost-button:hover,
+.delete-button:hover {
+  transform: translateY(-1px);
+}
+
+.delete-button {
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(247, 248, 252, 0.82);
+}
+
+.meta-pane {
+  gap: 14px;
+}
+
+.meta-card {
+  padding: 18px;
+  background: var(--surface-strong);
+}
+
+.meta-card .eyebrow {
+  margin-bottom: 6px;
+}
+
+.empty-text,
+.meta-card p {
+  color: var(--text-soft);
+}
+
+.step-list,
+.tips-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step-list li,
+.tips-list li {
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--border-color);
+}
+
+.step-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.step-list li:last-child,
+.tips-list li:last-child {
+  border-bottom: none;
+}
+
+.tips-list li {
+  color: var(--text-soft);
+  line-height: 1.6;
+}
+
+.meta-stat {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--border-color);
+}
+
+.meta-stat:last-child {
+  border-bottom: none;
+}
+
+.error-card {
+  border-color: rgba(220, 73, 64, 0.24);
+  background: linear-gradient(180deg, rgba(255, 244, 243, 0.92), rgba(255, 255, 255, 0.96));
+}
+
+@media (max-width: 1180px) {
+  .workspace,
+  .chat-layout {
+    grid-template-columns: 1fr;
   }
 
-  .sidebar {
-    width: 300px;
-    display: flex;
-    flex-direction: column;
-    background: rgba(255, 255, 255, 0.95);
-    backdrop-filter: blur(10px);
-    border-radius: 1rem;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-    transition: transform 0.3s ease;
-    
-    .history-header {
-      flex-shrink: 0;
-      padding: 1rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-      
-      h2 {
-        font-size: 1.25rem;
-        font-weight: 600;
-      }
-      
-      .new-chat {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.5rem 1rem;
-        border-radius: 0.5rem;
-        background: #4CAF50;
-        color: white;
-        border: none;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        
-        &:hover {
-          background: #388E3C;
-          transform: translateY(-1px);
-        }
-        
-        &:active {
-          transform: translateY(0);
-        }
-      }
-    }
-    
-    .history-list {
-      flex: 1;
-      overflow-y: auto;
-      padding: 0.5rem;
-      scrollbar-width: thin;
-      scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
-      
-      &::-webkit-scrollbar {
-        width: 6px;
-      }
-      
-      &::-webkit-scrollbar-track {
-        background: transparent;
-      }
-      
-      &::-webkit-scrollbar-thumb {
-        background-color: rgba(0, 0, 0, 0.2);
-        border-radius: 3px;
-      }
-      
-      .history-item {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.75rem;
-        border-radius: 0.5rem;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        margin-bottom: 0.25rem;
-        
-        &:hover {
-          background: rgba(76, 175, 80, 0.1);
-          transform: translateX(2px);
-          
-          .delete-btn {
-            opacity: 1;
-          }
-        }
-        
-        &.active {
-          background: rgba(76, 175, 80, 0.15);
-          font-weight: 500;
-        }
-        
-        .title {
-          flex: 1;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-          font-size: 0.95rem;
-        }
-
-        .delete-btn {
-          opacity: 0;
-          background: none;
-          border: none;
-          padding: 0.25rem;
-          cursor: pointer;
-          color: #666;
-          transition: all 0.3s ease;
-          border-radius: 0.25rem;
-          
-          &:hover {
-            color: #ff4d4f;
-            background: rgba(255, 77, 79, 0.1);
-          }
-        }
-      }
-    }
+  .history-pane {
+    order: 2;
   }
 
-  .chat-main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    background: rgba(255, 255, 255, 0.95);
-    backdrop-filter: blur(10px);
-    border-radius: 1rem;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-    overflow: hidden;
-    transition: all 0.3s ease;
-
-    .service-header {
-      flex-shrink: 0;
-      padding: 1rem 2rem;
-      border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-      background: rgba(255, 255, 255, 0.98);
-      transition: all 0.3s ease;
-
-      .service-info {
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-
-        .info {
-          h3 {
-            font-size: 1.25rem;
-            margin-bottom: 0.25rem;
-            font-weight: 600;
-            color: #4CAF50;
-          }
-
-          p {
-            font-size: 0.875rem;
-            color: #666;
-          }
-        }
-      }
-    }
-    
-    .messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: 2rem;
-      scrollbar-width: thin;
-      scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
-      
-      &::-webkit-scrollbar {
-        width: 6px;
-      }
-      
-      &::-webkit-scrollbar-track {
-        background: transparent;
-      }
-      
-      &::-webkit-scrollbar-thumb {
-        background-color: rgba(0, 0, 0, 0.2);
-        border-radius: 3px;
-      }
-    }
-    
-    .input-area {
-      flex-shrink: 0;
-      padding: 1.5rem 2rem;
-      background: rgba(255, 255, 255, 0.98);
-      border-top: 1px solid rgba(0, 0, 0, 0.05);
-      display: flex;
-      gap: 1rem;
-      align-items: flex-end;
-      transition: all 0.3s ease;
-      
-      textarea {
-        flex: 1;
-        resize: none;
-        border: 1px solid rgba(76, 175, 80, 0.3);
-        background: white;
-        border-radius: 0.75rem;
-        padding: 1rem;
-        color: inherit;
-        font-family: inherit;
-        font-size: 1rem;
-        line-height: 1.5;
-        max-height: 150px;
-        transition: all 0.3s ease;
-        
-        &:focus {
-          outline: none;
-          border-color: #4CAF50;
-          box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
-        }
-      }
-      
-      .send-button {
-        background: #E8F5E9;
-        color: #4CAF50;
-        border: 1px solid #C8E6C9;
-        border-radius: 0.75rem;
-        width: 3.5rem;
-        height: 3.5rem;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        padding: 0;
-        
-        &:hover:not(:disabled) {
-          background: #C8E6C9;
-          transform: scale(1.05);
-        }
-        
-        &:active:not(:disabled) {
-          transform: scale(0.95);
-        }
-        
-        &:disabled {
-          background: #f5f5f5;
-          border-color: #e0e0e0;
-          cursor: not-allowed;
-          opacity: 0.6;
-        }
-      }
-    }
+  .messages {
+    max-height: none;
   }
 }
 
-.dark {
-  .sidebar {
-    background: rgba(40, 40, 40, 0.95);
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
-    
-    .history-header {
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
-    
-    .history-list {
-      scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
-      
-      &::-webkit-scrollbar-thumb {
-        background-color: rgba(255, 255, 255, 0.2);
-      }
-      
-      .history-item {
-        &:hover {
-          background: rgba(76, 175, 80, 0.15);
-        }
-        
-        &.active {
-          background: rgba(76, 175, 80, 0.2);
-        }
-      }
-    }
+@media (max-width: 720px) {
+  .chat-hero,
+  .hero-badges,
+  .starter-grid,
+  .composer {
+    grid-template-columns: 1fr;
   }
-  
-  .chat-main {
-    background: rgba(40, 40, 40, 0.95);
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
-    
-    .service-header {
-      background: rgba(30, 30, 30, 0.98);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 
-      .info p {
-        color: #999;
-      }
-    }
-
-    .messages {
-      scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
-      
-      &::-webkit-scrollbar-thumb {
-        background-color: rgba(255, 255, 255, 0.2);
-      }
-    }
-
-    .input-area {
-      background: rgba(30, 30, 30, 0.98);
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
-      
-      textarea {
-        background: rgba(50, 50, 50, 0.95);
-        border-color: rgba(76, 175, 80, 0.3);
-        color: white;
-        
-        &:focus {
-          border-color: #4CAF50;
-          box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
-        }
-      }
-      
-      .send-button {
-        background: rgba(76, 175, 80, 0.2);
-        border-color: rgba(76, 175, 80, 0.3);
-      }
-    }
+  .chat-hero,
+  .hero-badges {
+    display: grid;
   }
-}
 
-@media (max-width: 768px) {
-  .analysis-service {
-    .chat-container {
-      padding: 0;
-    }
-    
-    .sidebar {
-      position: fixed;
-      left: -300px;
-      top: 64px;
-      bottom: 0;
-      z-index: 100;
-      
-      &.show {
-        transform: translateX(300px);
-      }
-    }
-    
-    .chat-main {
-      border-radius: 0;
-      
-      .service-header {
-        padding: 1rem;
-      }
-      
-      .messages {
-        padding: 1rem;
-      }
-      
-      .input-area {
-        padding: 1rem;
-      }
-    }
+  .history-pane,
+  .chat-pane {
+    padding: 16px;
   }
 }
 </style>

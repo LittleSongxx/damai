@@ -46,6 +46,15 @@ public interface ChatTypeHistoryService {
      * @param chatTypeHistory 会话类型历史记录
      */
     void updateById(ChatTypeHistory chatTypeHistory);
+
+    /**
+     * 绑定最近一次工作流。
+     *
+     * @param chatId 会话ID
+     * @param runId 工作流ID
+     * @param workflowStatus 工作流状态
+     */
+    void bindLatestRun(String chatId, String runId, String workflowStatus);
     
     /**
      * 获取会话列表

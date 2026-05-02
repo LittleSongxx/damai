@@ -52,17 +52,14 @@ spring:
       chat:
         options:
           model: ${DAMAI_AI_DEEPSEEK_CHAT_MODEL:deepseek-chat}
-    # stdio 和 sse 两种模式不能同时使用，使用一种必须把另一种注释掉
-#    mcp:
-#      client:
-#        stdio:
-#          servers-configuration: classpath:mcp-servers.json
-#        sse:
-#          connections:
-#            damai-log:
-#              url: ${DAMAI_AI_MCP_LOG_URL:http://127.0.0.1:8085}
-#            damai-metrics:
-#              url: ${DAMAI_AI_MCP_METRICS_URL:http://127.0.0.1:8086}
+    mcp:
+      client:
+        sse:
+          connections:
+            damai-log:
+              url: ${DAMAI_AI_MCP_LOG_URL:http://127.0.0.1:8085/sse}
+            damai-metrics:
+              url: ${DAMAI_AI_MCP_METRICS_URL:http://127.0.0.1:8086/sse}
 easy-es:
   #默认为true,若为false则认为不启用本框架
   enable: true
@@ -104,6 +101,32 @@ management:
     metrics:
       export:
         enabled: true
+damai:
+  ai:
+    playground:
+      enabled: ${DAMAI_AI_PLAYGROUND_ENABLED:false}
+    security:
+      admin-user-ids: ${DAMAI_AI_ADMIN_USER_IDS:}
+    web-search:
+      enabled: ${DAMAI_AI_WEB_SEARCH_ENABLED:true}
+      timeout-ms: ${DAMAI_AI_WEB_SEARCH_TIMEOUT_MS:5000}
+      max-results: ${DAMAI_AI_WEB_SEARCH_MAX_RESULTS:5}
+      tavily:
+        enabled: ${DAMAI_AI_TAVILY_ENABLED:true}
+        api-key: ${DAMAI_AI_TAVILY_API_KEY:}
+        api-keys: ${DAMAI_AI_TAVILY_API_KEYS:}
+        url: ${DAMAI_AI_TAVILY_URL:https://api.tavily.com/search}
+      bocha:
+        enabled: ${DAMAI_AI_BOCHA_ENABLED:true}
+        api-key: ${DAMAI_AI_BOCHA_API_KEY:}
+        url: ${DAMAI_AI_BOCHA_URL:https://api.bochaai.com/v1/web-search}
+    prometheus:
+      url: ${DAMAI_AI_PROMETHEUS_URL:http://127.0.0.1:9090}
+    qdrant:
+      url: ${DAMAI_AI_QDRANT_URL:http://127.0.0.1:16333}
+      collection: ${DAMAI_AI_QDRANT_COLLECTION:damai_ai_faq}
+    faq:
+      alias: ${DAMAI_AI_FAQ_ALIAS:damai-ai-faq-current}
 # AI可观测性配置 - 模型价格（单位：元/1K tokens）
 # 参考价格，请以各厂商官网为准
 ai:

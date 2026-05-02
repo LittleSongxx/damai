@@ -38,6 +38,7 @@ public class StructuredOutputService {
                 - CHECK_ORDER: 查询订单
                 - REFUND: 退票/退款
                 - CONSULT: 一般咨询
+                - GENERAL: 通用对话、艺人资料、娱乐资讯、开放域问题
                 - OTHER: 其他
                 
                 实体类型说明:

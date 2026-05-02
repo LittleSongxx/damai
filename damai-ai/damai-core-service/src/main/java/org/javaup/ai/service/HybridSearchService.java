@@ -1,139 +1,368 @@
 package org.javaup.ai.service;
 
+import cn.hutool.core.codec.Base64;
 import cn.hutool.core.collection.CollectionUtil;
+import cn.hutool.http.ContentType;
+import cn.hutool.http.HttpRequest;
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
 import lombok.extern.slf4j.Slf4j;
+import org.javaup.ai.ai.rag.MarkdownLoader;
+import org.javaup.ai.context.AiRequestContextHolder;
+import org.javaup.ai.entity.AiRetrievalTrace;
+import org.javaup.ai.vo.RagSearchResultVo;
+import org.javaup.ai.vo.RagSourceVo;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.vectorstore.SearchRequest;
-import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.ai.openai.OpenAiEmbeddingModel;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
- * @program: 大麦-ai智能服务项目。 添加 阿星不是程序员 微信，添加时备注 ai 来获取项目的完整资料
- * @description: 混合检索服务 - 结合向量检索和关键词检索提高召回率
- * @author: 阿星不是程序员
- **/
+ * FAQ 混合检索服务：Qdrant dense + ES sparse + RRF + rerank。
+ */
 @Slf4j
 @Service
 public class HybridSearchService {
-    
-    @Autowired
-    private VectorStore vectorStore;
-    
-    @Autowired
-    private RerankService rerankService;
-    
-    private final Map<String, Document> documentCache = new HashMap<>();
-    
-    public void cacheDocuments(List<Document> documents) {
-        for (Document doc : documents) {
-            documentCache.put(doc.getId(), doc);
-        }
-        log.info("已缓存 {} 个文档用于关键词检索", documents.size());
+
+    private final OpenAiEmbeddingModel embeddingModel;
+    private final RerankService rerankService;
+    private final MarkdownLoader markdownLoader;
+    private final AiWorkflowService workflowService;
+
+    @Value("${damai.ai.qdrant.url:http://127.0.0.1:16333}")
+    private String qdrantUrl;
+
+    @Value("${damai.ai.qdrant.collection:damai_ai_faq}")
+    private String qdrantCollection;
+
+    @Value("${damai.ai.faq.alias:damai-ai-faq-current}")
+    private String faqAlias;
+
+    @Value("${DAMAI_ES_ADDR:127.0.0.1:19200}")
+    private String esAddress;
+
+    @Value("${DAMAI_ES_USERNAME:elastic}")
+    private String esUsername;
+
+    @Value("${DAMAI_ES_PASSWORD:elastic}")
+    private String esPassword;
+
+    @Value("${DAMAI_AI_OPENAI_EMBEDDING_DIMENSIONS:1024}")
+    private Integer embeddingDimensions;
+
+    private final Map<String, Document> documentCache = new ConcurrentHashMap<>();
+
+    public HybridSearchService(OpenAiEmbeddingModel embeddingModel,
+                               RerankService rerankService,
+                               MarkdownLoader markdownLoader,
+                               AiWorkflowService workflowService) {
+        this.embeddingModel = embeddingModel;
+        this.rerankService = rerankService;
+        this.markdownLoader = markdownLoader;
+        this.workflowService = workflowService;
     }
-    
-    /**
-     * 混合检索入口
-     * @param query 用户查询
-     * @param topK 返回结果数量
-     * @return 融合后的文档列表
-     */
+
+    public void cacheDocuments(List<Document> documents) {
+        documentCache.clear();
+        for (Document document : documents) {
+            String chunkId = chunkId(document);
+            if (StringUtils.hasText(chunkId)) {
+                documentCache.put(chunkId, document);
+            }
+        }
+        log.info("已缓存 {} 个 FAQ 文档片段", documentCache.size());
+    }
+
+    public int reindexAll() {
+        List<Document> documents = markdownLoader.loadMarkdowns();
+        cacheDocuments(documents);
+        recreateQdrantCollection();
+        bulkUpsertQdrant(documents);
+        recreateEsIndex(documents);
+        return documents.size();
+    }
+
+    public RagSearchResultVo hybridSearchWithTrace(String query, int topK, boolean enableRerank) {
+        ensureDocumentsLoaded();
+        String rewrittenQuery = rewriteQuery(query);
+
+        List<RagSourceVo> denseSources = denseSearch(rewrittenQuery, topK * 2);
+        List<RagSourceVo> sparseSources = sparseSearch(rewrittenQuery, topK * 2);
+        List<RagSourceVo> fusedSources = mergeWithRrf(denseSources, sparseSources, topK * 2);
+        List<RagSourceVo> finalSources = enableRerank ? rerankSources(rewrittenQuery, fusedSources, topK) : shrink(fusedSources, topK);
+        List<Document> documents = finalSources.stream()
+                .map(source -> documentCache.get(source.getChunkId()))
+                .filter(Objects::nonNull)
+                .toList();
+
+        AiRetrievalTrace trace = new AiRetrievalTrace();
+        trace.setRunId(AiRequestContextHolder.getOptional().map(ctx -> ctx.getRunId()).orElse(null));
+        trace.setChatId(AiRequestContextHolder.getOptional().map(ctx -> ctx.getConversationId()).orElse(null));
+        trace.setUserId(AiRequestContextHolder.getOptional().map(ctx -> ctx.getUser().getUserId()).orElse(null));
+        trace.setOriginalQuery(query);
+        trace.setRewrittenQuery(rewrittenQuery);
+        trace.setDenseHitsJson(JSON.toJSONString(denseSources));
+        trace.setSparseHitsJson(JSON.toJSONString(sparseSources));
+        trace.setFusedHitsJson(JSON.toJSONString(fusedSources));
+        trace.setFinalHitsJson(JSON.toJSONString(finalSources));
+        workflowService.saveRetrievalTrace(trace);
+
+        return RagSearchResultVo.builder()
+                .originalQuery(query)
+                .normalizedQuery(query)
+                .rewrittenQuery(rewrittenQuery)
+                .retrievalTraceId(trace.getTraceId())
+                .documents(documents)
+                .denseSources(denseSources)
+                .sparseSources(sparseSources)
+                .fusedSources(fusedSources)
+                .sources(finalSources)
+                .build();
+    }
+
+    public List<Document> hybridSearch(String query, int topK, boolean enableRerank) {
+        return hybridSearchWithTrace(query, topK, enableRerank).getDocuments();
+    }
+
     public List<Document> hybridSearch(String query, int topK) {
         return hybridSearch(query, topK, true);
     }
-    
-    /**
-     * 混合检索入口（可控制是否启用Rerank）
-     * @param query 用户查询
-     * @param topK 返回结果数量
-     * @param enableRerank 是否启用Rerank精排
-     * @return 融合后的文档列表
-     */
-    public List<Document> hybridSearch(String query, int topK, boolean enableRerank) {
-      
-        List<Document> vectorResults = vectorStore.similaritySearch(
-            SearchRequest.builder()
-                .query(query)
-                .topK(topK)
-                .similarityThreshold(0.2)
-                .build()
+
+    public String rewriteQuery(String query) {
+        if (!StringUtils.hasText(query)) {
+            return query;
+        }
+        String rewritten = query;
+        Map<String, String> synonymMap = Map.of(
+                "退票", "退票 退款 取消订单",
+                "退款", "退款 退票 退钱",
+                "买票", "买票 购票 订票 下单",
+                "取消", "取消 作废 退订",
+                "演出", "演出 节目 表演 演唱会",
+                "门票", "门票 票 入场券"
         );
-        if (vectorResults != null) {
-            log.info("向量检索返回 {} 个结果", vectorResults.size());
+        for (Map.Entry<String, String> entry : synonymMap.entrySet()) {
+            if (query.contains(entry.getKey())) {
+                rewritten = rewritten + " " + entry.getValue();
+            }
         }
-        List<Document> keywordResults = keywordSearch(query, topK);
-        log.info("关键词检索返回 {} 个结果", keywordResults.size());
-        
-        List<Document> merged = new ArrayList<>();
-        if (CollectionUtil.isNotEmpty(vectorResults)) {
-            merged = mergeWithRRF(vectorResults, keywordResults, topK * 2);
-        }
-        if (merged != null) {
-            log.info("RRF融合后返回 {} 个结果", merged.size());
-        }
-        
-        if (enableRerank && CollectionUtil.isNotEmpty(merged)) {
-            List<Document> reranked = rerankService.rerank(query, merged, topK);
-            log.info("Rerank精排后返回 {} 个结果", reranked.size());
-            return reranked;
-        }
-        
-        return merged.size() > topK ? merged.subList(0, topK) : merged;
+        return rewritten;
     }
-    
-    private List<Document> keywordSearch(String query, int topK) {
-      
-        String[] keywords = query.split("[\\s,，。？?！!]+");
-        
-        return documentCache.values().stream()
-            .map(doc -> {
-                String docText = doc.getText();
-                if (docText == null) {
-                    return new AbstractMap.SimpleEntry<>(doc, 0L);
-                }
-                long matchCount = Arrays.stream(keywords)
-                    .filter(kw -> kw.length() > 1 && docText.contains(kw))
-                    .count();
-                return new AbstractMap.SimpleEntry<>(doc, matchCount);
-            })
-            .filter(e -> e.getValue() > 0)
-            .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
-            .limit(topK)
-            .map(Map.Entry::getKey)
-            .collect(Collectors.toList());
+
+    private void ensureDocumentsLoaded() {
+        if (documentCache.isEmpty()) {
+            cacheDocuments(markdownLoader.loadMarkdowns());
+        }
     }
-    
-    private List<Document> mergeWithRRF(
-            List<Document> vectorResults, 
-            List<Document> keywordResults, 
-            int topK) {
-        
-        Map<String, Double> scoreMap = new HashMap<>(vectorResults.size());
-        Map<String, Document> docMap = new HashMap<>(vectorResults.size());
-        int k = 60; 
-        
-        for (int i = 0; i < vectorResults.size(); i++) {
-            Document doc = vectorResults.get(i);
-            String id = doc.getId();
-            scoreMap.merge(id, 1.0 / (k + i + 1), Double::sum);
-            docMap.put(id, doc);
+
+    private List<RagSourceVo> denseSearch(String query, int topK) {
+        try {
+            float[] vector = embeddingModel.embed(query);
+            JSONObject request = new JSONObject();
+            request.put("vector", vector);
+            request.put("limit", topK);
+            request.put("with_payload", true);
+            JSONObject response = executeQdrant("/collections/" + qdrantCollection + "/points/search", request.toJSONString(), "POST");
+            JSONArray result = response.getJSONArray("result");
+            if (result == null) {
+                return List.of();
+            }
+            List<RagSourceVo> sources = new ArrayList<>();
+            for (int i = 0; i < result.size(); i++) {
+                JSONObject item = result.getJSONObject(i);
+                JSONObject payload = item.getJSONObject("payload");
+                sources.add(buildSource(payload, item.getDouble("score")));
+            }
+            return sources;
+        } catch (Exception ex) {
+            log.warn("Qdrant dense 检索失败，回退为空结果", ex);
+            return List.of();
         }
-        
-        for (int i = 0; i < keywordResults.size(); i++) {
-            Document doc = keywordResults.get(i);
-            String id = doc.getId();
-            scoreMap.merge(id, 1.0 / (k + i + 1), Double::sum);
-            docMap.put(id, doc);
+    }
+
+    private List<RagSourceVo> sparseSearch(String query, int topK) {
+        try {
+            JSONObject multiMatch = new JSONObject();
+            multiMatch.put("query", query);
+            multiMatch.put("fields", List.of("text^3", "keywords^2", "label^2", "section^2", "title^2"));
+
+            JSONObject body = new JSONObject();
+            body.put("size", topK);
+            body.put("query", new JSONObject(Map.of("multi_match", multiMatch)));
+
+            JSONObject response = executeEs("/" + faqAlias + "/_search", body.toJSONString(), "POST");
+            JSONArray hits = response.getJSONObject("hits").getJSONArray("hits");
+            if (hits == null) {
+                return List.of();
+            }
+            List<RagSourceVo> sources = new ArrayList<>();
+            for (int i = 0; i < hits.size(); i++) {
+                JSONObject hit = hits.getJSONObject(i);
+                JSONObject source = hit.getJSONObject("_source");
+                source.put("chunkId", source.getString("chunkId"));
+                sources.add(buildSource(source, hit.getDouble("_score")));
+            }
+            return sources;
+        } catch (Exception ex) {
+            log.warn("Elasticsearch sparse 检索失败，回退为空结果", ex);
+            return List.of();
         }
-        
-        return scoreMap.entrySet().stream()
-            .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
-            .limit(topK)
-            .map(e -> docMap.get(e.getKey()))
-            .filter(Objects::nonNull)
-            .collect(Collectors.toList());
+    }
+
+    private List<RagSourceVo> mergeWithRrf(List<RagSourceVo> denseSources, List<RagSourceVo> sparseSources, int topK) {
+        return RagFusionSupport.reciprocalRankFusion(denseSources, sparseSources, topK);
+    }
+
+    private List<RagSourceVo> rerankSources(String query, List<RagSourceVo> fusedSources, int topK) {
+        if (CollectionUtil.isEmpty(fusedSources)) {
+            return List.of();
+        }
+        Map<String, Document> docMap = fusedSources.stream()
+                .map(source -> documentCache.get(source.getChunkId()))
+                .filter(Objects::nonNull)
+                .collect(Collectors.toMap(doc -> chunkId(doc), doc -> doc, (left, right) -> left, LinkedHashMap::new));
+        List<Document> reranked = rerankService.rerank(query, new ArrayList<>(docMap.values()), topK);
+        if (CollectionUtil.isEmpty(reranked)) {
+            return shrink(fusedSources, topK);
+        }
+        Map<String, RagSourceVo> sourceMap = fusedSources.stream()
+                .collect(Collectors.toMap(RagSourceVo::getChunkId, source -> source, (left, right) -> left));
+        return reranked.stream()
+                .map(this::chunkId)
+                .map(sourceMap::get)
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    private List<RagSourceVo> shrink(List<RagSourceVo> sources, int topK) {
+        return RagFusionSupport.limit(sources, topK);
+    }
+
+    private void recreateQdrantCollection() {
+        JSONObject body = new JSONObject();
+        JSONObject vectors = new JSONObject();
+        vectors.put("size", embeddingDimensions);
+        vectors.put("distance", "Cosine");
+        body.put("vectors", vectors);
+        executeQdrant("/collections/" + qdrantCollection, body.toJSONString(), "PUT");
+    }
+
+    private void bulkUpsertQdrant(List<Document> documents) {
+        JSONArray points = new JSONArray();
+        for (Document document : documents) {
+            String chunkId = chunkId(document);
+            if (!StringUtils.hasText(chunkId)) {
+                continue;
+            }
+            JSONObject point = new JSONObject();
+            point.put("id", chunkId);
+            point.put("vector", embeddingModel.embed(document.getText()));
+            JSONObject payload = new JSONObject(new HashMap<>(document.getMetadata()));
+            payload.put("text", document.getText());
+            payload.put("title", payload.getOrDefault("name", "FAQ"));
+            point.put("payload", payload);
+            points.add(point);
+        }
+        JSONObject body = new JSONObject();
+        body.put("points", points);
+        executeQdrant("/collections/" + qdrantCollection + "/points?wait=true", body.toJSONString(), "PUT");
+    }
+
+    private void recreateEsIndex(List<Document> documents) {
+        String physicalIndex = "damai-ai-faq-" + System.currentTimeMillis();
+        JSONObject mapping = new JSONObject();
+        mapping.put("properties", new JSONObject(Map.of(
+                "chunkId", new JSONObject(Map.of("type", "keyword")),
+                "title", new JSONObject(Map.of("type", "keyword")),
+                "source", new JSONObject(Map.of("type", "keyword")),
+                "section", new JSONObject(Map.of("type", "keyword")),
+                "keywords", new JSONObject(Map.of("type", "text")),
+                "label", new JSONObject(Map.of("type", "keyword")),
+                "text", new JSONObject(Map.of("type", "text"))
+        )));
+        executeEs("/" + physicalIndex, new JSONObject(Map.of("mappings", mapping)).toJSONString(), "PUT");
+
+        StringBuilder bulk = new StringBuilder();
+        for (Document document : documents) {
+            String chunkId = chunkId(document);
+            if (!StringUtils.hasText(chunkId)) {
+                continue;
+            }
+            bulk.append(JSON.toJSONString(Map.of("index", Map.of("_index", physicalIndex, "_id", chunkId)))).append('\n');
+            Map<String, Object> source = new HashMap<>(document.getMetadata());
+            source.put("chunkId", chunkId);
+            source.put("title", source.getOrDefault("name", "FAQ"));
+            source.put("text", document.getText());
+            bulk.append(JSON.toJSONString(source)).append('\n');
+        }
+        HttpRequest request = HttpRequest.post("http://" + esAddress + "/_bulk")
+                .header("Authorization", esAuthorization())
+                .header("Content-Type", "application/x-ndjson")
+                .body(bulk.toString());
+        String response = request.execute().body();
+        log.info("ES bulk reindex response: {}", response);
+
+        JSONObject aliasBody = new JSONObject();
+        JSONArray actions = new JSONArray();
+        actions.add(new JSONObject(Map.of("remove", Map.of("index", "*", "alias", faqAlias, "ignore_unavailable", true))));
+        actions.add(new JSONObject(Map.of("add", Map.of("index", physicalIndex, "alias", faqAlias))));
+        aliasBody.put("actions", actions);
+        executeEs("/_aliases", aliasBody.toJSONString(), "POST");
+    }
+
+    private JSONObject executeQdrant(String path, String body, String method) {
+        String url = qdrantUrl + path;
+        HttpRequest request = buildJsonRequest(url, method, body);
+        String response = request.execute().body();
+        return JSON.parseObject(response == null ? "{}" : response);
+    }
+
+    private JSONObject executeEs(String path, String body, String method) {
+        String url = "http://" + esAddress + path;
+        HttpRequest request = buildJsonRequest(url, method, body)
+                .header("Authorization", esAuthorization());
+        String response = request.execute().body();
+        return JSON.parseObject(response == null ? "{}" : response);
+    }
+
+    private HttpRequest buildJsonRequest(String url, String method, String body) {
+        HttpRequest request = switch (method) {
+            case "PUT" -> HttpRequest.put(url);
+            case "POST" -> HttpRequest.post(url);
+            default -> HttpRequest.get(url);
+        };
+        return request.contentType(ContentType.JSON.getValue()).body(body);
+    }
+
+    private String esAuthorization() {
+        return "Basic " + Base64.encode(esUsername + ":" + esPassword);
+    }
+
+    private RagSourceVo buildSource(JSONObject payload, Double score) {
+        String text = payload.getString("text");
+        return RagSourceVo.builder()
+                .chunkId(payload.getString("chunkId"))
+                .title(payload.getString("title"))
+                .source(payload.getString("source"))
+                .section(payload.getString("section"))
+                .snippet(text == null ? "" : text.substring(0, Math.min(200, text.length())))
+                .score(score)
+                .build();
+    }
+
+    private String chunkId(Document document) {
+        Object value = document.getMetadata().get("chunkId");
+        return value == null ? null : String.valueOf(value);
     }
 }

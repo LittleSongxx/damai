@@ -1,0 +1,36 @@
+package org.javaup.ai.vo;
+
+import lombok.Builder;
+import lombok.Data;
+import org.springframework.ai.document.Document;
+
+import java.util.List;
+
+@Data
+@Builder
+public class RagSearchResultVo {
+
+    private String originalQuery;
+
+    private String normalizedQuery;
+
+    private String rewrittenQuery;
+
+    private String retrievalTraceId;
+
+    private List<Document> documents;
+
+    private List<RagSourceVo> sources;
+
+    private List<RagSourceVo> denseSources;
+
+    private List<RagSourceVo> sparseSources;
+
+    private List<RagSourceVo> fusedSources;
+
+    private Double confidenceScore;
+
+    private String confidenceLevel;
+
+    private String correctiveAction;
+}

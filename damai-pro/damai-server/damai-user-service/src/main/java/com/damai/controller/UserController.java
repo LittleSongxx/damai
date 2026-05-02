@@ -21,6 +21,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -38,7 +39,7 @@ public class UserController {
     
     @Autowired
     private UserService userService;
-    
+
     @Operation(summary  = "查询(通过手机号)")
     @PostMapping(value = "/get/mobile")
     public ApiResponse<UserVo> getByMobile(@Valid @RequestBody UserMobileDto userMobileDto){
@@ -49,6 +50,13 @@ public class UserController {
     @PostMapping(value = "/get/id")
     public ApiResponse<UserVo> getById(@Valid @RequestBody UserIdDto userIdDto){
         return ApiResponse.ok(userService.getById(userIdDto));
+    }
+
+    @Operation(summary  = "获取当前登录用户(内部接口)")
+    @PostMapping(value = "/current")
+    public ApiResponse<UserVo> currentUser(@RequestHeader("token") String token,
+                                           @RequestHeader(value = "code", required = false, defaultValue = "0001") String code) {
+        return ApiResponse.ok(userService.currentUser(token, code));
     }
     
     @Operation(summary  = "注册")

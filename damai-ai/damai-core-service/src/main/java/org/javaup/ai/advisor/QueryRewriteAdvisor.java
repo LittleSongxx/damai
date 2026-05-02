@@ -6,6 +6,7 @@ import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.client.advisor.api.AdvisorChain;
 import org.springframework.ai.chat.client.advisor.api.BaseAdvisor;
+import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.core.Ordered;
 
 import java.util.HashMap;
@@ -53,8 +54,17 @@ public class QueryRewriteAdvisor implements BaseAdvisor {
         }
         
         log.info("改写后Query: {}", enhancedQuery);
-        
-        return request;
+
+        if (enhancedQuery.equals(originalQuery)) {
+            return request;
+        }
+
+        Map<String, Object> context = new HashMap<>(request.context());
+        context.put("rewrittenQuery", enhancedQuery);
+        return ChatClientRequest.builder()
+                .prompt(new Prompt(enhancedQuery))
+                .context(context)
+                .build();
     }
     
     @Override

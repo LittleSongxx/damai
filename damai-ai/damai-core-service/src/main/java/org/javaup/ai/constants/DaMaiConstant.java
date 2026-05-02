@@ -133,6 +133,8 @@ public class DaMaiConstant {
     public static final String TICKET_LIST_URL = resolveEnv("DAMAI_AI_TICKET_LIST_URL", "http://127.0.0.1:6085/damai/program/ticket/category/select/list/by/program");
     
     public static final String USER_DETAIL_URL = resolveEnv("DAMAI_AI_USER_DETAIL_URL", "http://127.0.0.1:6085/damai/user/user/get/mobile");
+
+    public static final String CURRENT_USER_URL = resolveEnv("DAMAI_AI_CURRENT_USER_URL", "http://127.0.0.1:6085/damai/user/user/current");
     
     public static final String TICKET_USER_LIST_URL = resolveEnv("DAMAI_AI_TICKET_USER_LIST_URL", "http://127.0.0.1:6085/damai/user/ticket/user/list");
     

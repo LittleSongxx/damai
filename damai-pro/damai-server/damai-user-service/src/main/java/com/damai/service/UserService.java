@@ -222,6 +222,25 @@ public class UserService extends ServiceImpl<UserMapper, User> {
         map.put("userId",userId);
         return TokenUtil.createToken(String.valueOf(uidGenerator.getUid()), JSON.toJSONString(map),tokenExpireTime * 60 * 1000,tokenSecret);
     }
+
+    public UserVo currentUser(String token, String code) {
+        String actualCode = StringUtil.isEmpty(code) ? "0001" : code;
+        String userStr = TokenUtil.parseToken(token, getChannelDataByCode(actualCode).getTokenSecret());
+        if (StringUtil.isEmpty(userStr)) {
+            throw new DaMaiFrameException(BaseCode.USER_EMPTY);
+        }
+        String userId = JSONObject.parseObject(userStr).getString("userId");
+        UserVo cachedUser = redisCache.get(
+                RedisKeyBuild.createRedisKey(RedisKeyManage.USER_LOGIN, actualCode, userId),
+                UserVo.class
+        );
+        if (Objects.nonNull(cachedUser)) {
+            return cachedUser;
+        }
+        UserIdDto userIdDto = new UserIdDto();
+        userIdDto.setId(Long.valueOf(userId));
+        return getById(userIdDto);
+    }
     
     public Boolean logout(UserLogoutDto userLogoutDto) {
         String userStr = TokenUtil.parseToken(userLogoutDto.getToken(),getChannelDataByCode(userLogoutDto.getCode())

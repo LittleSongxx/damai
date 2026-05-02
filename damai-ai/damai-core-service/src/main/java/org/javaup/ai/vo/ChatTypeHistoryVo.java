@@ -17,4 +17,8 @@ public class ChatTypeHistoryVo  {
     private String chatId;
     
     private String title;
+
+    private String latestRunId;
+
+    private String workflowStatus;
 }

@@ -27,13 +27,27 @@
         </div>
         <div class="box">
           <div class="box-left"  >
-            <router-link :to="{ name: 'detial', params: { id: item.programListVoList[0].id }}"><img :src="item.programListVoList[0].itemPicture" alt=""></router-link>
+            <router-link :to="{ name: 'detial', params: { id: item.programListVoList[0].id }}">
+              <ProgramPoster
+                :src="item.programListVoList[0].itemPicture"
+                :title="item.programListVoList[0].title"
+                :subtitle="`${item.programListVoList[0].areaName || ''} ${item.programListVoList[0].place || ''}`"
+                badge="热门推荐"
+                class="poster poster--hero"
+              />
+            </router-link>
           </div>
 
             <div class="box-right">
               <div class="rtLink" v-for="(dict,ind) in item.programListVoList.slice(1)">
                 <router-link  :to="{ name: 'detial', params: { id: dict.id }}" >
-                <img :src="dict.itemPicture" alt="">
+                <ProgramPoster
+                  :src="dict.itemPicture"
+                  :title="dict.title"
+                  :subtitle="dict.place"
+                  badge="演出现场"
+                  class="poster poster--card"
+                />
                 <div class="info">
                   <div class="img-title">{{ dict.title }}</div>
                   <div class="local">{{ dict.place }}</div>
@@ -54,6 +68,7 @@
 
 <script setup>
 import Header from '@/components/header/index'
+import ProgramPoster from '@/components/programPoster/index'
 import swiperPic1 from '@/assets/section/javaup.png'
 import concert from '@/assets/section/concert.jpg'
 import small from '@/assets/section/small.jpg'
@@ -268,13 +283,9 @@ function getMainCategoryList() {
       overflow: hidden;
       border: 1px solid #efefef;
 
-      img {
+      :deep(.poster--hero) {
         width: 100%;
         height: 100%;
-        position: absolute;
-        left: 0;
-        top: 0;
-
       }
     }
 
@@ -296,13 +307,14 @@ function getMainCategoryList() {
         color: #000;
         overflow: hidden;
 
-        img {
+        :deep(.poster--card) {
           width: 118px;
           height: 158px;
           overflow: hidden;
           position: relative;
           display: inline-block;
           border: 1px solid #efefef;
+          vertical-align: top;
         }
 
         .info {
@@ -372,5 +384,4 @@ function getMainCategoryList() {
 
 
 </style>
-
 

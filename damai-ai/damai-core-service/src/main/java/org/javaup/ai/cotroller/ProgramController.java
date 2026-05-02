@@ -1,19 +1,15 @@
 package org.javaup.ai.cotroller;
 
-import jakarta.annotation.Resource;
 import org.javaup.ai.ai.function.call.ProgramCall;
 import org.javaup.ai.ai.function.dto.ProgramSearchFunctionDto;
+import org.javaup.ai.assistant.AssistantRouteType;
+import org.javaup.ai.assistant.compat.LegacyAssistantCompatibilityService;
 import org.javaup.ai.dto.ProgramDetailDto;
-import org.javaup.ai.service.HybridSearchService;
+import org.javaup.ai.security.AiPermissionService;
 import org.javaup.ai.vo.ProgramSearchVo;
 import org.javaup.ai.vo.result.ProgramDetailResultVo;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.document.Document;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -22,96 +18,45 @@ import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
-import java.util.stream.Collectors;
-
-import static org.javaup.ai.constants.DaMaiConstant.RAG_VERSION;
 
 /**
- * @program: 大麦-ai智能服务项目。 添加 阿星不是程序员 微信，添加时备注 ai 来获取项目的完整资料 
- * @description: 节目控制器
- * @author: 阿星不是程序员
- **/
+ * 兼容旧版三助手入口，内部统一转接到新的 Assistant Runtime。
+ */
 @RestController
 @RequestMapping("/program")
 public class ProgramController {
 
-    private static final Logger log = LoggerFactory.getLogger(ProgramController.class);
+    private final ProgramCall programCall;
+    private final LegacyAssistantCompatibilityService legacyCompatibilityService;
+    private final AiPermissionService aiPermissionService;
 
-    @Autowired
-    private ProgramCall programCall;
+    public ProgramController(ProgramCall programCall,
+                             LegacyAssistantCompatibilityService legacyCompatibilityService,
+                             AiPermissionService aiPermissionService) {
+        this.programCall = programCall;
+        this.legacyCompatibilityService = legacyCompatibilityService;
+        this.aiPermissionService = aiPermissionService;
+    }
 
-    @Resource
-    private ChatClient assistantChatClient;
-    
-    @Resource
-    private ChatClient markdownChatClient;
-    
-    @Resource
-    private ChatClient analysisChatClient;
-    
-    @Resource
-    private HybridSearchService hybridSearchService;
-    
-    @Value("${"+RAG_VERSION+":1}")
-    private Integer ragVersion;
-    
-    @RequestMapping(value = "/chat", produces = "text/html;charset=utf-8")
-    public Flux<String> chat(@RequestParam("prompt") String prompt,
-                                @RequestParam("chatId") String chatId) {
-        // 请求模型
-        return assistantChatClient.prompt()
-                .user(prompt)
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, chatId))
-                .stream()
-                .content();
+    @RequestMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<ServerSentEvent<String>> chat(@RequestParam("prompt") String prompt,
+                                              @RequestParam("chatId") String chatId) {
+        return legacyCompatibilityService.streamLegacyRun(prompt, chatId, AssistantRouteType.BUSINESS);
     }
-    
-    @RequestMapping(value = "/rag", produces = "text/html;charset=utf-8")
-    public Flux<String> rag(@RequestParam("prompt") String prompt,
-                             @RequestParam("chatId") String chatId) {
-        final Integer ragTwoVersionValue = 2;
-        if (ragVersion.equals(ragTwoVersionValue)) {
-            List<Document> documents = hybridSearchService.hybridSearch(prompt, 10, true);
-            log.info("混合检索返回 {} 个文档", documents.size());
-            
-            String context = documents.stream()
-                    .map(Document::getText)
-                    .collect(Collectors.joining("\n\n"));
-            
-            String enhancedPrompt = """
-                以下是检索到的相关上下文信息：
-                ---------------------
-                %s
-                ---------------------
-                请基于上述上下文信息回答用户问题。如果上下文中没有相关信息，请告知用户。
-                
-                用户问题：%s
-                """.formatted(context, prompt);
-            
-            return markdownChatClient.prompt()
-                    .user(enhancedPrompt)
-                    .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, chatId))
-                    .stream()
-                    .content();
-        }
-        return markdownChatClient.prompt()
-                .user(prompt)
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, chatId))
-                .stream()
-                .content();
+
+    @RequestMapping(value = "/rag", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<ServerSentEvent<String>> rag(@RequestParam("prompt") String prompt,
+                                             @RequestParam("chatId") String chatId) {
+        return legacyCompatibilityService.streamLegacyRun(prompt, chatId, AssistantRouteType.KNOWLEDGE);
     }
-    
-    @RequestMapping(value = "/chat/mcp", produces = "text/html;charset=utf-8")
-    public Flux<String> chatMcp(@RequestParam("prompt") String prompt,
-                             @RequestParam("chatId") String chatId) {
-        // 请求模型（MCP工具已在 analysisChatClient 中全局配置）
-        return analysisChatClient.prompt()
-                .user(prompt)
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, chatId))
-                .stream()
-                .content();
+
+    @RequestMapping(value = "/chat/mcp", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<ServerSentEvent<String>> chatMcp(@RequestParam("prompt") String prompt,
+                                                 @RequestParam("chatId") String chatId) {
+        aiPermissionService.requireOpsAccess();
+        return legacyCompatibilityService.streamLegacyRun(prompt, chatId, AssistantRouteType.OPS);
     }
-    
+
     @PostMapping(value = "/search")
     public List<ProgramSearchVo> search(@RequestBody ProgramSearchFunctionDto programSearchFunctionDto) {
         return programCall.search(programSearchFunctionDto);

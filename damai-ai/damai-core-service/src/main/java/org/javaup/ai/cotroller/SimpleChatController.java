@@ -4,6 +4,7 @@ package org.javaup.ai.cotroller;
 import jakarta.annotation.Resource;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.tool.ToolCallbackProvider;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -16,6 +17,7 @@ import reactor.core.publisher.Flux;
  * @author: 阿星不是程序员
  **/
 @RestController
+@ConditionalOnProperty(name = "damai.ai.playground.enabled", havingValue = "true")
 @RequestMapping("/simple")
 public class SimpleChatController {
 

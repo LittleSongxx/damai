@@ -14,15 +14,21 @@ import org.javaup.ai.entity.base.BaseTableData;
  **/
 @EqualsAndHashCode(callSuper = true)
 @Data
-@TableName("d_chat_type_history")
+@TableName("d_ai_session")
 public class ChatTypeHistory extends BaseTableData {
     
     @TableId(value = "id", type = IdType.AUTO)
     private Long id;
+
+    private Long userId;
     
     private Integer type;
     
     private String chatId;
     
     private String title;
+
+    private String latestRunId;
+
+    private String workflowStatus;
 }

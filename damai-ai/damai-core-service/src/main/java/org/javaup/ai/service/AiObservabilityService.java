@@ -3,6 +3,7 @@ package org.javaup.ai.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.config.AiObservabilityProperties;
+import org.javaup.ai.context.AiRequestContextHolder;
 import org.javaup.ai.entity.AiTrace;
 import org.javaup.ai.mapper.AiTraceMapper;
 import org.javaup.ai.vo.TokenStatisticsVo;
@@ -124,6 +125,7 @@ public class AiObservabilityService {
     public TokenStatisticsVo getConversationStats(String conversationId) {
         LambdaQueryWrapper<AiTrace> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AiTrace::getConversationId, conversationId)
+               .eq(AiTrace::getUserId, currentUserId())
                .eq(AiTrace::getStatus, 1);
         
         List<AiTrace> traces = aiTraceMapper.selectList(wrapper);
@@ -176,6 +178,7 @@ public class AiObservabilityService {
     public TokenStatisticsVo getTodayStats() {
         LambdaQueryWrapper<AiTrace> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AiTrace::getStatus, 1)
+               .eq(AiTrace::getUserId, currentUserId())
                .ge(AiTrace::getCreateTime, getTodayStart());
         
         List<AiTrace> traces = aiTraceMapper.selectList(wrapper);
@@ -217,6 +220,7 @@ public class AiObservabilityService {
     public List<AiTrace> getTracesByConversation(String conversationId) {
         LambdaQueryWrapper<AiTrace> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AiTrace::getConversationId, conversationId)
+               .eq(AiTrace::getUserId, currentUserId())
                .eq(AiTrace::getStatus, 1)
                .orderByDesc(AiTrace::getCreateTime);
         return aiTraceMapper.selectList(wrapper);
@@ -233,6 +237,7 @@ public class AiObservabilityService {
     public List<AiTrace> getRecentTraces(int limit) {
         LambdaQueryWrapper<AiTrace> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AiTrace::getStatus, 1)
+               .eq(AiTrace::getUserId, currentUserId())
                .orderByDesc(AiTrace::getCreateTime)
                .last("LIMIT " + limit);
         return aiTraceMapper.selectList(wrapper);
@@ -249,6 +254,7 @@ public class AiObservabilityService {
     public List<TypeStatisticsVo> getStatsByRequestType() {
         LambdaQueryWrapper<AiTrace> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AiTrace::getStatus, 1)
+               .eq(AiTrace::getUserId, currentUserId())
                .ge(AiTrace::getCreateTime, getTodayStart());
         
         List<AiTrace> traces = aiTraceMapper.selectList(wrapper);
@@ -280,5 +286,9 @@ public class AiObservabilityService {
         calendar.set(Calendar.SECOND, 0);
         calendar.set(Calendar.MILLISECOND, 0);
         return calendar.getTime();
+    }
+
+    private Long currentUserId() {
+        return AiRequestContextHolder.getRequiredUser().getUserId();
     }
 }

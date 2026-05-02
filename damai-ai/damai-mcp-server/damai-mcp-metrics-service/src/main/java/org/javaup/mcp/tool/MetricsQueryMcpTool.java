@@ -13,6 +13,8 @@ import org.springframework.stereotype.Service;
 
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -355,20 +357,21 @@ public class MetricsQueryMcpTool {
     // ======================== 私有方法 ========================
 
     /**
-     * 查询 Prometheus API（使用 curl 命令）
+     * 查询 Prometheus API
      */
     private String queryPrometheus(String path) {
         String url = prometheusUrl + path;
         try {
-            ProcessBuilder pb = new ProcessBuilder("curl", "-s", url);
-            pb.redirectErrorStream(true);
-            Process process = pb.start();
-            String result = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            int exitCode = process.waitFor();
-            log.debug("curl 退出码: {}, 结果: {}", exitCode, result);
-            return result;
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .timeout(Duration.ofSeconds(10))
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            log.debug("prometheus status: {}, body: {}", response.statusCode(), response.body());
+            return response.body();
         } catch (Exception e) {
-            log.error("curl 执行失败: {}", url, e);
+            log.error("Prometheus 请求失败: {}", url, e);
             return null;
         }
     }
@@ -381,14 +384,15 @@ public class MetricsQueryMcpTool {
         String url = prometheusUrl + "/api/v1/query?query=" + encodedQuery;
         log.info("执行 PromQL: {}", query);
         try {
-            ProcessBuilder pb = new ProcessBuilder("curl", "-s", url);
-            pb.redirectErrorStream(true);
-            Process process = pb.start();
-            String result = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            process.waitFor();
-            return result;
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .timeout(Duration.ofSeconds(10))
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            return response.body();
         } catch (Exception e) {
-            log.error("curl 执行失败: {}", query, e);
+            log.error("Prometheus 查询失败: {}", query, e);
             return null;
         }
     }
@@ -544,10 +548,10 @@ public class MetricsQueryMcpTool {
             }
         }
         if (cpu != null && cpu > 0.8) {
-            return "⚠️ CPU较高";
-        }
-        if (cpu != null && cpu > 0.9) {
             return "⚠️ CPU告警";
+        }
+        if (cpu != null && cpu > 0.7) {
+            return "⚠️ CPU较高";
         }
         return "✅ 正常";
     }

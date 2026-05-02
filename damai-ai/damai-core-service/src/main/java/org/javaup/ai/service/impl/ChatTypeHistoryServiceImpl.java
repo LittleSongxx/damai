@@ -3,6 +3,7 @@ package org.javaup.ai.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import org.javaup.ai.context.AiRequestContextHolder;
 import org.javaup.ai.entity.ChatTypeHistory;
 import org.javaup.ai.mapper.ChatHistoryMapper;
 import org.javaup.ai.service.ChatTypeHistoryService;
@@ -39,13 +40,18 @@ public class ChatTypeHistoryServiceImpl implements ChatTypeHistoryService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void save(Integer type, String chatId){
+        Long userId = AiRequestContextHolder.getRequiredUser().getUserId();
         LambdaQueryWrapper<ChatTypeHistory> chatHistroyLambdaQueryWrapper =
-                Wrappers.lambdaQuery(ChatTypeHistory.class).eq(ChatTypeHistory::getType, type).eq(ChatTypeHistory::getChatId, chatId);
+                Wrappers.lambdaQuery(ChatTypeHistory.class)
+                        .eq(ChatTypeHistory::getType, type)
+                        .eq(ChatTypeHistory::getChatId, chatId)
+                        .eq(ChatTypeHistory::getUserId, userId);
         ChatTypeHistory chatTypeHistory = chatHistoryMapper.selectOne(chatHistroyLambdaQueryWrapper);
         if (Objects.isNull(chatTypeHistory)){
             chatTypeHistory = new ChatTypeHistory();
             chatTypeHistory.setType(type);
             chatTypeHistory.setChatId(chatId);
+            chatTypeHistory.setUserId(userId);
             chatHistoryMapper.insert(chatTypeHistory);
         }
     }
@@ -57,8 +63,12 @@ public class ChatTypeHistoryServiceImpl implements ChatTypeHistoryService {
      */
     @Override
     public List<String> getChatIdList(Integer type){
+        Long userId = AiRequestContextHolder.getRequiredUser().getUserId();
         LambdaQueryWrapper<ChatTypeHistory> chatHistroyLambdaQueryWrapper =
-                Wrappers.lambdaQuery(ChatTypeHistory.class).eq(ChatTypeHistory::getType, type);
+                Wrappers.lambdaQuery(ChatTypeHistory.class)
+                        .eq(ChatTypeHistory::getType, type)
+                        .eq(ChatTypeHistory::getUserId, userId)
+                        .eq(ChatTypeHistory::getStatus, 1);
         List<ChatTypeHistory> chatTypeHistoryList = chatHistoryMapper.selectList(chatHistroyLambdaQueryWrapper);
         return chatTypeHistoryList.stream()
                 .map(ChatTypeHistory::getChatId)
@@ -73,8 +83,12 @@ public class ChatTypeHistoryServiceImpl implements ChatTypeHistoryService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void delete(Integer type, String chatId) {
+        Long userId = AiRequestContextHolder.getRequiredUser().getUserId();
         LambdaUpdateWrapper<ChatTypeHistory> chatHistroyLambdaUpdateWrapper =
-                Wrappers.lambdaUpdate(ChatTypeHistory.class).eq(ChatTypeHistory::getType, type).eq(ChatTypeHistory::getChatId, chatId);
+                Wrappers.lambdaUpdate(ChatTypeHistory.class)
+                        .eq(ChatTypeHistory::getType, type)
+                        .eq(ChatTypeHistory::getChatId, chatId)
+                        .eq(ChatTypeHistory::getUserId, userId);
         chatHistoryMapper.delete(chatHistroyLambdaUpdateWrapper);
         chatMemory.clear(chatId);
     }
@@ -87,13 +101,34 @@ public class ChatTypeHistoryServiceImpl implements ChatTypeHistoryService {
      */
     @Override
     public ChatTypeHistory getChatTypeHistory(Integer type, String chatId) {
+        Long userId = AiRequestContextHolder.getRequiredUser().getUserId();
         LambdaQueryWrapper<ChatTypeHistory> chatHistroyLambdaQueryWrapper =
-                Wrappers.lambdaQuery(ChatTypeHistory.class).eq(ChatTypeHistory::getType, type).eq(ChatTypeHistory::getChatId, chatId);
+                Wrappers.lambdaQuery(ChatTypeHistory.class)
+                        .eq(ChatTypeHistory::getType, type)
+                        .eq(ChatTypeHistory::getChatId, chatId)
+                        .eq(ChatTypeHistory::getUserId, userId)
+                        .eq(ChatTypeHistory::getStatus, 1);
         return chatHistoryMapper.selectOne(chatHistroyLambdaQueryWrapper);
     }
     
     @Override
     public void updateById(ChatTypeHistory chatTypeHistory){
+        chatHistoryMapper.updateById(chatTypeHistory);
+    }
+
+    @Override
+    public void bindLatestRun(String chatId, String runId, String workflowStatus) {
+        Long userId = AiRequestContextHolder.getRequiredUser().getUserId();
+        ChatTypeHistory chatTypeHistory = chatHistoryMapper.selectOne(Wrappers.lambdaQuery(ChatTypeHistory.class)
+                .eq(ChatTypeHistory::getChatId, chatId)
+                .eq(ChatTypeHistory::getUserId, userId)
+                .eq(ChatTypeHistory::getStatus, 1)
+                .last("limit 1"));
+        if (chatTypeHistory == null) {
+            return;
+        }
+        chatTypeHistory.setLatestRunId(runId);
+        chatTypeHistory.setWorkflowStatus(workflowStatus);
         chatHistoryMapper.updateById(chatTypeHistory);
     }
     
@@ -104,8 +139,13 @@ public class ChatTypeHistoryServiceImpl implements ChatTypeHistoryService {
      */
     @Override
     public List<ChatTypeHistoryVo> getChatTypeHistoryList(Integer type){
+        Long userId = AiRequestContextHolder.getRequiredUser().getUserId();
         LambdaQueryWrapper<ChatTypeHistory> chatHistroyLambdaQueryWrapper =
-                Wrappers.lambdaQuery(ChatTypeHistory.class).eq(ChatTypeHistory::getType, type);
+                Wrappers.lambdaQuery(ChatTypeHistory.class)
+                        .eq(ChatTypeHistory::getType, type)
+                        .eq(ChatTypeHistory::getUserId, userId)
+                        .eq(ChatTypeHistory::getStatus, 1)
+                        .orderByDesc(ChatTypeHistory::getEditTime);
         List<ChatTypeHistory> chatTypeHistoryList = chatHistoryMapper.selectList(chatHistroyLambdaQueryWrapper);
         return chatTypeHistoryList.stream()
                 .map(chatTypeHistory -> {

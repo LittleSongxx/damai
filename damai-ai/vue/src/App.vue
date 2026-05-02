@@ -1,206 +1,324 @@
-<script setup lang="ts">
-import { RouterLink, RouterView } from 'vue-router'
+<script setup>
+import { computed, onMounted, ref } from 'vue'
+import { RouterView, useRoute } from 'vue-router'
 import { useDark, useToggle } from '@vueuse/core'
 import { SunIcon, MoonIcon } from '@heroicons/vue/24/outline'
-import { useRouter, onBeforeRouteLeave } from 'vue-router'
-import { ref } from 'vue'
+import { assistantAPI, ensureAuthenticated } from './api/api'
 
+const route = useRoute()
 const isDark = useDark()
 const toggleDark = useToggle(isDark)
-const router = useRouter()
+const capabilities = ref({ admin: false, allowedRoutes: ['business', 'knowledge', 'general'] })
 
-// 添加全局状态来跟踪当前路由
-const currentRoute = ref(router.currentRoute.value.path)
+const navItems = [
+  { label: '统一助手', to: '/assistant' },
+  { label: '可观测性', to: '/ai-observability', adminOnly: true },
+  { label: '旧版入口', to: '/legacy' }
+]
 
-// 添加全局路由守卫
-router.beforeEach((to, from, next) => {
-  // 如果是从 ChatPDF 页面离开
-  if (from.path === '/chat-pdf') {
-    // 触发一个自定义事件，让 ChatPDF 组件知道要清理资源
-    window.dispatchEvent(new CustomEvent('cleanupChatPDF'))
+const activePath = computed(() => route.path)
+const visibleNavItems = computed(() => navItems.filter(item => !item.adminOnly || capabilities.value.admin))
+
+onMounted(async () => {
+  if (!ensureAuthenticated()) {
+    return
   }
-  currentRoute.value = to.path
-  next()
+  try {
+    const result = await assistantAPI.getCapabilities()
+    capabilities.value = {
+      admin: result?.data?.admin === true,
+      allowedRoutes: Array.isArray(result?.data?.allowedRoutes) ? result.data.allowedRoutes : ['business', 'knowledge', 'general']
+    }
+  } catch (error) {
+    capabilities.value = { admin: false, allowedRoutes: ['business', 'knowledge', 'general'] }
+  }
 })
 </script>
 
 <template>
-  <div class="app" :class="{ 'dark': isDark }">
-    <nav class="navbar">
-      <router-link to="/" class="logo">
-        <span class="logo-text">大麦 AI</span>
-      </router-link>
+  <div class="app-shell" :class="{ dark: isDark }">
+    <div class="app-shell__backdrop"></div>
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand__mark">AI</div>
+        <div>
+          <p class="brand__eyebrow">Javaup Ticket Ops</p>
+          <router-link to="/assistant" class="brand__title">大麦 AI 控制台</router-link>
+        </div>
+      </div>
+
+      <nav class="topbar__nav">
+        <router-link
+          v-for="item in visibleNavItems"
+          :key="item.to"
+          :to="item.to"
+          class="nav-pill"
+          :class="{ 'nav-pill--active': activePath === item.to }"
+        >
+          {{ item.label }}
+        </router-link>
+      </nav>
+
       <button @click="toggleDark()" class="theme-toggle" aria-label="切换主题">
         <SunIcon v-if="isDark" class="icon" />
         <MoonIcon v-else class="icon" />
       </button>
-    </nav>
-    <main class="main-content">
-      <router-view v-slot="{ Component }">
+    </header>
+
+    <main class="main-stage">
+      <RouterView v-slot="{ Component }">
         <transition name="page" mode="out-in">
           <component :is="Component" />
         </transition>
-      </router-view>
+      </RouterView>
     </main>
   </div>
 </template>
 
 <style lang="scss">
 :root {
-  --primary-color: #ff3b1d;
-  --primary-light: rgba(255, 59, 29, 0.1);
-  --bg-color: #ffffff;
-  --text-color: #2c3e50;
-  --border-color: #eaeaea;
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
-  --radius-lg: 16px;
-  --radius-md: 12px;
-  --radius-sm: 8px;
+  --primary-color: #ff5a36;
+  --primary-strong: #ff4319;
+  --primary-soft: rgba(255, 90, 54, 0.14);
+  --secondary-color: #2550c8;
+  --accent-color: #12203f;
+  --bg-color: #f7efe8;
+  --bg-strong: #fffaf6;
+  --surface-color: rgba(255, 255, 255, 0.84);
+  --surface-strong: rgba(255, 255, 255, 0.96);
+  --surface-dark: #17253f;
+  --text-color: #162033;
+  --text-soft: #627089;
+  --text-inverse: #f7f8fc;
+  --border-color: rgba(18, 32, 63, 0.12);
+  --border-strong: rgba(18, 32, 63, 0.18);
+  --shadow-sm: 0 16px 38px rgba(17, 28, 52, 0.08);
+  --shadow-md: 0 26px 60px rgba(17, 28, 52, 0.14);
+  --radius-xl: 28px;
+  --radius-lg: 20px;
+  --radius-md: 16px;
+  --radius-sm: 12px;
 }
 
 .dark {
-  --bg-color: #1a1a1a;
-  --text-color: #ffffff;
-  --border-color: #2c2c2c;
-  --primary-light: rgba(255, 59, 29, 0.15);
+  --bg-color: #0d1424;
+  --bg-strong: #121c31;
+  --surface-color: rgba(18, 29, 50, 0.86);
+  --surface-strong: rgba(18, 29, 50, 0.96);
+  --surface-dark: #0a1020;
+  --text-color: #f3f6ff;
+  --text-soft: #93a3c2;
+  --text-inverse: #f7f8fc;
+  --border-color: rgba(147, 163, 194, 0.15);
+  --border-strong: rgba(147, 163, 194, 0.24);
+  --shadow-sm: 0 18px 40px rgba(0, 0, 0, 0.26);
+  --shadow-md: 0 28px 68px rgba(0, 0, 0, 0.34);
 }
 
 * {
-  margin: 0;
-  padding: 0;
   box-sizing: border-box;
 }
 
-html, body {
-  height: 100%;
+html,
+body,
+#app {
+  min-height: 100%;
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
-    Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  margin: 0;
   color: var(--text-color);
-  background: var(--bg-color);
-  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(255, 117, 82, 0.2), transparent 30%),
+    radial-gradient(circle at top right, rgba(37, 80, 200, 0.16), transparent 28%),
+    linear-gradient(180deg, var(--bg-strong), var(--bg-color));
+  font-family: 'Avenir Next', 'Segoe UI Variable', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   line-height: 1.6;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-.app {
+a {
+  color: inherit;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.app-shell {
+  position: relative;
   min-height: 100vh;
-  display: flex;
-  flex-direction: column;
+  padding: 22px 24px 28px;
 }
 
-.navbar {
-  margin: 1.5rem auto;
-  width: 92vw;
-  max-width: 1280px;
-  border-radius: var(--radius-lg);
-  background: var(--bg-color);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0 2rem;
-  height: 64px;
-  box-shadow: var(--shadow-sm);
-  border: 1px solid var(--border-color);
+.app-shell__backdrop {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 18% 20%, rgba(255, 90, 54, 0.12), transparent 0 24%),
+    radial-gradient(circle at 82% 18%, rgba(37, 80, 200, 0.12), transparent 0 22%),
+    radial-gradient(circle at 50% 100%, rgba(255, 220, 193, 0.16), transparent 0 32%);
+}
+
+.topbar {
   position: sticky;
-  top: 0;
-  z-index: 100;
-  transition: all 0.3s ease;
+  top: 18px;
+  z-index: 50;
+  max-width: 1480px;
+  margin: 0 auto 18px;
+  padding: 14px 18px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 18px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xl);
+  background: var(--surface-color);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--shadow-sm);
 }
 
-.logo {
-  text-decoration: none;
+.brand {
   display: flex;
   align-items: center;
-  
-  .logo-text {
-    font-size: 1.5rem;
-    font-weight: 800;
-    background: linear-gradient(135deg, var(--primary-color), #ff6b3d);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    letter-spacing: 1px;
-    position: relative;
-    transition: all 0.3s ease;
-    
-    &:hover {
-      transform: translateY(-1px);
-      filter: brightness(1.1);
-      text-shadow: 0 0 20px rgba(255, 59, 29, 0.2);
-    }
-  }
+  gap: 14px;
+}
+
+.brand__mark {
+  width: 50px;
+  height: 50px;
+  display: grid;
+  place-items: center;
+  border-radius: 18px;
+  background: linear-gradient(145deg, var(--primary-color), #ff875e);
+  color: #fff;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.brand__eyebrow {
+  margin: 0 0 2px;
+  color: var(--text-soft);
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.brand__title {
+  text-decoration: none;
+  font-size: 1.45rem;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+
+.topbar__nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.nav-pill {
+  padding: 10px 16px;
+  border-radius: 999px;
+  text-decoration: none;
+  color: var(--text-soft);
+  border: 1px solid transparent;
+  transition: 180ms ease;
+}
+
+.nav-pill:hover {
+  color: var(--text-color);
+  border-color: var(--border-color);
+  background: rgba(255, 255, 255, 0.36);
+}
+
+.nav-pill--active {
+  color: var(--text-inverse);
+  background: linear-gradient(135deg, var(--accent-color), var(--secondary-color));
+  box-shadow: 0 14px 34px rgba(37, 80, 200, 0.22);
 }
 
 .theme-toggle {
-  background: var(--primary-light);
-  border: none;
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--primary-color);
   cursor: pointer;
-  padding: 0.6rem;
-  border-radius: 50%;
-  transition: all 0.3s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  &:hover {
-    transform: scale(1.05);
-    background: var(--primary-color);
-    
-    .icon {
-      color: white;
-    }
-  }
-
-  .icon {
-    width: 22px;
-    height: 22px;
-    color: var(--primary-color);
-    transition: color 0.3s ease;
-  }
+  transition: 180ms ease;
 }
 
-.main-content {
-  flex: 1;
-  width: 92vw;
-  max-width: 1280px;
+.theme-toggle:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 90, 54, 0.32);
+  background: var(--primary-soft);
+}
+
+.theme-toggle .icon {
+  width: 22px;
+  height: 22px;
+}
+
+.main-stage {
+  position: relative;
+  max-width: 1480px;
   margin: 0 auto;
-  padding: 0 1rem;
 }
 
 .page-enter-active,
 .page-leave-active {
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity 0.24s ease, transform 0.24s ease;
 }
 
-.page-enter-from {
-  opacity: 0;
-  transform: translateY(10px);
-}
-
+.page-enter-from,
 .page-leave-to {
   opacity: 0;
-  transform: translateY(-10px);
+  transform: translateY(8px);
+}
+
+@media (max-width: 1120px) {
+  .topbar {
+    grid-template-columns: 1fr auto;
+  }
+
+  .topbar__nav {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
 }
 
 @media (max-width: 768px) {
-  .navbar {
-    margin: 1rem auto;
-    padding: 0 1.25rem;
-    height: 56px;
+  .app-shell {
+    padding: 14px 12px 20px;
   }
-  
-  .logo .logo-text {
-    font-size: 1.25rem;
+
+  .topbar {
+    top: 8px;
+    padding: 12px;
+    gap: 12px;
   }
-  
-  .main-content {
-    width: 100%;
-    padding: 0 1rem;
+
+  .brand__title {
+    font-size: 1.2rem;
+  }
+
+  .brand__eyebrow {
+    font-size: 0.68rem;
+  }
+
+  .nav-pill {
+    padding: 8px 12px;
+    font-size: 0.92rem;
   }
 }
 </style>
-

@@ -1,7 +1,7 @@
 <template>
   <div class="home" :class="{ 'dark': isDark }">
     <div class="container">
-      <h1 class="title">具体 AI 应用</h1>
+      <h1 class="title">旧版 AI 入口</h1>
       <div class="cards-grid">
         <router-link 
           v-for="app in aiApps" 
@@ -24,10 +24,6 @@
 import { ref } from 'vue'
 import { useDark } from '@vueuse/core'
 import { 
-  ChatBubbleLeftRightIcon,
-  HeartIcon,
-  UserGroupIcon,
-  DocumentTextIcon,
   ChartBarIcon
 } from '@heroicons/vue/24/outline'
 import DamaiAssistantIcon from '../components/icons/DamaiAssistantIcon.vue'
@@ -37,6 +33,13 @@ import DamaiAnalysisIcon from '../components/icons/DamaiAnalysisIcon.vue'
 const isDark = useDark()
 
 const aiApps = ref([
+  {
+    id: 0,
+    title: '大麦统一助手',
+    description: '新的统一入口，后台自动路由到业务、规则或运维技能',
+    route: '/assistant',
+    icon: DamaiAssistantRobotIcon
+  },
   {
     id: 1,
     title: '大麦贴心助手',

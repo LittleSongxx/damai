@@ -1,5 +1,6 @@
 package org.javaup.ai.ai.rag;
 
+import cn.hutool.crypto.digest.DigestUtil;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.utils.StringUtil;
@@ -14,6 +15,7 @@ import org.springframework.core.io.support.ResourcePatternResolver;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 /**
@@ -82,6 +84,7 @@ public class MarkdownLoader {
                     splitDocuments.add(doc);
                 }
             }
+            attachChunkMetadata(splitDocuments);
             log.info("二次切分后总共 {} 个文档片段", splitDocuments.size());
             return splitDocuments;
         } catch (IOException e) {
@@ -110,5 +113,33 @@ public class MarkdownLoader {
             }
         }
         return keywords.toString();
+    }
+
+    private void attachChunkMetadata(List<Document> documents) {
+        int index = 0;
+        for (Document document : documents) {
+            Map<String, Object> metadata = new HashMap<>(document.getMetadata());
+            String text = document.getText() == null ? "" : document.getText().trim();
+            String name = String.valueOf(metadata.getOrDefault("name", "faq"));
+            String chunkId = DigestUtil.md5Hex(name + ":" + index + ":" + text);
+            metadata.put("chunkId", chunkId);
+            metadata.put("section", extractSection(text));
+            metadata.put("sequence", index++);
+            document.getMetadata().putAll(metadata);
+        }
+    }
+
+    private String extractSection(String text) {
+        if (StringUtil.isEmpty(text)) {
+            return "default";
+        }
+        String[] lines = text.split("\\R");
+        for (String line : lines) {
+            String normalized = line.replace("#", "").trim();
+            if (StringUtil.isNotEmpty(normalized)) {
+                return normalized.length() > 60 ? normalized.substring(0, 60) : normalized;
+            }
+        }
+        return text.length() > 60 ? text.substring(0, 60) : text;
     }
 }

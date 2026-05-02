@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Objects;
 
 import static org.javaup.ai.constants.DaMaiConstant.TICKET_USER_LIST_URL;
+import static org.javaup.ai.constants.DaMaiConstant.CURRENT_USER_URL;
 import static org.javaup.ai.constants.DaMaiConstant.USER_DETAIL_URL;
 
 /**
@@ -29,7 +30,7 @@ public class UserCall {
         Map<String,String> params = new HashMap<>(2);
         params.put("mobile", mobile);
         UserDetailResultVo userDetailResultVo = new UserDetailResultVo();
-        String result = HttpRequest.post(USER_DETAIL_URL)
+        String result = HttpRequest.post(userDetailUrl())
                 .header("no_verify", "true")
                 .body(JSON.toJSONString(params))
                 .timeout(20000)
@@ -40,12 +41,27 @@ public class UserCall {
         }
         return userDetailResultVo.getData();
     }
+
+    public UserDetailVo currentUser(String token) {
+        UserDetailResultVo userDetailResultVo;
+        String result = HttpRequest.post(currentUserUrl())
+                .header("token", token)
+                .header("code", currentUserCode())
+                .header("no_verify", "true")
+                .timeout(20000)
+                .execute().body();
+        userDetailResultVo = JSON.parseObject(result, UserDetailResultVo.class);
+        if (!Objects.equals(userDetailResultVo.getCode(), BaseCode.SUCCESS.getCode())) {
+            throw new RuntimeException("调用大麦系统获取当前用户失败");
+        }
+        return userDetailResultVo.getData();
+    }
     
     public List<TicketUserVo> ticketUserList(Long userId){
         Map<String,Object> params = new HashMap<>(2);
         params.put("userId", userId);
         TicketUserResultVo ticketUserResultVo = new TicketUserResultVo();
-        String result = HttpRequest.post(TICKET_USER_LIST_URL)
+        String result = HttpRequest.post(ticketUserListUrl())
                 .header("no_verify", "true")
                 .body(JSON.toJSONString(params))
                 .timeout(20000)
@@ -58,5 +74,22 @@ public class UserCall {
             throw new RuntimeException("购票人信息不存在");
         }
         return ticketUserResultVo.getData();
+    }
+
+    protected String userDetailUrl() {
+        return USER_DETAIL_URL;
+    }
+
+    protected String currentUserUrl() {
+        return CURRENT_USER_URL;
+    }
+
+    protected String ticketUserListUrl() {
+        return TICKET_USER_LIST_URL;
+    }
+
+    protected String currentUserCode() {
+        String code = System.getenv("DAMAI_AI_CHANNEL_CODE");
+        return (code == null || code.isBlank()) ? "0001" : code;
     }
 }

@@ -2,7 +2,7 @@ package org.javaup.ai.ai.rag;
 
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.prompt.PromptTemplate;
-import org.springframework.ai.deepseek.DeepSeekChatModel;
+import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.rag.Query;
 import org.springframework.ai.rag.preretrieval.query.transformation.QueryTransformer;
 import org.springframework.ai.rag.preretrieval.query.transformation.RewriteQueryTransformer;
@@ -18,7 +18,7 @@ public class QueryRewriter {
 
     private final QueryTransformer queryTransformer;
 
-    public QueryRewriter(DeepSeekChatModel model) {
+    public QueryRewriter(OpenAiChatModel model) {
         PromptTemplate template = PromptTemplate.builder().template("""
                 你是演出/演唱会退票规则专家。
                 请将用户查询重写为最适合用在 {target} 中检索演出门票退票规则的版本。

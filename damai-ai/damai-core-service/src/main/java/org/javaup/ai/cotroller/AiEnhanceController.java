@@ -3,6 +3,7 @@ package org.javaup.ai.cotroller;
 import jakarta.annotation.Resource;
 import org.javaup.ai.common.ApiResponse;
 import org.javaup.ai.entity.AiTrace;
+import org.javaup.ai.security.AiPermissionService;
 import org.javaup.ai.service.AiObservabilityService;
 import org.javaup.ai.vo.TokenStatisticsVo;
 import org.javaup.ai.vo.TypeStatisticsVo;
@@ -29,6 +30,9 @@ public class AiEnhanceController {
     
     @Resource
     private AiObservabilityService observabilityService;
+
+    @Resource
+    private AiPermissionService aiPermissionService;
     
     @Resource
     private StructuredOutputService structuredOutputService;
@@ -38,24 +42,28 @@ public class AiEnhanceController {
     
     @GetMapping("/observability/today")
     public ApiResponse<TokenStatisticsVo> getTodayStats() {
+        aiPermissionService.requireOpsAccess();
         TokenStatisticsVo stats = observabilityService.getTodayStats();
         return ApiResponse.ok(stats);
     }
     
     @GetMapping("/observability/conversation")
     public ApiResponse<TokenStatisticsVo> getConversationStats(@RequestParam("conversationId") String conversationId) {
+        aiPermissionService.requireOpsAccess();
         TokenStatisticsVo stats = observabilityService.getConversationStats(conversationId);
         return ApiResponse.ok(stats);
     }
     
     @GetMapping("/observability/traces")
     public ApiResponse<List<AiTrace>> getRecentTraces(@RequestParam(value = "limit", defaultValue = "50") int limit) {
+        aiPermissionService.requireOpsAccess();
         List<AiTrace> traces = observabilityService.getRecentTraces(limit);
         return ApiResponse.ok(traces);
     }
     
     @GetMapping("/observability/stats/type")
     public ApiResponse<List<TypeStatisticsVo>> getStatsByType() {
+        aiPermissionService.requireOpsAccess();
         List<TypeStatisticsVo> stats = observabilityService.getStatsByRequestType();
         return ApiResponse.ok(stats);
     }

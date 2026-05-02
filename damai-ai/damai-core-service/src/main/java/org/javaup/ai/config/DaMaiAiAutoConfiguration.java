@@ -15,7 +15,7 @@ import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.ChatMemoryRepository;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
-import org.springframework.ai.deepseek.DeepSeekChatModel;
+import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.vectorstore.SimpleVectorStore;
@@ -37,7 +37,7 @@ public class DaMaiAiAutoConfiguration {
 
 
     @Bean
-    public ChatClient chatClient(DeepSeekChatModel model) {
+    public ChatClient chatClient(OpenAiChatModel model) {
         return ChatClient
                 .builder(model)
                 .defaultSystem("你是一位智能助手，你的特点是温柔、善良，你的名字叫智能小艾，要结合你的特点积极的回答用户的问题。")
@@ -56,7 +56,7 @@ public class DaMaiAiAutoConfiguration {
     }
 
     @Bean
-    public ChatClient assistantChatClient(DeepSeekChatModel model, ChatMemory chatMemory, AiProgram aiProgram,
+    public ChatClient assistantChatClient(OpenAiChatModel model, ChatMemory chatMemory, AiProgram aiProgram,
                                           ChatTypeHistoryService chatTypeHistoryService,
                                           @Qualifier("titleChatClient")ChatClient titleChatClient,
                                           AiObservabilityService observabilityService) {
@@ -73,7 +73,7 @@ public class DaMaiAiAutoConfiguration {
                         // AI增强: Observability可观测性 - Token统计、延迟监控
                         AiObservabilityAdvisor.builder(observabilityService)
                                 .order(OBSERVABILITY_ADVISOR_ORDER)
-                                .modelName("deepseek-chat")
+                                .modelName("qwen-compatible")
                                 .requestType(ChatType.ASSISTANT.getMsg())
                                 .build()
                 )
@@ -82,7 +82,7 @@ public class DaMaiAiAutoConfiguration {
     }
     
     @Bean
-    public ChatClient analysisChatClient(DeepSeekChatModel model, ChatMemory chatMemory,
+    public ChatClient analysisChatClient(OpenAiChatModel model, ChatMemory chatMemory,
                                           ChatTypeHistoryService chatTypeHistoryService,
                                           @Qualifier("titleChatClient")ChatClient titleChatClient,
                                           @Qualifier("mcpToolCallbackProvider") ToolCallbackProvider mcpToolCallbackProvider,
@@ -100,7 +100,7 @@ public class DaMaiAiAutoConfiguration {
                         // AI增强: Observability可观测性 - Token统计、延迟监控
                         AiObservabilityAdvisor.builder(observabilityService)
                                 .order(OBSERVABILITY_ADVISOR_ORDER)
-                                .modelName("deepseek-chat")
+                                .modelName("qwen-compatible")
                                 .requestType(ChatType.ANALYSIS.getMsg())
                                 .build()
                 )
@@ -110,7 +110,7 @@ public class DaMaiAiAutoConfiguration {
     }
     
     @Bean
-    public ChatClient titleChatClient(DeepSeekChatModel model) {
+    public ChatClient titleChatClient(OpenAiChatModel model) {
         return ChatClient
                 .builder(model)
                 .defaultAdvisors(

@@ -6,7 +6,15 @@
       <div class="box-left">
           <div class="box-detail">
             <div class="count">
-              <div class="box-img"><img :src="detailList.itemPicture" alt=""></div>
+              <div class="box-img">
+                <ProgramPoster
+                  :src="detailList.itemPicture"
+                  :title="detailList.title"
+                  :subtitle="detailList.place"
+                  badge="演出海报"
+                  class="poster poster--hero"
+                />
+              </div>
               <div class="order">
                 <div class="title">
                   <span class="tips">电子票</span>
@@ -107,7 +115,15 @@
             </div>
             <div id="projectDetial">
               <div class="proDetial">活动介绍</div>
-              <img :src="detailList.detail" alt="">
+              <ProgramPoster
+                :src="detailList.detail"
+                :title="detailList.title"
+                :subtitle="detailList.areaName"
+                badge="活动介绍"
+                fit="contain"
+                tone="cool"
+                class="poster poster--detail"
+              />
             </div>
             <div id="ticketNeed">
               <div class="proDetial">购票须知</div>
@@ -184,7 +200,13 @@
           <ul class="search__box">
             <li class="search__item" v-for="item in recommendList">
                 <router-link :to="{name:'detial',params:{id:item.id}}" class="link" >
-                  <img :src="item.itemPicture" alt="">
+                  <ProgramPoster
+                    :src="item.itemPicture"
+                    :title="item.title"
+                    :subtitle="item.place"
+                    badge="为你推荐"
+                    class="poster poster--recommend"
+                  />
                   <router-view :key="route.fullpath" />
 
                 </router-link>
@@ -209,6 +231,7 @@
 
 <script setup name="detial">
 import Header from '@/components/header/index'
+import ProgramPoster from '@/components/programPoster/index'
 import {formatDateWithWeekday } from '@/utils/index'
 import {useRoute, useRouter} from 'vue-router'
 import {getProgramDetials} from '@/api/contentDetail'
@@ -369,7 +392,7 @@ function getRecommendList(){
           color: #000;
 
           .box-img {
-            img {
+            :deep(.poster--hero) {
               position: absolute;
               left: 30px;
               top: 40px;
@@ -797,9 +820,9 @@ function getRecommendList(){
             border-bottom: 1px solid #e2e2e2;
           }
 
-          img {
+          :deep(.poster--detail) {
             width: 100%;
-            height:100%;
+            min-height: 420px;
             display: block;
             padding-bottom: 50px;
           }
@@ -959,10 +982,10 @@ function getRecommendList(){
             width: 120px;
             height: 100%;
             display: inline-block;
-            img{
-              width: 120px;
-              height: 100%;
-            }
+          }
+          :deep(.poster--recommend) {
+            width: 120px;
+            height: 100%;
           }
           .search_item_info{
             width: 157px;

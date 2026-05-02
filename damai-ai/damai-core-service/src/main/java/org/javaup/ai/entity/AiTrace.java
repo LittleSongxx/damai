@@ -31,6 +31,36 @@ public class AiTrace extends BaseTableData {
      * 会话ID
      */
     private String conversationId;
+
+    /**
+     * 用户ID
+     */
+    private Long userId;
+
+    /**
+     * 工作流ID
+     */
+    private String runId;
+
+    /**
+     * 工作流步骤
+     */
+    private String stepKey;
+
+    /**
+     * 工具名称
+     */
+    private String toolName;
+
+    /**
+     * 检索追踪ID
+     */
+    private String retrievalTraceId;
+
+    /**
+     * 审批ID
+     */
+    private String approvalId;
     
     /**
      * 使用的模型名称

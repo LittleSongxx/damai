@@ -86,15 +86,21 @@ public class ChatTypeTitleAdvisor implements BaseChatMemoryAdvisor {
             return chatClientResponse;
         }
         
-        String content = chatClient.prompt().user("请为以下对话总结一句简洁标题\n" + JSON.toJSONString(list) + "\n 只返回标题文本内容，不要其他样式")
-                .call().content();
-        
-        log.info("生成的标题: {}", content);
-        
-        ChatTypeHistory updatedChatTypeHistory = new ChatTypeHistory();
-        updatedChatTypeHistory.setId(chatTypeHistory.getId());
-        updatedChatTypeHistory.setTitle(content);
-        chatTypeHistoryService.updateById(updatedChatTypeHistory);
+        try {
+            String content = chatClient.prompt()
+                    .user("请为以下对话总结一句简洁标题\n" + JSON.toJSONString(list) + "\n 只返回标题文本内容，不要其他样式")
+                    .call()
+                    .content();
+
+            log.info("生成的标题: {}", content);
+
+            ChatTypeHistory updatedChatTypeHistory = new ChatTypeHistory();
+            updatedChatTypeHistory.setId(chatTypeHistory.getId());
+            updatedChatTypeHistory.setTitle(content);
+            chatTypeHistoryService.updateById(updatedChatTypeHistory);
+        } catch (Exception exception) {
+            log.warn("生成会话标题失败，跳过标题写入，不影响主对话返回。conversationId={}", conversationId, exception);
+        }
         return chatClientResponse;
     }
     

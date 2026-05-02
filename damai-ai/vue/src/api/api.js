@@ -1,7 +1,7 @@
-const BASE_URL = (import.meta.env.VITE_DAMAI_AI_BASE_URL || 'http://127.0.0.1:6089').replace(/\/$/, '')
-const TIMEOUT = 30000 // 30秒超时
+const BASE_URL = (import.meta.env.VITE_DAMAI_AI_BASE_URL || '/damai-ai-dev').replace(/\/$/, '')
+const DAMAI_PRO_LOGIN_URL = import.meta.env.VITE_DAMAI_PRO_LOGIN_URL || 'http://127.0.0.1:5173/login'
+const TIMEOUT = 30000
 
-// 统一的错误处理
 class APIError extends Error {
   constructor(message, status) {
     super(message)
@@ -10,30 +10,87 @@ class APIError extends Error {
   }
 }
 
-// 统一的请求处理函数
+function getCookie(name) {
+  const cookie = document.cookie
+    .split('; ')
+    .find(row => row.startsWith(`${name}=`))
+  return cookie ? decodeURIComponent(cookie.split('=')[1]) : ''
+}
+
+export function getAuthState() {
+  const token = getCookie('Admin-Token')
+  const userId = getCookie('userId')
+  return {
+    token,
+    userId,
+    isAuthenticated: Boolean(token)
+  }
+}
+
+export function ensureAuthenticated() {
+  const auth = getAuthState()
+  if (!auth.isAuthenticated) {
+    window.location.href = DAMAI_PRO_LOGIN_URL
+    return false
+  }
+  return true
+}
+
+function authHeaders() {
+  const { token, userId } = getAuthState()
+  return {
+    token: token || '',
+    'x-user-id': userId || ''
+  }
+}
+
 async function fetchWithTimeout(url, options = {}) {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), TIMEOUT)
-  
+
   try {
     const response = await fetch(url, {
       ...options,
+      credentials: 'same-origin',
+      headers: {
+        ...authHeaders(),
+        ...(options.headers || {})
+      },
       signal: controller.signal
     })
-    
+
     if (!response.ok) {
-      throw new APIError(`HTTP error! status: ${response.status}`, response.status)
+      if (response.status === 401) {
+        ensureAuthenticated()
+      }
+      let message = `HTTP error! status: ${response.status}`
+      try {
+        const payload = await response.clone().json()
+        message = payload?.message || payload?.data?.message || payload?.error || message
+      } catch (error) {
+        const text = await response.clone().text()
+        if (text) {
+          message = text
+        }
+      }
+      throw new APIError(message, response.status)
     }
-    
+
     return response
   } finally {
     clearTimeout(timeoutId)
   }
 }
 
-// 构建URL的辅助函数
+export function createAbsoluteUrl(rawUrl) {
+  return /^https?:\/\//.test(rawUrl)
+    ? new URL(rawUrl)
+    : new URL(rawUrl, window.location.origin)
+}
+
 function buildUrl(path, params = {}) {
-  const url = new URL(`${BASE_URL}${path}`)
+  const rawUrl = `${BASE_URL}${path}`
+  const url = createAbsoluteUrl(rawUrl)
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null) {
       url.searchParams.append(key, value)
@@ -42,156 +99,242 @@ function buildUrl(path, params = {}) {
   return url
 }
 
+export function createSseIterator(reader) {
+  return {
+    async *[Symbol.asyncIterator]() {
+      const decoder = new TextDecoder('utf-8')
+      let buffer = ''
+
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) {
+          if (buffer.trim()) {
+            yield parseSseChunk(buffer)
+          }
+          break
+        }
+
+        buffer += decoder.decode(value, { stream: true })
+        const chunks = buffer.split('\n\n')
+        buffer = chunks.pop() || ''
+
+        for (const chunk of chunks) {
+          const parsed = parseSseChunk(chunk)
+          if (parsed) {
+            yield parsed
+          }
+        }
+      }
+    }
+  }
+}
+
+export function parseSseChunk(chunk) {
+  if (!chunk || !chunk.trim()) {
+    return null
+  }
+  const lines = chunk.split('\n')
+  let event = 'message'
+  const dataLines = []
+  for (const line of lines) {
+    if (line.startsWith('event:')) {
+      event = line.slice(6).trim()
+    } else if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).trim())
+    }
+  }
+  const rawData = dataLines.join('\n')
+  let data = rawData
+  try {
+    data = rawData ? JSON.parse(rawData) : null
+  } catch (error) {
+    data = rawData
+  }
+  return { event, data }
+}
+
+async function streamRequest(path, params = {}) {
+  const response = await fetchWithTimeout(buildUrl(path, params))
+  return createSseIterator(response.body.getReader())
+}
+
+async function requestJson(path, options = {}) {
+  const response = await fetchWithTimeout(buildUrl(path), {
+    method: options.method || 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined
+  })
+  return response.json()
+}
+
 export const chatAPI = {
-  // 发送聊天消息
   async simpleChat(data, chatId) {
-    try {
-      const url = buildUrl('/simple/chat', { chatId })
-      const response = await fetchWithTimeout(url, {
-        method: 'POST',
-        body: data instanceof FormData ? data : new URLSearchParams({ prompt: data })
-      })
-      return response.body.getReader()
-    } catch (error) {
-      console.error('Simple Chat Error:', error)
-      throw error
-    }
+    const url = buildUrl('/simple/chat', { chatId })
+    const response = await fetchWithTimeout(url, {
+      method: 'POST',
+      body: data instanceof FormData ? data : new URLSearchParams({ prompt: data })
+    })
+    return response.body.getReader()
   },
 
-  // 获取聊天的历史会话id列表
   async chatTypeHistoryList(type = 1) {
-    try {
-      const url = buildUrl('/chat/type/history/list', { type })
-      const response = await fetchWithTimeout(url)
-      const chats = await response.json()
-      
-      return chats.map(chat => ({
-        id:chat.chatId,
-        title: chat.title === '' || chat.title === null  || chat.title === undefined ? `新的对话` : chat.title
-      }))
-    } catch (error) {
-      console.error('History Chat ID List Error:', error)
-      return []
-    }
+    const url = buildUrl('/chat/type/history/list', { type })
+    const response = await fetchWithTimeout(url)
+    const chats = await response.json()
+    return chats.map(chat => ({
+      id: chat.chatId,
+      title: chat.title || '新的对话',
+      latestRunId: chat.latestRunId,
+      workflowStatus: chat.workflowStatus
+    }))
   },
 
-  // 获取具体对话下的历史消息
   async chatHistoryMessageList(chatId, type = 1) {
-    try {
-      const url = buildUrl('/chat/history/message/list', { chatId, type })
-      const response = await fetchWithTimeout(url)
-      const messages = await response.json()
-      
-      return messages.map(msg => ({
-        ...msg,
-        timestamp: new Date()
-      }))
-    } catch (error) {
-      console.error('History Chat History List Error:', error)
-      return []
-    }
+    const url = buildUrl('/chat/history/message/list', { chatId, type })
+    const response = await fetchWithTimeout(url)
+    const messages = await response.json()
+    return messages.map(msg => ({
+      ...msg,
+      timestamp: new Date()
+    }))
   },
 
-  // 发送助手消息
   async sendAssistantMessage(prompt, chatId) {
-    try {
-      const url = buildUrl('/program/chat', { prompt, chatId })
-      const response = await fetchWithTimeout(url)
-      return response.body.getReader()
-    } catch (error) {
-      console.error('Assistant Message Error:', error)
-      throw error
-    }
+    return streamRequest('/program/chat', { prompt, chatId })
   },
 
-  // 发送rag消息
   async sendRagMessage(prompt, chatId) {
-    try {
-      const url = buildUrl('/program/rag', { prompt, chatId })
-      const response = await fetchWithTimeout(url)
-      return response.body.getReader()
-    } catch (error) {
-      console.error('RAG Message Error:', error)
-      throw error
-    }
+    return streamRequest('/program/rag', { prompt, chatId })
   },
 
-  // 发送运维分析消息（MCP日志查询）
   async sendAnalysisMessage(prompt, chatId) {
-    try {
-      const url = buildUrl('/program/chat/mcp', { prompt, chatId })
-      const response = await fetchWithTimeout(url)
-      return response.body.getReader()
-    } catch (error) {
-      console.error('Analysis Message Error:', error)
-      throw error
-    }
+    return streamRequest('/program/chat/mcp', { prompt, chatId })
   },
 
-  // 删除对话
   async deleteChat(chatId, type = 1) {
-    try {
-      const url = buildUrl('/chat/delete', { chatId, type })
-      await fetchWithTimeout(url)
-      return true
-    } catch (error) {
-      console.error('Delete Chat Error:', error)
-      throw error
-    }
-  }
-} 
+    const url = buildUrl('/chat/delete', { chatId, type })
+    await fetchWithTimeout(url)
+    return true
+  },
 
-// AI可观测性API
+  async getWorkflow(runId) {
+    const url = buildUrl(`/ai/workflows/${runId}`)
+    const response = await fetchWithTimeout(url)
+    const result = await response.json()
+    return result.data
+  },
+
+  async approveWorkflow(runId) {
+    const url = buildUrl(`/ai/workflows/${runId}/approve`)
+    const response = await fetchWithTimeout(url, { method: 'POST' })
+    const result = await response.json()
+    return result.data
+  },
+
+  async rejectWorkflow(runId) {
+    const url = buildUrl(`/ai/workflows/${runId}/reject`)
+    const response = await fetchWithTimeout(url, { method: 'POST' })
+    const result = await response.json()
+    return result.data
+  },
+
+  async reindexFaq() {
+    const url = buildUrl('/ai/rag/reindex')
+    const response = await fetchWithTimeout(url, { method: 'POST' })
+    const result = await response.json()
+    return result.data
+  }
+}
+
+export const assistantAPI = {
+  async getCapabilities() {
+    const response = await fetchWithTimeout(buildUrl('/assistant/capabilities'))
+    return response.json()
+  },
+
+  async createRun(payload) {
+    return requestJson('/assistant/runs', {
+      method: 'POST',
+      body: payload
+    })
+  },
+
+  async sendMessage(message, chatId, clientContext = {}) {
+    const result = await this.createRun({
+      chatId,
+      message,
+      clientContext
+    })
+    return this.streamRun(result?.data?.eventStreamPath)
+  },
+
+  async streamRun(eventStreamPath) {
+    if (!eventStreamPath) {
+      throw new APIError('Missing event stream path', 500)
+    }
+    const response = await fetchWithTimeout(buildUrl(eventStreamPath))
+    return createSseIterator(response.body.getReader())
+  },
+
+  async getRun(runId) {
+    const response = await fetchWithTimeout(buildUrl(`/assistant/runs/${runId}`))
+    return response.json()
+  },
+
+  async listConversations() {
+    const response = await fetchWithTimeout(buildUrl('/assistant/conversations'))
+    return response.json()
+  },
+
+  async listMessages(chatId) {
+    const response = await fetchWithTimeout(buildUrl(`/assistant/conversations/${chatId}/messages`))
+    return response.json()
+  },
+
+  async approveAction(runId, actionId) {
+    const response = await fetchWithTimeout(buildUrl(`/assistant/runs/${runId}/actions/${actionId}/approve`), {
+      method: 'POST'
+    })
+    return response.json()
+  },
+
+  async rejectAction(runId, actionId) {
+    const response = await fetchWithTimeout(buildUrl(`/assistant/runs/${runId}/actions/${actionId}/reject`), {
+      method: 'POST'
+    })
+    return response.json()
+  }
+}
+
 export const observabilityAPI = {
-  // 获取今日统计
   async getTodayStats() {
-    try {
-      const url = buildUrl('/ai/enhance/observability/today')
-      const response = await fetchWithTimeout(url)
-      const result = await response.json()
-      return result.data
-    } catch (error) {
-      console.error('Get Today Stats Error:', error)
-      throw error
-    }
+    const url = buildUrl('/ai/enhance/observability/today')
+    const response = await fetchWithTimeout(url)
+    const result = await response.json()
+    return result.data
   },
 
-  // 获取最近的追踪记录
   async getRecentTraces(limit = 50) {
-    try {
-      const url = buildUrl('/ai/enhance/observability/traces', { limit })
-      const response = await fetchWithTimeout(url)
-      const result = await response.json()
-      return result.data
-    } catch (error) {
-      console.error('Get Recent Traces Error:', error)
-      throw error
-    }
+    const url = buildUrl('/ai/enhance/observability/traces', { limit })
+    const response = await fetchWithTimeout(url)
+    const result = await response.json()
+    return result.data
   },
 
-  // 按类型统计
   async getStatsByType() {
-    try {
-      const url = buildUrl('/ai/enhance/observability/stats/type')
-      const response = await fetchWithTimeout(url)
-      const result = await response.json()
-      return result.data
-    } catch (error) {
-      console.error('Get Stats By Type Error:', error)
-      throw error
-    }
+    const url = buildUrl('/ai/enhance/observability/stats/type')
+    const response = await fetchWithTimeout(url)
+    const result = await response.json()
+    return result.data
   },
 
-  // 获取会话统计
   async getConversationStats(conversationId) {
-    try {
-      const url = buildUrl('/ai/enhance/observability/conversation', { conversationId })
-      const response = await fetchWithTimeout(url)
-      const result = await response.json()
-      return result.data
-    } catch (error) {
-      console.error('Get Conversation Stats Error:', error)
-      throw error
-    }
+    const url = buildUrl('/ai/enhance/observability/conversation', { conversationId })
+    const response = await fetchWithTimeout(url)
+    const result = await response.json()
+    return result.data
   }
-} 
+}

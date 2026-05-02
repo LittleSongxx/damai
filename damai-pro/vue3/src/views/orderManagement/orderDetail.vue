@@ -9,10 +9,16 @@
       <div class="isPay" v-if="orderData[0]&&orderData[0].orderStatus == 3"><span>已支付</span> <span>实付款: <span>￥{{orderData[0].orderPrice}}</span></span></div>
       <div class="isPay" v-if="orderData[0]&&orderData[0].orderStatus == 4">交易关闭<span>需付款: <span>￥{{orderData[0].orderPrice}}</span></span></div>
       <div class="program-table">
-        <el-table :data="orderData" border style="width: 100%" class="tableCloumn">
+          <el-table :data="orderData" border style="width: 100%" class="tableCloumn">
           <el-table-column   label="项目信息"  width="400px" >
             <template #default="scope">
-              <img :src="scope.row.programItemPicture" alt="">
+              <ProgramPoster
+                :src="scope.row.programItemPicture"
+                :title="scope.row.programTitle"
+                :subtitle="scope.row.programPlace"
+                badge="订单海报"
+                class="poster poster--order"
+              />
               <div class="project">
                 <div class="title">{{scope.row.programTitle}}</div>
                 <div class="content">演出场次: {{scope.row.programShowTime}}</div>
@@ -94,6 +100,7 @@
 import {ref, computed, onMounted, getCurrentInstance, nextTick, onBeforeMount} from 'vue'
 import Header from '@/components/header/index'
 import Footer from '@/components/footer/index'
+import ProgramPoster from '@/components/programPoster/index'
 import {useRoute} from 'vue-router'
 import {getIdTypeName} from '@/api/common.js'
 import {ElMessage} from "element-plus";
@@ -167,7 +174,7 @@ function getOrderStatus(orderStatus){
     }
     .program-table{
       .tableCloumn{
-        img{
+        :deep(.poster--order) {
           width: 62px;
           height: 80px;
           float: left;

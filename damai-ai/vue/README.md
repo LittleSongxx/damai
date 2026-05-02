@@ -20,6 +20,12 @@ See [Vite Configuration Reference](https://vite.dev/config/).
 npm install
 ```
 
+## Runtime
+
+This frontend is validated on Node `24.13.0`.
+
+If you use WSL, switch to the version from [.nvmrc](/home/song/code/Java/damai/damai-ai/vue/.nvmrc:1) before local development, or just use the provided npm scripts because they pin Node 24 automatically.
+
 ### Compile and Hot-Reload for Development
 
 ```sh

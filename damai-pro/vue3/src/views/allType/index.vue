@@ -99,7 +99,13 @@
                 <ul>
                   <li v-for="item in cardArr">
                     <router-link :to="{name:'detial',params:{id:item.id}}" class="link">
-                      <img :src="item.itemPicture" alt="">
+                      <ProgramPoster
+                        :src="item.itemPicture"
+                        :title="item.title"
+                        :subtitle="item.place"
+                        badge="现场热卖"
+                        class="poster poster--list"
+                      />
                     </router-link>
                     <div class="item-txt">
                       <div class="item-title">
@@ -137,7 +143,13 @@
                 <ul>
                   <li v-for="item in cardArr">
                     <router-link :to="{name:'detial',params:{id:item.id}}" class="link">
-                      <img :src="item.itemPicture" alt="">
+                      <ProgramPoster
+                        :src="item.itemPicture"
+                        :title="item.title"
+                        :subtitle="item.place"
+                        badge="现场热卖"
+                        class="poster poster--list"
+                      />
                     </router-link>
                     <div class="item-txt">
                       <div class="item-title">
@@ -174,7 +186,13 @@
                 <ul>
                   <li v-for="item in cardArr">
                     <router-link :to="{name:'detial',params:{id:item.id}}" class="link">
-                      <img :src="item.itemPicture" alt="">
+                      <ProgramPoster
+                        :src="item.itemPicture"
+                        :title="item.title"
+                        :subtitle="item.place"
+                        badge="现场热卖"
+                        class="poster poster--list"
+                      />
                     </router-link>
                     <div class="item-txt">
                       <div class="item-title">
@@ -211,7 +229,13 @@
                 <ul>
                   <li v-for="item in cardArr">
                     <router-link :to="{name:'detial',params:{id:item.id}}" class="link">
-                      <img :src="item.itemPicture" alt="">
+                      <ProgramPoster
+                        :src="item.itemPicture"
+                        :title="item.title"
+                        :subtitle="item.place"
+                        badge="现场热卖"
+                        class="poster poster--list"
+                      />
                     </router-link>
                     <div class="item-txt">
                       <div class="item-title">
@@ -255,7 +279,14 @@
         <ul class="search__box">
           <li class="search__item" v-for="item in recommendList">
             <router-link :to="{name:'detial',params:{id:item.id}}" class="link">
-              <img :src="item.itemPicture" alt="">
+              <ProgramPoster
+                :src="item.itemPicture"
+                :title="item.title"
+                :subtitle="item.place"
+                badge="猜你喜欢"
+                class="poster poster--recommend"
+                tone="cool"
+              />
             </router-link>
             <div class="search_item_info">
               <router-link :to="{name:'detial',params:{id:item.id}}" class="link__title">
@@ -281,6 +312,7 @@ import {getcategoryType} from "@/api/index";
 import {getCurrentDate, useMitt,formatDateWithWeekday} from "@/utils/index";
 import {getChildrenType, getProgramPageType} from "@/api/allType";
 import {getProgramRecommendList} from "@/api/recommendlist.js"
+import ProgramPoster from '@/components/programPoster/index'
 //引入路由器
 import {useRouter} from 'vue-router'
 
@@ -625,12 +657,11 @@ function removeTag(str, tag) {
                   overflow: hidden;
                   margin-right: 20px;
                   float: left;
+                }
 
-                  img {
-                    width: 100%;
-                    height: 100%;
-                  }
-
+                :deep(.poster--list) {
+                  width: 100%;
+                  height: 100%;
                 }
 
                 .item-txt {
@@ -727,12 +758,6 @@ function removeTag(str, tag) {
           margin-bottom: 0px;
           box-shadow: none;
 
-          img {
-            width: 98px;
-            height: 132px;
-            float: left;
-          }
-
           .search_item_info {
             .link__title {
               font-size: 14px;
@@ -822,10 +847,11 @@ function removeTag(str, tag) {
   text-decoration: none; /* 去除下划线 */
 }
 
-.search__item img {
-  width: 100px; /* 图片宽度 */
-  height: auto; /* 图片高度自适应 */
-  margin-right: 15px; /* 图片与文字的间距 */
+:deep(.poster--recommend) {
+  width: 98px;
+  height: 132px;
+  margin-right: 15px;
+  flex-shrink: 0;
 }
 
 .search_item_info {

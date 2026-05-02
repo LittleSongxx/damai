@@ -190,6 +190,26 @@ services:
     networks:
       - damai
 
+  qdrant:
+    image: qdrant/qdrant:${DAMAI_QDRANT_VERSION:-v1.13.4}
+    restart: unless-stopped
+    profiles:
+      - ai
+    ports:
+      - "${DAMAI_QDRANT_PORT:-16333}:6333"
+    volumes:
+      - damai-qdrant-data:/qdrant/storage
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -qO- http://127.0.0.1:6333/collections >/dev/null 2>&1 || exit 1
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks:
+      - damai
+
   ollama:
     image: ollama/ollama:${DAMAI_OLLAMA_VERSION:-0.5.7}
     restart: unless-stopped
@@ -212,4 +232,5 @@ volumes:
   damai-kafka-data:
   damai-es-data:
   damai-prometheus-data:
+  damai-qdrant-data:
   damai-ollama-data:

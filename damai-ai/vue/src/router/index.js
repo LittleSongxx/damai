@@ -1,8 +1,18 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { ensureAuthenticated, getAuthState } from '../api/api'
 
 const routes = [
   {
     path: '/',
+    redirect: '/assistant'
+  },
+  {
+    path: '/assistant',
+    name: 'AssistantHub',
+    component: () => import('../views/AssistantHub.vue')
+  },
+  {
+    path: '/legacy',
     name: 'Home',
     component: () => import('../views/Home.vue')
   },
@@ -31,6 +41,14 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(),
   routes
+})
+
+router.beforeEach((to, from, next) => {
+  if (!getAuthState().isAuthenticated) {
+    ensureAuthenticated()
+    return
+  }
+  next()
 })
 
 export default router 
