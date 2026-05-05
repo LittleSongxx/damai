@@ -11,6 +11,7 @@ import org.javaup.ai.assistant.AssistantSkillRegistry;
 import org.javaup.ai.assistant.AssistantSkillResult;
 import org.javaup.ai.assistant.memory.AssistantMemoryContext;
 import org.javaup.ai.assistant.memory.AssistantMemoryService;
+import org.javaup.ai.assistant.mq.AssistantRunCompletedPublisher;
 import org.javaup.ai.assistant.profile.AssistantUserProfileContext;
 import org.javaup.ai.assistant.profile.AssistantUserProfileService;
 import org.javaup.ai.entity.AiAction;
@@ -28,6 +29,7 @@ public class SkillExecutor implements AssistantExecutor {
     private final AssistantMessageEmitter messageEmitter;
     private final AssistantMemoryService memoryService;
     private final AssistantUserProfileService userProfileService;
+    private final AssistantRunCompletedPublisher runCompletedPublisher;
 
     @Override
     public AssistantExecutionMode mode() {
@@ -74,24 +76,16 @@ public class SkillExecutor implements AssistantExecutor {
         } else {
             runService.markCompleted(run, "RESPONDED", result.getResponseSummary());
         }
-        refreshMemory(run.getRunId());
-        refreshUserProfile(run.getRunId());
+        publishRunCompleted(run.getRunId());
         runService.appendEvent(run.getRunId(), AssistantEventTypes.RUN_COMPLETED, Map.of(
                 "runId", run.getRunId(),
                 "status", runService.getRun(run.getRunId()).getRunStatus()
         ));
     }
 
-    private void refreshMemory(String runId) {
+    private void publishRunCompleted(String runId) {
         try {
-            memoryService.refreshAfterRun(runService.getRun(runId));
-        } catch (RuntimeException ignored) {
-        }
-    }
-
-    private void refreshUserProfile(String runId) {
-        try {
-            userProfileService.refreshAfterRun(runService.getRun(runId));
+            runCompletedPublisher.publish(runService.getRun(runId));
         } catch (RuntimeException ignored) {
         }
     }

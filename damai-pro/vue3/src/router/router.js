@@ -33,6 +33,12 @@ export const constantRoutes = [
 
     },
     {
+        path: '/aiAssistant/index',
+        name: 'AI助手',
+        component: () => import('@/views/aiAssistant/index.vue'),
+        meta: {requiresAuth: true}
+    },
+    {
         path: '/allType/index',
         name: 'AllType',
         component: () => import('@/views/allType/index'),

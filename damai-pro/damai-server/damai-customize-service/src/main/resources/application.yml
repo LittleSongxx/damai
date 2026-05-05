@@ -32,24 +32,22 @@ spring:
         server-addr: ${DAMAI_NACOS_ADDR:127.0.0.1:18848}
         username: ${DAMAI_NACOS_USERNAME:nacos}
         password: ${DAMAI_NACOS_PASSWORD:nacos}
-  kafka:
-    bootstrap-servers: ${DAMAI_KAFKA_BOOTSTRAP_SERVERS:127.0.0.1:19092}
-    consumer:
-      #默认的消费组ID
-      group-id: api_data
-      #是否自动提交offset
-      enable-auto-commit: true
-      #提交offset延时
-      auto-commit-interval: 2000
-      # 当kafka中没有初始offset或offset超出范围时将自动重置offset
-      # earliest:重置为分区中最小的offset;
-      # latest:重置为分区中最新的offset(消费分区中新产生的数据);
-      # none:只要有一个分区不存在已提交的offset,就抛出异常;
-      auto-offset-reset: latest
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      # 主题
-      topic: save_api_data   
+  rabbitmq:
+    host: ${DAMAI_RABBITMQ_HOST:127.0.0.1}
+    port: ${DAMAI_RABBITMQ_AMQP_PORT:5672}
+    username: ${DAMAI_RABBITMQ_USERNAME:damai}
+    password: ${DAMAI_RABBITMQ_PASSWORD:damai}
+    listener:
+      simple:
+        acknowledge-mode: manual
+        prefetch: 50
+damai:
+  rabbitmq:
+    exchange: ${DAMAI_RABBITMQ_EXCHANGE:damai.pro.topic}
+    save-api-data:
+      queue: save_api_data
+      routing-key: save_api_data
+      dlq: save_api_data.dlq
 mybatis-plus:
   mapper-locations: classpath:mapper/*.xml
   global-config:

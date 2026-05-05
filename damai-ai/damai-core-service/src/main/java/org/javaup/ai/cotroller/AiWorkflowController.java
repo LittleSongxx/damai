@@ -109,7 +109,6 @@ public class AiWorkflowController {
 
     @PostMapping("/rag/reindex")
     public ApiResponse<Map<String, Object>> reindexFaq() {
-        int count = hybridSearchService.reindexAll();
-        return ApiResponse.ok(Map.of("count", count));
+        return ApiResponse.ok(hybridSearchService.reindexAll());
     }
 }

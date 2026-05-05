@@ -5,6 +5,7 @@ import org.javaup.ai.assistant.executor.AssistantMessageEmitter;
 import org.javaup.ai.assistant.executor.SkillExecutor;
 import org.javaup.ai.assistant.memory.AssistantMemoryContext;
 import org.javaup.ai.assistant.memory.AssistantMemoryService;
+import org.javaup.ai.assistant.mq.AssistantRunCompletedPublisher;
 import org.javaup.ai.assistant.profile.AssistantUserProfileContext;
 import org.javaup.ai.assistant.profile.AssistantUserProfileService;
 import org.javaup.ai.context.AiUserContext;
@@ -29,6 +30,7 @@ class SkillExecutorTest {
         AssistantMessageEmitter messageEmitter = mock(AssistantMessageEmitter.class);
         AssistantMemoryService memoryService = mock(AssistantMemoryService.class);
         AssistantUserProfileService userProfileService = mock(AssistantUserProfileService.class);
+        AssistantRunCompletedPublisher runCompletedPublisher = mock(AssistantRunCompletedPublisher.class);
         AssistantSkill skill = mock(AssistantSkill.class);
         when(skillRegistry.getRequired(AssistantRouteType.BUSINESS)).thenReturn(skill);
         when(memoryService.load("chat_1", 1L)).thenReturn(AssistantMemoryContext.empty());
@@ -40,7 +42,7 @@ class SkillExecutorTest {
         AiRun latestRun = run();
         latestRun.setRunStatus(AssistantRunStatus.COMPLETED.name());
         when(runService.getRun("run_1")).thenReturn(latestRun);
-        SkillExecutor executor = new SkillExecutor(runService, skillRegistry, messageEmitter, memoryService, userProfileService);
+        SkillExecutor executor = new SkillExecutor(runService, skillRegistry, messageEmitter, memoryService, userProfileService, runCompletedPublisher);
 
         executor.execute(context());
 
@@ -48,8 +50,7 @@ class SkillExecutorTest {
         verify(runService).appendEvent(eq("run_1"), eq(AssistantEventTypes.SKILL_COMPLETED), any());
         verify(messageEmitter).emitMessage("run_1", "chat_1", "回答内容");
         verify(runService).markCompleted(any(AiRun.class), eq("RESPONDED"), eq("回答内容"));
-        verify(memoryService).refreshAfterRun(latestRun);
-        verify(userProfileService).refreshAfterRun(latestRun);
+        verify(runCompletedPublisher).publish(latestRun);
         verify(runService).appendEvent(eq("run_1"), eq(AssistantEventTypes.RUN_COMPLETED), any());
     }
 

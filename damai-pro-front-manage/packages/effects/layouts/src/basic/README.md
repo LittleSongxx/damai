@@ -1,7 +1,15 @@
-## layout
+# basic layout
 
-### header
+`basic` 是后台管理前端的基础布局实现，负责头部、侧边栏、内容区和常用布局插槽。
 
-- 支持N个自定义插槽，命名方式：header-right-n，header-left-n
-- header-left-n ，排序方式：0-19 ,breadcrumb 21-x
-- header-right-n ，排序方式：0-49，global-search，51-59，theme-toggle，61-69，language-toggle，71-79，fullscreen，81-89，notification，91-149，user-dropdown，151-x
+## header 插槽约定
+
+- `header-left-n`：左侧区域，推荐排序 `0-19`，面包屑从 `21` 之后开始。
+- `header-right-n`：右侧区域，推荐排序 `0-49`，全局搜索、主题切换、语言切换、全屏、通知、用户下拉等按约定区间插入。
+
+## 维护约束
+
+- 布局组件只处理框架级结构和交互。
+- 业务按钮或业务状态应通过插槽接入。
+- 修改插槽排序规则时需要同步检查所有布局消费者。
+

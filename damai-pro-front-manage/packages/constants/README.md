@@ -1,19 +1,26 @@
 # @vben/constants
 
-用于多个 `app` 公用的常量，继承了 `@vben-core/shared/constants` 的所有能力。业务上有通用常量可以放在这里。
+`@vben/constants` 用于多个应用共享常量，并继承 `@vben-core/shared/constants` 的基础能力。
 
-## 用法
+## 职责
 
-### 添加依赖
+- 存放跨应用共享的路由路径、缓存 key、枚举值等常量。
+- 避免同一常量在多个 app 或 package 中重复定义。
+- 为管理端统一行为提供稳定入口。
+
+## 使用
 
 ```bash
-# 进入目标应用目录，例如 apps/xxxx-app
-# cd apps/xxxx-app
 pnpm add @vben/constants
 ```
-
-### 使用
 
 ```ts
 import { LOGIN_PATH } from '@vben/constants';
 ```
+
+## 维护约束
+
+- 只放通用常量。
+- 业务接口返回的字典值应优先来自后端或业务模块。
+- 修改常量前需要评估所有 workspace 消费方。
+

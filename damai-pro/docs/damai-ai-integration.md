@@ -29,7 +29,7 @@ Copy-Item .\vue\.env.example .\vue\.env -ErrorAction SilentlyContinue
 docker compose --profile ai up -d
 ```
 
-该命令会启动：MySQL、Redis、Nacos、Kafka、Elasticsearch、Seata、Sentinel，以及 AI 需要的 Prometheus、Ollama。
+该命令会启动：MySQL、Redis、Nacos、RabbitMQ、Elasticsearch、Seata、Sentinel，以及 AI 需要的 Prometheus、Ollama。
 
 ## 3) 初始化数据库（包含 damai-ai）
 
@@ -74,7 +74,7 @@ npm run dev
 
 - damai-pro 网关：`http://127.0.0.1:6085`
 - damai-ai 核心服务：`http://127.0.0.1:6089`
-- damai-ai 前端：`http://127.0.0.1:5173`
+- damai-ai 前端：`http://127.0.0.1:5174`
 - MCP 日志服务：`http://127.0.0.1:8085/sse`
 - MCP 指标服务：`http://127.0.0.1:8086/sse`
 - Prometheus：`http://127.0.0.1:9090`

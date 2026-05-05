@@ -1,7 +1,6 @@
 package org.javaup.ai.assistant.skill.ops;
 
 import com.alibaba.fastjson.JSON;
-import lombok.RequiredArgsConstructor;
 import org.javaup.ai.assistant.AssistantRouteType;
 import org.javaup.ai.assistant.AssistantSkill;
 import org.javaup.ai.assistant.AssistantSkillContext;
@@ -13,6 +12,7 @@ import org.javaup.ai.assistant.memory.AssistantMemoryKeyService;
 import org.javaup.ai.assistant.tool.AssistantToolInvoker;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -20,7 +20,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Component
-@RequiredArgsConstructor
 public class OpsSkill implements AssistantSkill {
 
     private static final Pattern TRACE_PATTERN = Pattern.compile("trace(?:id)?[=: ]+([A-Za-z0-9\\-_]+)", Pattern.CASE_INSENSITIVE);
@@ -32,6 +31,20 @@ public class OpsSkill implements AssistantSkill {
     private final MetricsGateway metricsGateway;
     private final TraceGateway traceGateway;
     private final AssistantMemoryKeyService memoryKeyService;
+
+    public OpsSkill(@Qualifier("unifiedOpsChatClient") ChatClient unifiedOpsChatClient,
+                    AssistantToolInvoker toolInvoker,
+                    LogGateway logGateway,
+                    MetricsGateway metricsGateway,
+                    TraceGateway traceGateway,
+                    AssistantMemoryKeyService memoryKeyService) {
+        this.unifiedOpsChatClient = unifiedOpsChatClient;
+        this.toolInvoker = toolInvoker;
+        this.logGateway = logGateway;
+        this.metricsGateway = metricsGateway;
+        this.traceGateway = traceGateway;
+        this.memoryKeyService = memoryKeyService;
+    }
 
     @Override
     public AssistantRouteType routeType() {

@@ -41,6 +41,7 @@
       <div class="recommendHeader" v-if="isShowHeader">
         <router-link to="/index" class="routeHome" tag="div">首页</router-link>
         <router-link to="/allType/index" class="routeType" tag="div">分类</router-link>
+        <router-link to="/aiAssistant/index" class="routeAi" tag="div">AI助手</router-link>
       </div>
       <div class="searchHeader" v-if="isShowHeader">
         <el-input
@@ -287,7 +288,7 @@ function getProgramSearchList() {
     }
 
     .recommendHeader {
-      max-width: 220px;
+      max-width: 280px;
       height: 100%;
       float: left;
       margin-right: -20px;
@@ -319,13 +320,25 @@ function getProgramSearchList() {
       .routeType.router-link-active {
         color: rgba(255, 55, 29, 0.85);
       }
+
+      .routeAi {
+        display: inline-block;
+        font-size: 16px;
+        color: #000;
+        margin-right: 18px;
+        overflow: hidden;
+      }
+
+      .routeAi.router-link-active {
+        color: rgba(255, 55, 29, 0.85);
+      }
     }
 
     .searchHeader {
       width: 32%;
       height: 46px;
       margin-top: 12px;
-      margin-left: 286px;
+      margin-left: 226px;
       line-height: 46px;
       float: left;
       position: relative;

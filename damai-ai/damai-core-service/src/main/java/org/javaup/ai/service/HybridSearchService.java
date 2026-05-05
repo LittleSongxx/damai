@@ -84,13 +84,25 @@ public class HybridSearchService {
         log.info("已缓存 {} 个 FAQ 文档片段", documentCache.size());
     }
 
-    public int reindexAll() {
+    public Map<String, Object> reindexAll() {
         List<Document> documents = markdownLoader.loadMarkdowns();
         cacheDocuments(documents);
         recreateQdrantCollection();
-        bulkUpsertQdrant(documents);
-        recreateEsIndex(documents);
-        return documents.size();
+        int qdrantPointCount = bulkUpsertQdrant(documents);
+        EsReindexResult esReindexResult = recreateEsIndex(documents);
+        MarkdownLoader.LoadStats loadStats = markdownLoader.getLastLoadStats();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("count", documents.size());
+        result.put("fileCount", loadStats.fileCount());
+        result.put("documentCount", loadStats.faqCount());
+        result.put("chunkCount", documents.size());
+        result.put("qdrantCollection", qdrantCollection);
+        result.put("qdrantPointCount", qdrantPointCount);
+        result.put("faqAlias", faqAlias);
+        result.put("physicalIndex", esReindexResult.physicalIndex());
+        result.put("esDocumentCount", esReindexResult.documentCount());
+        result.put("skippedCount", loadStats.skippedCount());
+        return result;
     }
 
     public RagSearchResultVo hybridSearchWithTrace(String query, int topK, boolean enableRerank) {
@@ -144,13 +156,27 @@ public class HybridSearchService {
             return query;
         }
         String rewritten = query;
-        Map<String, String> synonymMap = Map.of(
-                "退票", "退票 退款 取消订单",
-                "退款", "退款 退票 退钱",
-                "买票", "买票 购票 订票 下单",
-                "取消", "取消 作废 退订",
-                "演出", "演出 节目 表演 演唱会",
-                "门票", "门票 票 入场券"
+        Map<String, String> synonymMap = Map.ofEntries(
+                Map.entry("退票", "退票 退款 取消订单 条件退 手续费"),
+                Map.entry("退款", "退款 退票 退钱 原路退回 到账"),
+                Map.entry("买票", "买票 购票 订票 下单 抢票"),
+                Map.entry("购票", "购票 买票 订票 下单 限购"),
+                Map.entry("取消", "取消 作废 退订 延期"),
+                Map.entry("演出", "演出 节目 表演 演唱会"),
+                Map.entry("门票", "门票 票 入场券 票档"),
+                Map.entry("实名", "实名 实名认证 身份证 证件 观演人"),
+                Map.entry("观演人", "观演人 实名 入场人 证件"),
+                Map.entry("电子票", "电子票 二维码 身份证电子票 数字票 票夹 换票"),
+                Map.entry("数字票", "数字票 电子票 转赠 票夹"),
+                Map.entry("转赠", "转赠 转票 赠送 数字票"),
+                Map.entry("入场", "入场 安检 检票 场馆 证件核验"),
+                Map.entry("安检", "安检 禁带 违禁品 摄录设备 液体"),
+                Map.entry("儿童", "儿童票 儿童 亲子 身高 年龄 监护人"),
+                Map.entry("配送", "配送 快递 收货地址 物流"),
+                Map.entry("取票", "取票 自取 现场取票 换票"),
+                Map.entry("支付", "支付 付款 超时 重复支付 支付失败"),
+                Map.entry("订单", "订单 订单状态 支付超时 取消订单"),
+                Map.entry("安全", "安全 防诈骗 验证码 私下交易 非官方渠道")
         );
         for (Map.Entry<String, String> entry : synonymMap.entrySet()) {
             if (query.contains(entry.getKey())) {
@@ -195,7 +221,7 @@ public class HybridSearchService {
         try {
             JSONObject multiMatch = new JSONObject();
             multiMatch.put("query", query);
-            multiMatch.put("fields", List.of("text^3", "keywords^2", "label^2", "section^2", "title^2"));
+            multiMatch.put("fields", List.of("searchText^4", "question^3", "keywords^2", "text^2", "docTitle^1"));
 
             JSONObject body = new JSONObject();
             body.put("size", topK);
@@ -258,11 +284,11 @@ public class HybridSearchService {
         executeQdrant("/collections/" + qdrantCollection, body.toJSONString(), "PUT");
     }
 
-    private void bulkUpsertQdrant(List<Document> documents) {
+    private int bulkUpsertQdrant(List<Document> documents) {
         JSONArray points = new JSONArray();
         for (Document document : documents) {
             String chunkId = chunkId(document);
-            if (!StringUtils.hasText(chunkId)) {
+            if (!StringUtils.hasText(chunkId) || !StringUtils.hasText(document.getText())) {
                 continue;
             }
             JSONObject point = new JSONObject();
@@ -270,48 +296,62 @@ public class HybridSearchService {
             point.put("vector", embeddingModel.embed(document.getText()));
             JSONObject payload = new JSONObject(new HashMap<>(document.getMetadata()));
             payload.put("text", document.getText());
-            payload.put("title", payload.getOrDefault("name", "FAQ"));
+            payload.put("title", payload.getOrDefault("title", payload.getOrDefault("name", "FAQ")));
             point.put("payload", payload);
             points.add(point);
+        }
+        if (points.isEmpty()) {
+            return 0;
         }
         JSONObject body = new JSONObject();
         body.put("points", points);
         executeQdrant("/collections/" + qdrantCollection + "/points?wait=true", body.toJSONString(), "PUT");
+        return points.size();
     }
 
-    private void recreateEsIndex(List<Document> documents) {
+    private EsReindexResult recreateEsIndex(List<Document> documents) {
         String physicalIndex = "damai-ai-faq-" + System.currentTimeMillis();
         JSONObject mapping = new JSONObject();
-        mapping.put("properties", new JSONObject(Map.of(
-                "chunkId", new JSONObject(Map.of("type", "keyword")),
-                "title", new JSONObject(Map.of("type", "keyword")),
-                "source", new JSONObject(Map.of("type", "keyword")),
-                "section", new JSONObject(Map.of("type", "keyword")),
-                "keywords", new JSONObject(Map.of("type", "text")),
-                "label", new JSONObject(Map.of("type", "keyword")),
-                "text", new JSONObject(Map.of("type", "text"))
-        )));
+        JSONObject properties = new JSONObject();
+        properties.put("chunkId", field("keyword"));
+        properties.put("source", field("keyword"));
+        properties.put("sourceFile", field("keyword"));
+        properties.put("chunkType", field("keyword"));
+        properties.put("label", field("keyword"));
+        properties.put("title", field("text"));
+        properties.put("docTitle", field("text"));
+        properties.put("section", field("text"));
+        properties.put("question", field("text"));
+        properties.put("keywords", field("text"));
+        properties.put("searchText", field("text"));
+        properties.put("text", field("text"));
+        mapping.put("properties", properties);
         executeEs("/" + physicalIndex, new JSONObject(Map.of("mappings", mapping)).toJSONString(), "PUT");
 
         StringBuilder bulk = new StringBuilder();
+        int documentCount = 0;
         for (Document document : documents) {
             String chunkId = chunkId(document);
-            if (!StringUtils.hasText(chunkId)) {
+            if (!StringUtils.hasText(chunkId) || !StringUtils.hasText(document.getText())) {
                 continue;
             }
             bulk.append(JSON.toJSONString(Map.of("index", Map.of("_index", physicalIndex, "_id", chunkId)))).append('\n');
             Map<String, Object> source = new HashMap<>(document.getMetadata());
             source.put("chunkId", chunkId);
-            source.put("title", source.getOrDefault("name", "FAQ"));
+            source.put("title", source.getOrDefault("title", source.getOrDefault("name", "FAQ")));
             source.put("text", document.getText());
+            source.putIfAbsent("searchText", document.getText());
             bulk.append(JSON.toJSONString(source)).append('\n');
+            documentCount++;
         }
-        HttpRequest request = HttpRequest.post("http://" + esAddress + "/_bulk")
-                .header("Authorization", esAuthorization())
-                .header("Content-Type", "application/x-ndjson")
-                .body(bulk.toString());
-        String response = request.execute().body();
-        log.info("ES bulk reindex response: {}", response);
+        if (documentCount > 0) {
+            HttpRequest request = HttpRequest.post("http://" + esAddress + "/_bulk")
+                    .header("Authorization", esAuthorization())
+                    .header("Content-Type", "application/x-ndjson")
+                    .body(bulk.toString());
+            String response = request.execute().body();
+            log.info("ES bulk reindex response: {}", response);
+        }
 
         JSONObject aliasBody = new JSONObject();
         JSONArray actions = new JSONArray();
@@ -319,6 +359,11 @@ public class HybridSearchService {
         actions.add(new JSONObject(Map.of("add", Map.of("index", physicalIndex, "alias", faqAlias))));
         aliasBody.put("actions", actions);
         executeEs("/_aliases", aliasBody.toJSONString(), "POST");
+        return new EsReindexResult(physicalIndex, documentCount);
+    }
+
+    private JSONObject field(String type) {
+        return new JSONObject(Map.of("type", type));
     }
 
     private JSONObject executeQdrant(String path, String body, String method) {
@@ -364,5 +409,8 @@ public class HybridSearchService {
     private String chunkId(Document document) {
         Object value = document.getMetadata().get("chunkId");
         return value == null ? null : String.valueOf(value);
+    }
+
+    private record EsReindexResult(String physicalIndex, int documentCount) {
     }
 }

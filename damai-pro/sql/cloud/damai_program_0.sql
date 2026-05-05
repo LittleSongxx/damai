@@ -515,3 +515,61 @@ LOCK TABLES `undo_log` WRITE;
 /*!40000 ALTER TABLE `undo_log` DISABLE KEYS */;
 /*!40000 ALTER TABLE `undo_log` ENABLE KEYS */;
 UNLOCK TABLES;
+
+-- BEGIN LOCAL PROGRAM POSTER OVERRIDES
+UPDATE `d_program_1` SET `item_picture` = '/posters/8bb34815c307a78e160e8aa144eb7ae31c69c5238454c300f1da3254ca299e4c.png' WHERE `id` = 2;
+UPDATE `d_program_0` SET `item_picture` = '/posters/0aead2ab742e3f9174bf4094fcb392025d5b24fde486126f0013ca0248fe20c1.jpg' WHERE `id` = 4;
+UPDATE `d_program_1` SET `item_picture` = '/posters/9a1059d95c77dd0cdd5154a12a4955b63274176f499e87920b9fd40418998022.jpg' WHERE `id` = 6;
+UPDATE `d_program_0` SET `item_picture` = '/posters/3789c652ad0116886508cc0ba562addd0b75a010553acd27123ca4c06400e60f.webp' WHERE `id` = 8;
+UPDATE `d_program_1` SET `item_picture` = '/posters/bafd7262710ff8199b7e613aa8fa70e556cfc74cd4eae040b37f2b608a6f35d0.jpg' WHERE `id` = 10;
+UPDATE `d_program_0` SET `item_picture` = '/posters/85684b9a17ff475d7bfb650bf99c67f54c43afb7387e59932dad6d04b6ea44df.jpg' WHERE `id` = 12;
+UPDATE `d_program_1` SET `item_picture` = '/posters/1adf949cacefcbcbbfc6b2334263ba58292a852030ae3fc5ce4ff4a4ff63d036.jpg' WHERE `id` = 14;
+UPDATE `d_program_0` SET `item_picture` = '/posters/88a4d7a05441baf54c9791cfefbdca8cd21d53129ccc62aa9c8e2a15638d8c09.jpg' WHERE `id` = 16;
+UPDATE `d_program_1` SET `item_picture` = '/posters/1b641d80a78d84eed4df21d768cedbd48127674282bc7325371cbf2d2e4c4163.jpg' WHERE `id` = 18;
+UPDATE `d_program_0` SET `item_picture` = '/posters/25e150641501f9dca833e467fff20afa4dd333ae82b68a95a4db6b9d7d6f84e6.jpg' WHERE `id` = 20;
+UPDATE `d_program_1` SET `item_picture` = '/posters/2149959f906b58c1f507e50e213e4c86dda69982dba9890afaf32f94e29703a1.jpg' WHERE `id` = 22;
+UPDATE `d_program_0` SET `item_picture` = '/posters/2149959f906b58c1f507e50e213e4c86dda69982dba9890afaf32f94e29703a1.jpg' WHERE `id` = 24;
+UPDATE `d_program_1` SET `item_picture` = '/posters/2149959f906b58c1f507e50e213e4c86dda69982dba9890afaf32f94e29703a1.jpg' WHERE `id` = 26;
+UPDATE `d_program_0` SET `item_picture` = '/posters/2149959f906b58c1f507e50e213e4c86dda69982dba9890afaf32f94e29703a1.jpg' WHERE `id` = 28;
+UPDATE `d_program_1` SET `item_picture` = '/posters/2149959f906b58c1f507e50e213e4c86dda69982dba9890afaf32f94e29703a1.jpg' WHERE `id` = 30;
+UPDATE `d_program_0` SET `item_picture` = '/posters/5b9a0199a8ca1d7d9bae285404273f15b70f48ec7d2ae63ffae7dfa952ed6451.jpg' WHERE `id` = 32;
+UPDATE `d_program_1` SET `item_picture` = '/posters/f3ae81feec6ddf146ec1e123bee2484254b7d06291b94cd420fade5cac24afd4.jpg' WHERE `id` = 34;
+UPDATE `d_program_0` SET `item_picture` = '/posters/9de70245c62ec8000c500e98ef0eacc79ec1e6e49194c9a952c3877b43ec804a.jpg' WHERE `id` = 36;
+UPDATE `d_program_1` SET `item_picture` = '/posters/2436d9095c23f1bad536449f63d0e507a109f72fd18d4bf52d3a5252f43ff4db.png' WHERE `id` = 38;
+UPDATE `d_program_0` SET `item_picture` = '/posters/3c3e1dbc8166c985284cfb509e91ad3114657d6327d1a3dcf4b023b908980bc7.png' WHERE `id` = 40;
+UPDATE `d_program_1` SET `item_picture` = '/posters/f0fead3c549d6a3f0b2e7533db0d46a3aef4944d59edaeb949f0fab7a37e498d.png' WHERE `id` = 42;
+UPDATE `d_program_0` SET `item_picture` = '/posters/23c41b7ad870debe5a53f7e2afa904b463e4fabff4614574fde4733b3271c173.png' WHERE `id` = 44;
+UPDATE `d_program_1` SET `item_picture` = '/posters/e516d9da8ea93b1ab52823b9f77e32177511ed3e99326e63b2cedf2a28542e61.png' WHERE `id` = 46;
+UPDATE `d_program_0` SET `item_picture` = '/posters/0817a3159bfea981d9341675182e3d78b056ea2ea14685aa90e29223d5956424.jpg' WHERE `id` = 48;
+UPDATE `d_program_1` SET `item_picture` = '/posters/095304cc1e38bbead9ef1d85d01088a4eaf06b67765ca57381620826186daf94.png' WHERE `id` = 50;
+UPDATE `d_program_0` SET `item_picture` = '/posters/3a3998eb98c97b701a331995ca07e354eef7b02a5d2197d6edbff0bf6536206d.jpg' WHERE `id` = 52;
+-- END LOCAL PROGRAM POSTER OVERRIDES
+
+-- BEGIN LOCAL PROGRAM DETAIL IMAGE OVERRIDES
+UPDATE `d_program_1` SET `detail` = '/program-details/0720bcebddd7fee56d0585c5cdc9b684dfd344c0a8643495985205cdbe2f2b2c.webp' WHERE `id` = 2;
+UPDATE `d_program_0` SET `detail` = '/program-details/55815122409a552d7f93dcc19bcde91a9a03f2b9a5c9d6275de41ecc5e762c96.png' WHERE `id` = 4;
+UPDATE `d_program_1` SET `detail` = '/program-details/ad823f52a219f2dcde16c14e34727d086415ec91e39c898253ba17e2987de6c3.png' WHERE `id` = 6;
+UPDATE `d_program_0` SET `detail` = '/program-details/fb4a3662e643b0dc4320dfefae7e9fa18482eada99bbeac92a7030be187e4dcc.png' WHERE `id` = 8;
+UPDATE `d_program_1` SET `detail` = '/program-details/51d7ee9ec7d35fdd57bab3859bf193bf49cb02a007cfba2ab6dcf41cf4b28da5.jpg' WHERE `id` = 10;
+UPDATE `d_program_0` SET `detail` = '/program-details/f2ac0842735896b4507bc5841fc079ae803887e467432fdb8120adbbc393c65f.png' WHERE `id` = 12;
+UPDATE `d_program_1` SET `detail` = '/program-details/ef64492e5241eedf3de4ff9b403e1a45f24f239686374d6e9be692703e57dc6c.png' WHERE `id` = 14;
+UPDATE `d_program_0` SET `detail` = '/program-details/9121e8841cf8e58d57dfbd9b9450059cc88e890ae11d16fb40dab0fc91fa0c80.png' WHERE `id` = 16;
+UPDATE `d_program_1` SET `detail` = '/program-details/3468ae1d9b36942044cb289bfc4e6e5b4251760a5aa9237049b108a10fc819b0.png' WHERE `id` = 18;
+UPDATE `d_program_0` SET `detail` = '/program-details/31fefb155b4178b1c514dd99f94026ee74e1be45f11d8a5bc072ae9ddb9277dd.jpg' WHERE `id` = 20;
+UPDATE `d_program_1` SET `detail` = '/program-details/97c7761ff7305c84dfdaea902c6572c81c94ae4fe98110c1f1ebdb82ca919fab.png' WHERE `id` = 22;
+UPDATE `d_program_0` SET `detail` = '/program-details/97c7761ff7305c84dfdaea902c6572c81c94ae4fe98110c1f1ebdb82ca919fab.png' WHERE `id` = 24;
+UPDATE `d_program_1` SET `detail` = '/program-details/97c7761ff7305c84dfdaea902c6572c81c94ae4fe98110c1f1ebdb82ca919fab.png' WHERE `id` = 26;
+UPDATE `d_program_0` SET `detail` = '/program-details/97c7761ff7305c84dfdaea902c6572c81c94ae4fe98110c1f1ebdb82ca919fab.png' WHERE `id` = 28;
+UPDATE `d_program_1` SET `detail` = '/program-details/97c7761ff7305c84dfdaea902c6572c81c94ae4fe98110c1f1ebdb82ca919fab.png' WHERE `id` = 30;
+UPDATE `d_program_0` SET `detail` = '/program-details/fe230e4617642b862416be9ad9ebbe056322161b8a915a8ff6c037010cca4017.png' WHERE `id` = 32;
+UPDATE `d_program_1` SET `detail` = '/program-details/ecd20941f7ad26a01e15d2e182cc57f12baf97559b773aaab20daa1102bb4956.png' WHERE `id` = 34;
+UPDATE `d_program_0` SET `detail` = '/program-details/6d4e90f484545aa2c2c8d208d9d22f80ce11f365ebdf413fc3cfb355006e20ed.png' WHERE `id` = 36;
+UPDATE `d_program_1` SET `detail` = '/program-details/d53a4b6c1ca4aa8b5769ea23ec6d11917240781f6919897281ab678f198b13f8.png' WHERE `id` = 38;
+UPDATE `d_program_0` SET `detail` = '/program-details/8ff5d6a0a121d58280d1114376639c119f258450bbb2cc5a069ceadc867a3e42.png' WHERE `id` = 40;
+UPDATE `d_program_1` SET `detail` = '/program-details/bf7c5b92873b5b8388daf824c274ed9aeee26101fe55ed11a119c12bceb6670b.png' WHERE `id` = 42;
+UPDATE `d_program_0` SET `detail` = '/program-details/9bedae351680c3ca21200d21c8b404222baf220b15296c7ffb6b8094867dc2c3.png' WHERE `id` = 44;
+UPDATE `d_program_1` SET `detail` = '/program-details/1f42e3b7212c41b66faaaee6882691d6c2fa3338a6e3cdaf7f67260bfc58d6a2.png' WHERE `id` = 46;
+UPDATE `d_program_0` SET `detail` = '/program-details/bee6a78df4b0df64f0a571847a36c61c1e076a33bc4113f7e91873121d3185e1.png' WHERE `id` = 48;
+UPDATE `d_program_1` SET `detail` = '/program-details/8a88a29d6e2164d529152eb25b748489f885bde04ebda1285953227488a159c4.png' WHERE `id` = 50;
+UPDATE `d_program_0` SET `detail` = '/program-details/262a6f9f00854630a0fdad50e3eb29283f152f59c7b9fe0e24ebe5869d3252fe.png' WHERE `id` = 52;
+-- END LOCAL PROGRAM DETAIL IMAGE OVERRIDES

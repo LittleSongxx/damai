@@ -21,7 +21,7 @@ import reactor.core.publisher.Flux;
 @RequestMapping("/simple")
 public class SimpleChatController {
 
-    @Resource
+    @Resource(name = "chatClient")
     private ChatClient chatClient;
 
     @Resource

@@ -19,6 +19,7 @@ import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -43,8 +44,20 @@ import static org.javaup.ai.constants.DaMaiConstant.RAG_VERSION;
 public class DaMaiRagAiAutoConfiguration {
     
     @Bean
-    public MarkdownLoader markdownLoader(ResourcePatternResolver resourcePatternResolver){
-        return new MarkdownLoader(resourcePatternResolver);
+    public MarkdownLoader markdownLoader(ResourcePatternResolver resourcePatternResolver,
+                                         @Value("${damai.ai.rag.document-pattern:classpath:datum/*.md}") String documentPattern,
+                                         @Value("${damai.ai.rag.chunk-size:400}") int chunkSize,
+                                         @Value("${damai.ai.rag.min-chunk-size-chars:50}") int minChunkSizeChars,
+                                         @Value("${damai.ai.rag.min-chunk-length-to-embed:5}") int minChunkLengthToEmbed,
+                                         @Value("${damai.ai.rag.max-num-chunks:10000}") int maxNumChunks,
+                                         @Value("${damai.ai.rag.min-doc-length-for-token-split:1000}") int minDocLengthForTokenSplit){
+        return new MarkdownLoader(resourcePatternResolver,
+                documentPattern,
+                chunkSize,
+                minChunkSizeChars,
+                minChunkLengthToEmbed,
+                maxNumChunks,
+                minDocLengthForTokenSplit);
     }
     
     @Bean("markdownChatClient")

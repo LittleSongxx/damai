@@ -64,6 +64,10 @@ public class AssistantRunService {
 
     public AiRun getRun(String runId) {
         Long userId = AiRequestContextHolder.getRequiredUser().getUserId();
+        return getRun(runId, userId);
+    }
+
+    public AiRun getRun(String runId, Long userId) {
         return runMapper.selectOne(Wrappers.lambdaQuery(AiRun.class)
                 .eq(AiRun::getRunId, runId)
                 .eq(AiRun::getUserId, userId)

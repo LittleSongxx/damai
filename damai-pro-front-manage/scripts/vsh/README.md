@@ -1,56 +1,28 @@
 # @vben/vsh
 
-一个 Shell 脚本工具集合，用于 Vue Vben Admin 项目的开发和管理。
+`vsh` 是后台管理前端 monorepo 的 Node.js Shell 工具集合，用于依赖检查、循环依赖扫描、lint、格式化和发布前检查等工程治理任务。
 
-## 功能特性
+## 项目内用途
 
-- 🚀 基于 Node.js 的现代化 Shell 工具
-- 📦 支持模块化开发和按需加载
-- 🔍 提供依赖检查和分析功能
-- 🔄 支持循环依赖扫描
-- 📝 提供包发布检查功能
+根目录脚本会通过 `vsh` 执行：
 
-## 安装
+- `pnpm check:dep`
+- `pnpm check:circular`
+- `pnpm lint`
+- `pnpm format`
+- `pnpm publint`
 
-```bash
-# 使用 pnpm 安装
-pnpm add -D @vben/vsh
-
-# 或者使用 npm
-npm install -D @vben/vsh
-
-# 或者使用 yarn
-yarn add -D @vben/vsh
-```
-
-## 使用方法
-
-### 全局安装
+## 常用命令
 
 ```bash
-# 全局安装
-pnpm add -g @vben/vsh
-
-# 使用 vsh 命令
-vsh [command]
+pnpm check
+pnpm lint
+pnpm format
 ```
 
-### 本地使用
+## 维护约束
 
-```bash
-# 在 package.json 中添加脚本
-{
-  "scripts": {
-    "vsh": "vsh"
-  }
-}
+- 工具命令应保持工程治理职责，不承载业务逻辑。
+- 修改检查规则后需要同步验证 `pnpm check`。
+- CI 或本地提交前建议至少执行类型检查和 lint。
 
-# 运行命令
-pnpm vsh [command]
-```
-
-## 命令列表
-
-- `vsh check-deps`: 检查项目依赖
-- `vsh scan-circular`: 扫描循环依赖
-- `vsh publish-check`: 检查包发布配置

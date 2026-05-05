@@ -1,20 +1,26 @@
 # @vben/types
 
-用于多个 `app` 公用的工具类型，继承了 `@vben-core/typings` 的所有能力。业务上有通用的类型定义可以放在这里。
+`@vben/types` 用于多个应用共享 TypeScript 类型，并继承 `@vben-core/typings` 的基础能力。
 
-## 用法
+## 职责
 
-### 添加依赖
+- 存放跨应用共享类型。
+- 统一 SelectOption、表格配置、菜单、路由等通用结构。
+- 避免类型在多个包中重复定义。
+
+## 使用
 
 ```bash
-# 进入目标应用目录，例如 apps/xxxx-app
-# cd apps/xxxx-app
 pnpm add @vben/types
 ```
 
-### 使用
-
 ```ts
-// 推荐加上 type
 import type { SelectOption } from '@vben/types';
 ```
+
+## 维护约束
+
+- 类型导入优先使用 `import type`。
+- 业务接口 DTO 应跟随业务模块，不要全部塞进通用 types。
+- 修改共享类型前需要确认所有 workspace 消费方。
+

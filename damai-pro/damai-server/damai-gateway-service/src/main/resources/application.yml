@@ -59,13 +59,22 @@ spring:
     gateway:
       default-filters:
         - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials
-  kafka:
-    bootstrap-servers: ${DAMAI_KAFKA_BOOTSTRAP_SERVERS:127.0.0.1:19092}
-    producer:
-      retries: 1
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.apache.kafka.common.serialization.StringSerializer
-    topic: save_api_data
+  rabbitmq:
+    host: ${DAMAI_RABBITMQ_HOST:127.0.0.1}
+    port: ${DAMAI_RABBITMQ_AMQP_PORT:5672}
+    username: ${DAMAI_RABBITMQ_USERNAME:damai}
+    password: ${DAMAI_RABBITMQ_PASSWORD:damai}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+damai:
+  rabbitmq:
+    exchange: ${DAMAI_RABBITMQ_EXCHANGE:damai.pro.topic}
+    save-api-data:
+      queue: save_api_data
+      routing-key: save_api_data
+      dlq: save_api_data.dlq
 api:
   limit:
     paths: /**/customize/test/test   

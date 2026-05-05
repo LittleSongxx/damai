@@ -27,8 +27,8 @@ import com.damai.mapper.ProgramRecordTaskMapper;
 import com.damai.redis.RedisKeyBuild;
 import com.damai.service.delaysend.DelayOrderCancelSend;
 import com.damai.service.domain.CreateOrderTemporaryData;
-import com.damai.service.kafka.CreateOrderMqDomain;
-import com.damai.service.kafka.CreateOrderSend;
+import com.damai.service.rabbitmq.CreateOrderMqDomain;
+import com.damai.service.rabbitmq.CreateOrderSend;
 import com.damai.service.lua.ProgramCacheCreateOrderData;
 import com.damai.service.lua.ProgramCacheCreateOrderResolutionOperate;
 import com.damai.service.lua.ProgramCacheResolutionOperate;
@@ -206,7 +206,7 @@ public class ProgramOrderService {
     public String createNewAsync(ProgramOrderCreateDto programOrderCreateDto,Integer orderVersion) {
         //操作redis
         CreateOrderTemporaryData createOrderTemporaryData = createOrderOperateProgramCacheResolution(programOrderCreateDto);
-        //发送kafka
+        //发送rabbitmq
         return doCreateV2(programOrderCreateDto,createOrderTemporaryData,orderVersion);
     }
     
@@ -439,10 +439,10 @@ public class ProgramOrderService {
         CountDownLatch latch = new CountDownLatch(1);
         createOrderMqDomain.orderNumber = String.valueOf(orderCreateMq.getOrderNumber());
         createOrderSend.sendMessage(JSON.toJSONString(orderCreateMq),sendResult -> {
-            log.info("创建订单kafka发送消息成功 topic : {}",sendResult.getRecordMetadata().topic());
+            log.info("创建订单rabbitmq发送消息成功 exchange : {} routingKey : {}",sendResult.getExchange(),sendResult.getRoutingKey());
             latch.countDown();
         },ex -> {
-            log.error("创建订单kafka发送消息失败 error",ex);
+            log.error("创建订单rabbitmq发送消息失败 error",ex);
             List<SeatVo> purchaseSeatVoList = purchaseSeatList.stream().map(purchaseSeat -> {
                 SeatVo seatVo = new SeatVo();
                 BeanUtils.copyProperties(purchaseSeat,seatVo);

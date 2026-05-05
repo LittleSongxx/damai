@@ -1,59 +1,35 @@
 # @vben/turbo-run
 
-`turbo-run` 是一个命令行工具，允许你在多个包中并行运行命令。它提供了一个交互式的界面，让你可以选择要运行命令的包。
+`turbo-run` 是 monorepo 命令选择工具，用于在多个 workspace 包中查找并运行指定脚本。
 
-## 特性
+## 项目内用途
 
-- 🚀 交互式选择要运行的包
-- 📦 支持 monorepo 项目结构
-- 🔍 自动检测可用的命令
-- 🎯 精确过滤目标包
+`damai-pro-front-manage` 根目录的 `pnpm dev`、`pnpm preview` 等脚本会通过 `turbo-run` 提供交互式选择，便于只启动目标应用或包。
 
-## 安装
-
-```bash
-pnpm add -D @vben/turbo-run
-```
-
-## 使用方法
-
-基本语法：
-
-```bash
-turbo-run [script]
-```
-
-例如，如果你想运行 `dev` 命令：
+## 基本用法
 
 ```bash
 turbo-run dev
 ```
 
-工具会自动检测哪些包有 `dev` 命令，并提供一个交互式界面让你选择要运行的包。
+执行后工具会：
 
-## 示例
+1. 扫描 workspace 中定义了 `dev` 脚本的包。
+2. 提供交互式选择界面。
+3. 使用 pnpm filter 在选中的包内运行脚本。
 
-假设你的项目中有以下包：
+## 常用替代命令
 
-- `@vben/app`
-- `@vben/admin`
-- `@vben/website`
-
-当你运行：
+如果目标明确，可以直接运行：
 
 ```bash
-turbo-run dev
+pnpm dev:ele
+pnpm build:ele
 ```
 
-工具会：
+## 维护约束
 
-1. 检测哪些包有 `dev` 命令
-2. 显示一个交互式选择界面
-3. 让你选择要运行命令的包
-4. 使用 `pnpm --filter` 在选定的包中运行命令
+- 该工具需要在 monorepo 根目录执行。
+- 新增应用包时应在包的 `package.json` 中声明对应脚本。
+- 批处理或 CI 场景优先使用明确的 `pnpm --filter` 命令。
 
-## 注意事项
-
-- 确保你的项目使用 pnpm 作为包管理器
-- 确保目标包在 `package.json` 中定义了相应的脚本命令
-- 该工具需要在 monorepo 项目的根目录下运行

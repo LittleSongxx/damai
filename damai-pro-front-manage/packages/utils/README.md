@@ -1,19 +1,26 @@
 # @vben/utils
 
-用于多个 `app` 公用的工具包，继承了 `@vben-core/shared/utils` 的所有能力。业务上有通用的工具函数可以放在这里。
+`@vben/utils` 用于多个应用共享工具函数，并继承 `@vben-core/shared/utils` 的基础能力。
 
-## 用法
+## 职责
 
-### 添加依赖
+- 提供字符串、对象、数组、日期、浏览器环境等通用工具。
+- 避免多个包重复实现基础函数。
+- 保持纯函数优先，降低副作用。
+
+## 使用
 
 ```bash
-# 进入目标应用目录，例如 apps/xxxx-app
-# cd apps/xxxx-app
 pnpm add @vben/utils
 ```
-
-### 使用
 
 ```ts
 import { isString } from '@vben/utils';
 ```
+
+## 维护约束
+
+- 不写业务接口调用。
+- 不依赖具体页面状态。
+- 带副作用逻辑优先放入 `effects` 或应用层。
+

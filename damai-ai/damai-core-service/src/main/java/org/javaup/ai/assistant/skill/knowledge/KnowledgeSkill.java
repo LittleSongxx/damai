@@ -1,7 +1,6 @@
 package org.javaup.ai.assistant.skill.knowledge;
 
 import com.alibaba.fastjson.JSON;
-import lombok.RequiredArgsConstructor;
 import org.javaup.ai.assistant.AssistantEventTypes;
 import org.javaup.ai.assistant.AssistantRouteType;
 import org.javaup.ai.assistant.AssistantRunService;
@@ -12,6 +11,7 @@ import org.javaup.ai.assistant.memory.AssistantMemoryKeyService;
 import org.javaup.ai.entity.AiRetrieval;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -20,7 +20,6 @@ import java.util.List;
 import java.util.Map;
 
 @Component
-@RequiredArgsConstructor
 public class KnowledgeSkill implements AssistantSkill {
 
     private final ChatClient unifiedKnowledgeChatClient;
@@ -29,6 +28,20 @@ public class KnowledgeSkill implements AssistantSkill {
     private final KnowledgePromptAssemblyService promptAssemblyService;
     private final AssistantRunService assistantRunService;
     private final AssistantMemoryKeyService memoryKeyService;
+
+    public KnowledgeSkill(@Qualifier("unifiedKnowledgeChatClient") ChatClient unifiedKnowledgeChatClient,
+                          KnowledgeRetrievalPlanner retrievalPlanner,
+                          KnowledgeRetrievalOrchestrator retrievalOrchestrator,
+                          KnowledgePromptAssemblyService promptAssemblyService,
+                          AssistantRunService assistantRunService,
+                          AssistantMemoryKeyService memoryKeyService) {
+        this.unifiedKnowledgeChatClient = unifiedKnowledgeChatClient;
+        this.retrievalPlanner = retrievalPlanner;
+        this.retrievalOrchestrator = retrievalOrchestrator;
+        this.promptAssemblyService = promptAssemblyService;
+        this.assistantRunService = assistantRunService;
+        this.memoryKeyService = memoryKeyService;
+    }
 
     @Override
     public AssistantRouteType routeType() {

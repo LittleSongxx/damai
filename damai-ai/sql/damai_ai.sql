@@ -2,6 +2,17 @@
 create database if not exists damai_ai character set utf8mb4;
 use damai_ai;
 
+
+CREATE TABLE IF NOT EXISTS `SPRING_AI_CHAT_MEMORY` (
+  `conversation_id` varchar(191) NOT NULL,
+  `content` text NOT NULL,
+  `type` varchar(10) NOT NULL,
+  `timestamp` timestamp NOT NULL,
+  CONSTRAINT `TYPE_CHECK` CHECK (`type` IN ('USER','ASSISTANT','SYSTEM','TOOL'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Spring AI聊天记忆表';
+
+ALTER TABLE `SPRING_AI_CHAT_MEMORY` MODIFY COLUMN `conversation_id` varchar(191) NOT NULL;
+
 CREATE TABLE IF NOT EXISTS `d_ai_session` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
   `user_id` bigint NOT NULL COMMENT '用户ID',

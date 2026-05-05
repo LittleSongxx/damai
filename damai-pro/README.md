@@ -1,129 +1,180 @@
-# ©️版权告示
-为了保障星球用户权益，大麦pro 不再实行开源策略，而是通过邀请星球用户进入私有项目进行学习。
-严禁未经本项目原作者明确书面授权擅自分享至 GitHub、Gitee 等任何开放平台。违者将面临版权法律追究。
+# damai-pro
 
-- **知识星球:** [《侵权责任法》、《著作权法》和《信息网络传播权保护条例》。](https://support.zsxq.com/guidance.html)
-- **项目版权:**[《中华人民共和国著作权法实施条例》。](https://gitcode.com/java_up/introduce/blob/main/copyright_%E4%B8%AD%E5%8D%8E%E4%BA%BA%E6%B0%91%E5%85%B1%E5%92%8C%E5%9B%BD%E8%91%97%E4%BD%9C%E6%9D%83%E6%B3%95%E5%AE%9E%E6%96%BD%E6%9D%A1%E4%BE%8B.pdf)
+## 版权与访问说明
 
-## 本地开发
+为了保障项目作者与学习用户权益，`damai-pro` 当前不按公开开源项目方式分发。请勿在未获得原作者明确授权的情况下，将代码、配套资料或私有仓库内容上传到 GitHub、Gitee 等开放平台。
 
-本仓库已经补充了 Docker 本地依赖编排、数据库初始化脚本、完整本地联调验证脚本与 IntelliJ IDEA 共享运行配置；当前工作区的 `.env` 也已经按本机可用端口完成对齐。使用说明见 [docs/local-dev.md](docs/local-dev.md)。
+- **知识星球规则**：[《侵权责任法》、《著作权法》和《信息网络传播权保护条例》](https://support.zsxq.com/guidance.html)
+- **项目版权说明**：[《中华人民共和国著作权法实施条例》](https://gitcode.com/java_up/introduce/blob/main/copyright_%E4%B8%AD%E5%8D%8E%E4%BA%BA%E6%B0%91%E5%85%B1%E5%92%8C%E5%9B%BD%E8%91%97%E4%BD%9C%E6%9D%83%E6%B3%95%E5%AE%9E%E6%96%BD%E6%9D%A1%E4%BE%8B.pdf)
 
-## 大麦pro版本震撼来袭
+## 项目定位
 
-我们都知道想进大厂难度确实比较高，有些小伙伴去面试虽然是实习生岗位，但依然会问你很刁钻的问题，来考验你的技术能力到底如何？
+`damai-pro` 是大麦票务系统的高并发微服务版本，核心目标是把“演出浏览、选座锁座、库存扣减、异步下单、支付、后台监控、数据迁移与故障恢复”串成一套可本地运行、可压测、可排障的工程样板。
 
-而我辅导的小伙伴就有不少人问到了架构方面的问题，就比如在项目的运行时，就会被问到：
+项目重点演示以下问题的工程化解法：
 
-- **Redis宕机了怎么办？**
+- **高并发下单**：通过多版本下单链路、库存缓存、座位锁定、异步订单、限流与幂等控制提高吞吐。
+- **数据一致性**：围绕 Redis、MySQL、RabbitMQ、Seata、补偿任务和后台核对能力处理极端失败场景。
+- **分库分表**：基于 ShardingSphere、基因法和虚拟分片思想组织订单、支付、节目、用户等数据。
+- **服务治理**：使用 Nacos、Gateway、OpenFeign、Sentinel、Spring Boot Admin 管理服务发现、路由、调用与监控。
+- **可观测性**：通过 API 数据采集、Elasticsearch、Prometheus、后台管理与 AI MCP 服务提供诊断数据。
 
-- **MQ宕机了怎么办？**
+## 模块结构
 
-- **MQ消息丢失了怎么办？**
+| 模块 | 说明 |
+| --- | --- |
+| `damai-common` | 公共模型、异常、响应结构、工具类、自动配置基础 |
+| `damai-redis-tool-framework` | Redis 缓存、Lua、分布式缓存访问封装 |
+| `damai-elasticsearch-framework` | Elasticsearch / Easy-ES 相关封装 |
+| `damai-id-generator-framework` | 分布式 ID 生成器，支持基于 Redis 生成 `workId` |
+| `damai-spring-cloud-framework` | Spring Cloud、OpenFeign、网关与通用微服务能力 |
+| `damai-thread-pool-framework` | 线程池封装与异步执行支撑 |
+| `damai-redisson-framework` | Redisson 分布式锁、业务锁注解能力 |
+| `damai-captcha-manage-framework` | 验证码相关能力 |
+| `damai-server-client` | 各业务服务对外 Feign Client 与 DTO |
+| `damai-server` | 实际可启动的业务微服务集合 |
+| `vue3` | 用户端前端，基于 Vue 3、Vite、Element Plus |
+| `docs` | 本地开发、AI 一体化联调等补充文档 |
+| `scripts` | Windows/PowerShell 本地开发辅助脚本 |
 
-- **MQ消息延迟消费了怎么办？**
+## 微服务与端口
 
-- **数据库的余票数量和Redis中的不一致怎么办？**
+| 服务 | 端口 | 职责 |
+| --- | --- | --- |
+| `damai-admin-service` | `10082` | Spring Boot Admin 与后端管理支撑 |
+| `damai-base-data-service` | `6083` | 渠道、地区、字典等基础数据 |
+| `damai-customize-service` | `6084` | API 采集、定制化业务与后台查询能力 |
+| `damai-user-service` | `6082` | 用户、登录态、观演人等用户域能力 |
+| `damai-program-service` | `6086` | 节目、场次、票档、座位、下单前置链路 |
+| `damai-pay-service` | `6087` | 支付单、支付回调、支付状态流转 |
+| `damai-order-service` | `8081` | 订单创建、取消、支付状态、MQ 消费 |
+| `damai-migrate-service` | `6088` | 分片迁移、扩容与数据迁移支撑 |
+| `damai-gateway-service` | `6085` | 统一入口、路由、签名校验、跨域与鉴权过滤 |
 
-- **Redis恢复后，丢失的数据要怎么恢复？**
+## 基础设施
 
-等等一系列的这种令人头疼的问题！之前的 damai 项目关于这方面的问题有做过处理，但有些是人工处理，没有实现全面的自动化，有的面试官听着感觉比较普通，没有给人十足的亮点。
+`docker-compose.yml` 统一编排本地依赖：
 
-所以针对上述说的这种疑难杂症，特意开发出了 damai 项目的升级版本：<font size="5" color="#5575f6"> **damai_pro** </font>
+| 组件 | 默认地址 |
+| --- | --- |
+| MySQL | `127.0.0.1:13306` |
+| Redis | `127.0.0.1:16379` |
+| Nacos | `127.0.0.1:18848/nacos` |
+| RabbitMQ | AMQP `5672`，管理端 `15672` |
+| Elasticsearch | `127.0.0.1:19200` |
+| Seata | `127.0.0.1:8091` |
+| Sentinel Dashboard | `127.0.0.1:8082` |
+| Prometheus | `127.0.0.1:9090` |
+| Qdrant | `127.0.0.1:16333` |
+| Ollama | `127.0.0.1:11434` |
 
-# 一、大麦pro介绍
+本地环境变量模板见 `.env.example`。如果端口冲突，优先修改 `damai-pro/.env` 后再启动。
 
-damai_pro 是在原有的 damai 项目做了一次重大的升级！不仅保留了原有的功能，而且在此基础上添加了很多新的解决方案。
+## 快速启动
 
-**甭管是Redis宕机了、Redis和数据库不一致了、Redis恢复丢失的数据了、MQ宕机了、MQ数据丢失了，等等。。。**
+### 推荐：工作区一键启动
 
-**这些所有的问题全部在damai_pro版本中得到解决！**
+在工作区根目录执行：
 
-**都是真实生产环境使用的实际落地解决方案，完完全全经得起考证**
+```bash
+bash scripts/damai-stack.sh start
+```
 
-为的就是让小伙伴去面试时，能做到无论面试问什么，问的多么的抠细节，用 damai_pro 项目全都能回答上来！
+常用命令：
 
-![](https://multimedia-javaup.cn/%E5%A4%A7%E9%BA%A6pro/%E6%9E%B6%E6%9E%84%E9%9A%BE%E7%82%B9%E9%97%AE%E9%A2%98%E8%A7%A3%E5%86%B3.png)
+```bash
+bash scripts/damai-stack.sh status
+bash scripts/damai-stack.sh stop
+bash scripts/damai-stack.sh start --skip-build
+bash scripts/damai-stack.sh start --skip-db-init
+bash scripts/damai-stack.sh start --skip-frontend
+```
 
-# 二、大麦pro细节的优化
-damai_pro 除了解决上述提到的各种中间件宕机和数据库丢失的问题外，还对原有的逻辑进一步做了优化，将逻辑进行再次解耦，学习起来更加的清晰！
+脚本会自动读取 `damai-pro/.env`，完成 Docker 依赖启动、数据库初始化、分片配置生成、Maven 构建、后端服务启动和用户端前端启动。
 
-并且在数据方面也升级了可靠性，做到 **应该高可用的业务，那就高可用。应该强一致性的业务，那就强一致性。** 解决之前数据在极端的情况下可能会丢失的问题。
+### 手动启动顺序
 
-![](https://multimedia-javaup.cn/%E5%A4%A7%E9%BA%A6pro/%E5%AF%B9%E8%B4%A6.png)
+如果需要手动调试，建议按以下顺序启动：
 
-# 三、大麦pro的动态压测
+1. `docker compose --env-file .env --profile ai up -d`
+2. 初始化 SQL，或使用 `scripts/init-databases.ps1`
+3. `damai-admin-service`
+4. `damai-base-data-service`
+5. `damai-customize-service`
+6. `damai-user-service`
+7. `damai-program-service`
+8. `damai-pay-service`
+9. `damai-order-service`
+10. `damai-migrate-service`
+11. `damai-gateway-service`
+12. `vue3` 用户端前端
 
-对于高并发项目来说，**压测** 是必不可少的一个环节，只有通过压测，才能知道系统的瓶颈在哪里，才能知道系统能承受多大的压力。
+更细的 Windows/IDEA 本地开发说明见 [`docs/local-dev.md`](docs/local-dev.md)。
 
-而且通过压测还可以知道系统在不同的参数下，**性能提升了多少，能承受多大的压力**。
+## 用户端前端
 
-所以对于大麦pro项目来说，特意开发了 **动态压测** 的功能，来模拟生产中的实际业务场景。
+用户端前端位于 `vue3`：
 
-大麦pro的节目详情有 **v1**、**v2** 两个版本，生成订单有 **v1**、**v2**、**v3**、**v4** 四个版本，所以对于这些不同的版本，都需要进行压测，来对比不同版本下的性能提升。
+```bash
+cd damai-pro/vue3
+npm install
+npm run dev -- --host 127.0.0.1 --port 15173 --strictPort
+```
 
+前端通过 Vite 代理访问网关，网关地址为 `http://127.0.0.1:6085`。如果使用一键脚本，端口由 `DAMAI_PRO_FRONTEND_PORT` 控制，当前模板推荐 `15173`。
 
-# 四、大麦pro的后台管理
+## 核心业务流
 
-## 重要性功能的完善
-除了能解决上述的疑难杂症之外，还需要很多重要性的功能：
+### 节目浏览
 
-- 需要能实时的监控和查询关键数据，例如：余票数量、座位状态、订单状态，以及数据库中和Redis是否一致等。
+用户端请求经 `damai-gateway-service` 进入 `damai-program-service`，读取节目、场次、票档、余票和座位信息。热点数据优先走 Redis，本地服务通过 Nacos 发现和 Feign 协作。
 
-- 对于关键性的操作，比如Redis扣减余票，MQ消息队列的发送和消费，也都要记录下来，方便后续排查问题。
+### 下单链路
 
-- 以及问题出现后，不能说解决完就完事了，还要知道问题出现的原因是什么？问题出现的时间是什么时候？
+1. 用户选择节目、票档和座位。
+2. `damai-program-service` 校验节目状态、票档库存、座位状态和用户身份。
+3. 服务按下单版本执行库存扣减、座位锁定和风控校验。
+4. 下单消息写入 RabbitMQ。
+5. `damai-order-service` 消费消息，创建订单并维护订单状态。
+6. 支付链路由 `damai-pay-service` 处理，最终回写订单状态。
 
-为此，专门开发了一个后台管理系统，来对这些问题进行实时的监控、查询、处理。
+### 数据核对与恢复
 
-## 后台管理系统详细介绍
+系统围绕 Redis、数据库、RabbitMQ 设计了数据核对和补偿入口，用于处理缓存宕机、MQ 延迟/丢失、数据库与缓存不一致、库存回滚等场景。
 
-[👉 点击这里查看大麦pro后台管理系统的详细介绍](https://articles.zsxq.com/id_ug7spmc5hgjs.html)
+## 设计亮点
 
-# 五、大麦pro分库分表的升级
-## 基因法如何在分库分表下数据均匀分布
-在分库分表场景中，原始算法存在严重的资源浪费问题：由于分库和分表使用了相同的"基因位"（ID的同一部分），导致8个物理表中约有4个表很少被使用，资源利用率仅约50%。
+- **多版本下单演进**：`ProgramOrderController` 暴露多个创建订单版本，便于对比不同高并发策略的效果。
+- **异步订单创建**：节目服务负责前置校验和扣减，订单服务通过 RabbitMQ 消费创建订单，削峰填谷。
+- **分布式锁与防重**：基于 Redisson、业务锁注解和重复执行限制避免重复提交和并发冲突。
+- **分库分表路由**：通过 ShardingSphere 和基因法保证按用户或订单维度定位数据分片。
+- **虚拟分片扩容**：在物理分片与业务数据之间增加虚拟分片映射，降低扩容迁移风险。
+- **中间件故障兜底**：针对 Redis、RabbitMQ、数据库不一致等场景提供恢复和后台核对思路。
+- **链路可观测**：API 数据、日志、指标和后台页面可为 `damai-ai` 运维助手提供诊断证据。
 
-大麦pro通过基因位分离方案完美解决了这个问题：
+## 与 damai-ai 联动
 
-✅ 分表：使用分片键的低位bit（最右边的几位）
-✅ 分库：使用分片键的中高位bit（跳过表基因位后的几位）
-✅ 两者使用的bit位完全不重叠，实现独立分布
-✅ 在订单号生成时嵌入用户ID的基因，保证无论使用订单号还是用户ID查询，都能100%定位到同一个分片
-这样做的好处是：将资源利用率从50%提升到100%，并且保证了查询的一致性。
+`damai-ai` 会调用 `damai-pro` 网关接口完成节目检索、节目详情、票档查询、当前用户、观演人和下单准备等能力。联调说明见 [`docs/damai-ai-integration.md`](docs/damai-ai-integration.md)。
 
-[👉 点击这里查看基因法如何在分库分表下数据均匀分布的详细介绍](https://javaup.chat/damai/damai-pro/sharding/virtual/introduce)
+关键依赖：
 
-## 分库分表下数据如何扩容
-传统的基因法虽然解决了数据均匀分布问题，但有个致命缺陷：扩容困难。由于订单号中已经硬编码了固定的库表基因，当业务增长需要扩容时，原有订单号中的路由信息就会失效。
+- `damai-gateway-service` 必须可访问。
+- `damai-user-service`、`damai-program-service`、`damai-order-service` 等业务服务需要在 Nacos 中注册成功。
+- `damai-ai/.env` 中的 `DAMAI_AI_*_URL` 需要指向当前网关地址。
 
-大麦pro通过引入虚拟分片路由方案优雅地解决了这个问题：
+## 常见问题
 
-核心思想：在物理分片和数据之间增加一层虚拟分片映射
+- **Nacos 注册失败**：检查 `DAMAI_NACOS_ADDR`、用户名密码和 Docker 容器状态。
+- **数据库连接失败**：检查 `DAMAI_MYSQL_HOST`、`DAMAI_MYSQL_PORT`、账号密码和分片 YAML。
+- **前端接口 404**：确认 Vite 代理前缀、网关路由和 `/damai/**` 路径是否一致。
+- **网关裸请求失败**：网关存在签名/请求校验过滤器，建议通过前端或验证脚本发起请求。
+- **订单未创建**：检查 RabbitMQ 队列、订单服务消费者、Redis 座位锁和订单丢弃队列。
+- **AI 无法下单**：先确认 `damai-pro` 用户端已登录，再确认 AI 环境变量中的网关接口地址。
 
-数据 → 虚拟分片ID → 路由表 → 物理库表
+## 相关文档
 
-关键优势：
+- [`docs/local-dev.md`](docs/local-dev.md)：本地开发、IDEA 运行配置、数据库初始化与验证。
+- [`docs/damai-ai-integration.md`](docs/damai-ai-integration.md)：`damai-ai` 与 `damai-pro` 一体化联调。
+- [`vue3/README.md`](vue3/README.md)：用户端前端说明。
+- [`damai-id-generator-framework/README.md`](damai-id-generator-framework/README.md)：分布式 ID 生成器说明。
 
-✅ 将8个物理分片"细分"为1024个虚拟分片，扩容粒度从12.5%降低到约0.1%
-✅ 扩容时只需调整虚拟分片到物理分片的映射关系，不需要改变订单号生成逻辑
-✅ 支持分批迁移，可以分24次迁移，每次只迁移约2.1%的数据，大大降低风险
-✅ 支持秒级切换和快速回滚，业务无感知
-这样就真正做到了一次设计，持续扩容，彻底解决了分库分表扩容的难题。
-
-[👉 点击这里查看虚拟分片路由的详细介绍](https://javaup.chat/damai/damai-pro/sharding/virtual/introduce)
-
-# 六、大麦pro项目的总结
-
-到此，大麦pro可以说是一个非常完整的高并发项目了，不管从项目架构设计、高并发业务设计、高并发问题解决、数据一致性问题、实时监控查询、业务的详细压测
-，等等。全部都做了非常完善的处理。
-
-可以说全网能达到这种完善程度的项目真的是寥寥无几，拿这个去提高技术和面试，绝对是没得说！
-
-# 七、大麦pro项目的申请
-
-damai_pro项目是本人花费了很多的精力才开发出来的，同时也为了更好的保护已经加入星球的小伙伴的权益。所以决定damai_pro项目不再进行开源，而是将项目放到了私有库中。
-
-普通版本的damai项目依然还是正常开源，本人也依然会继续进行优化。开源地址为： [👉 点击这里跳转到damai项目](https://gitee.com/java-up-up/damai)
-
-已经加入星球的小伙伴，可以按照以下指示来申请和学习damai_pro项目：[👉 点击这里学习damai_pro项目](https://articles.zsxq.com/id_m4d7ni4zwkbq.html)

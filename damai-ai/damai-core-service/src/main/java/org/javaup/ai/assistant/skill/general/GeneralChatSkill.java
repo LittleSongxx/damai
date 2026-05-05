@@ -1,6 +1,5 @@
 package org.javaup.ai.assistant.skill.general;
 
-import lombok.RequiredArgsConstructor;
 import org.javaup.ai.assistant.AssistantRouteType;
 import org.javaup.ai.assistant.AssistantSkill;
 import org.javaup.ai.assistant.AssistantSkillContext;
@@ -9,13 +8,13 @@ import org.javaup.ai.assistant.memory.AssistantMemoryKeyService;
 import org.javaup.ai.assistant.tool.AssistantToolInvoker;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.stream.Collectors;
 
 @Component
-@RequiredArgsConstructor
 public class GeneralChatSkill implements AssistantSkill {
 
     private final ChatClient unifiedGeneralChatClient;
@@ -23,6 +22,18 @@ public class GeneralChatSkill implements AssistantSkill {
     private final WebSearchService webSearchService;
     private final AssistantToolInvoker toolInvoker;
     private final AssistantMemoryKeyService memoryKeyService;
+
+    public GeneralChatSkill(@Qualifier("unifiedGeneralChatClient") ChatClient unifiedGeneralChatClient,
+                            GeneralSearchPlanner searchPlanner,
+                            WebSearchService webSearchService,
+                            AssistantToolInvoker toolInvoker,
+                            AssistantMemoryKeyService memoryKeyService) {
+        this.unifiedGeneralChatClient = unifiedGeneralChatClient;
+        this.searchPlanner = searchPlanner;
+        this.webSearchService = webSearchService;
+        this.toolInvoker = toolInvoker;
+        this.memoryKeyService = memoryKeyService;
+    }
 
     @Override
     public AssistantRouteType routeType() {

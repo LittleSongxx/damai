@@ -12,7 +12,7 @@ import com.damai.enums.ApiRuleType;
 import com.damai.enums.BaseCode;
 import com.damai.enums.RuleTimeUnit;
 import com.damai.exception.DaMaiFrameException;
-import com.damai.kafka.ApiDataMessageSend;
+import com.damai.rabbitmq.ApiDataMessageSend;
 import com.damai.property.GatewayProperty;
 import com.damai.redis.RedisCache;
 import com.damai.redis.RedisKeyBuild;

@@ -73,14 +73,22 @@ spring:
         username: ${DAMAI_NACOS_USERNAME:nacos}
         password: ${DAMAI_NACOS_PASSWORD:nacos}
       eager: true
-  kafka:
-    bootstrap-servers: ${DAMAI_KAFKA_BOOTSTRAP_SERVERS:127.0.0.1:19092}
-    producer:
-      retries: 1
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.apache.kafka.common.serialization.StringSerializer
-    topic: create_order
-
+  rabbitmq:
+    host: ${DAMAI_RABBITMQ_HOST:127.0.0.1}
+    port: ${DAMAI_RABBITMQ_AMQP_PORT:5672}
+    username: ${DAMAI_RABBITMQ_USERNAME:damai}
+    password: ${DAMAI_RABBITMQ_PASSWORD:damai}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+damai:
+  rabbitmq:
+    exchange: ${DAMAI_RABBITMQ_EXCHANGE:damai.pro.topic}
+    create-order:
+      queue: create_order
+      routing-key: create_order
+      dlq: create_order.dlq
 bloom-filter:
   name: program-detail-bloom-filter
   expectedInsertions: 1000

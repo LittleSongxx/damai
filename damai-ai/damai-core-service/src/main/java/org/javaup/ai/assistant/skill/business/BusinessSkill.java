@@ -1,6 +1,5 @@
 package org.javaup.ai.assistant.skill.business;
 
-import lombok.RequiredArgsConstructor;
 import org.javaup.ai.assistant.AssistantRouteType;
 import org.javaup.ai.assistant.AssistantRunService;
 import org.javaup.ai.assistant.AssistantSkill;
@@ -10,15 +9,23 @@ import org.javaup.ai.assistant.memory.AssistantMemoryKeyService;
 import org.javaup.ai.entity.AiAction;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 @Component
-@RequiredArgsConstructor
 public class BusinessSkill implements AssistantSkill {
 
     private final ChatClient unifiedBusinessChatClient;
     private final AssistantRunService assistantRunService;
     private final AssistantMemoryKeyService memoryKeyService;
+
+    public BusinessSkill(@Qualifier("unifiedBusinessChatClient") ChatClient unifiedBusinessChatClient,
+                         AssistantRunService assistantRunService,
+                         AssistantMemoryKeyService memoryKeyService) {
+        this.unifiedBusinessChatClient = unifiedBusinessChatClient;
+        this.assistantRunService = assistantRunService;
+        this.memoryKeyService = memoryKeyService;
+    }
 
     @Override
     public AssistantRouteType routeType() {

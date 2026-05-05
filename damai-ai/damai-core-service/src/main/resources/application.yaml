@@ -25,12 +25,25 @@ spring:
     url: ${DAMAI_AI_MYSQL_URL:jdbc:mysql://${DAMAI_MYSQL_HOST:127.0.0.1}:${DAMAI_MYSQL_PORT:13306}/damai_ai?serverTimezone=Asia/Shanghai&useSSL=false&useUnicode=true&characterEncoding=utf-8&zeroDateTimeBehavior=convertToNull&transformedBitIsBoolean=true&tinyInt1isBit=false&allowPublicKeyRetrieval=true&allowMultiQueries=true&useServerPrepStmts=false}
     username: ${DAMAI_AI_MYSQL_USERNAME:${DAMAI_MYSQL_USERNAME:root}}
     password: ${DAMAI_AI_MYSQL_PASSWORD:${DAMAI_MYSQL_PASSWORD:root}}
+  rabbitmq:
+    host: ${DAMAI_RABBITMQ_HOST:127.0.0.1}
+    port: ${DAMAI_RABBITMQ_AMQP_PORT:5672}
+    username: ${DAMAI_RABBITMQ_USERNAME:damai}
+    password: ${DAMAI_RABBITMQ_PASSWORD:damai}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+    listener:
+      simple:
+        acknowledge-mode: manual
+        prefetch: 20
   ai:
     chat:
       memory:
         repository:
           jdbc:
-            initialize-schema: always
+            initialize-schema: never
             platform: mariadb
     ollama:
       base-url: ${DAMAI_AI_OLLAMA_BASE_URL:http://127.0.0.1:11434}
@@ -127,6 +140,19 @@ damai:
       collection: ${DAMAI_AI_QDRANT_COLLECTION:damai_ai_faq}
     faq:
       alias: ${DAMAI_AI_FAQ_ALIAS:damai-ai-faq-current}
+    rag:
+      document-pattern: ${DAMAI_AI_RAG_DOCUMENT_PATTERN:classpath:datum/*.md}
+      chunk-size: ${DAMAI_AI_RAG_CHUNK_SIZE:400}
+      min-chunk-size-chars: ${DAMAI_AI_RAG_MIN_CHUNK_SIZE_CHARS:50}
+      min-chunk-length-to-embed: ${DAMAI_AI_RAG_MIN_CHUNK_LENGTH_TO_EMBED:5}
+      max-num-chunks: ${DAMAI_AI_RAG_MAX_NUM_CHUNKS:10000}
+      min-doc-length-for-token-split: ${DAMAI_AI_RAG_MIN_DOC_LENGTH_FOR_TOKEN_SPLIT:1000}
+    memory:
+      mq:
+        exchange: ${DAMAI_AI_MEMORY_EXCHANGE:damai.ai.memory.topic}
+        run-completed-queue: ${DAMAI_AI_MEMORY_RUN_COMPLETED_QUEUE:damai.ai.memory.run_completed.q}
+        run-completed-routing-key: ${DAMAI_AI_MEMORY_RUN_COMPLETED_ROUTING_KEY:ai.run.completed}
+        run-completed-dlq: ${DAMAI_AI_MEMORY_RUN_COMPLETED_DLQ:damai.ai.memory.run_completed.dlq}
 # AI可观测性配置 - 模型价格（单位：元/1K tokens）
 # 参考价格，请以各厂商官网为准
 ai:

@@ -2,12 +2,13 @@
 param(
     [string]$ComposeFile = "docker-compose.yml",
     [string]$MySqlService = "mysql",
-    [string]$KafkaService = "kafka",
+    [string]$RabbitMqService = "rabbitmq",
     [string]$RootPassword,
     [int]$MySqlPort = 0,
     [int]$RedisPort = 0,
     [int]$NacosPort = 0,
-    [int]$KafkaPort = 0,
+    [int]$RabbitMqAmqpPort = 0,
+    [int]$RabbitMqManagementPort = 0,
     [int]$EsPort = 0,
     [int]$SeataPort = 0,
     [int]$SentinelPort = 0,
@@ -24,7 +25,8 @@ $RootPassword = if ($PSBoundParameters.ContainsKey("RootPassword")) { $RootPassw
 $MySqlPort = if ($PSBoundParameters.ContainsKey("MySqlPort")) { $MySqlPort } elseif ($env:DAMAI_MYSQL_PORT) { [int]$env:DAMAI_MYSQL_PORT } else { 3306 }
 $RedisPort = if ($PSBoundParameters.ContainsKey("RedisPort")) { $RedisPort } elseif ($env:DAMAI_REDIS_PORT) { [int]$env:DAMAI_REDIS_PORT } else { 6379 }
 $NacosPort = if ($PSBoundParameters.ContainsKey("NacosPort")) { $NacosPort } elseif ($env:DAMAI_NACOS_PORT) { [int]$env:DAMAI_NACOS_PORT } else { 8848 }
-$KafkaPort = if ($PSBoundParameters.ContainsKey("KafkaPort")) { $KafkaPort } elseif ($env:DAMAI_KAFKA_PORT) { [int]$env:DAMAI_KAFKA_PORT } else { 9092 }
+$RabbitMqAmqpPort = if ($PSBoundParameters.ContainsKey("RabbitMqAmqpPort")) { $RabbitMqAmqpPort } elseif ($env:DAMAI_RABBITMQ_AMQP_PORT) { [int]$env:DAMAI_RABBITMQ_AMQP_PORT } else { 5672 }
+$RabbitMqManagementPort = if ($PSBoundParameters.ContainsKey("RabbitMqManagementPort")) { $RabbitMqManagementPort } elseif ($env:DAMAI_RABBITMQ_PORT) { [int]$env:DAMAI_RABBITMQ_PORT } else { 15672 }
 $EsPort = if ($PSBoundParameters.ContainsKey("EsPort")) { $EsPort } elseif ($env:DAMAI_ES_PORT) { [int]$env:DAMAI_ES_PORT } else { 9200 }
 $SeataPort = if ($PSBoundParameters.ContainsKey("SeataPort")) { $SeataPort } elseif ($env:DAMAI_SEATA_PORT) { [int]$env:DAMAI_SEATA_PORT } else { 8091 }
 $SentinelPort = if ($PSBoundParameters.ContainsKey("SentinelPort")) { $SentinelPort } elseif ($env:DAMAI_SENTINEL_PORT) { [int]$env:DAMAI_SENTINEL_PORT } else { 8082 }
@@ -71,7 +73,8 @@ $ports = @(
     @{ Name = "MySQL"; Port = $MySqlPort },
     @{ Name = "Redis"; Port = $RedisPort },
     @{ Name = "Nacos"; Port = $NacosPort },
-    @{ Name = "Kafka"; Port = $KafkaPort },
+    @{ Name = "RabbitMQ AMQP"; Port = $RabbitMqAmqpPort },
+    @{ Name = "RabbitMQ Management"; Port = $RabbitMqManagementPort },
     @{ Name = "Elasticsearch"; Port = $EsPort },
     @{ Name = "Seata"; Port = $SeataPort },
     @{ Name = "Sentinel"; Port = $SentinelPort }
@@ -98,8 +101,8 @@ $esResponse = Invoke-WebRequest -Uri "http://127.0.0.1:$EsPort/_cluster/health" 
 }
 Assert-Condition ($esResponse.StatusCode -eq 200) "Elasticsearch cluster health check failed."
 
-$null = docker compose -f $ComposeFile exec -T $KafkaService /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list
-$kafkaExitCode = $LASTEXITCODE
-Assert-Condition ($kafkaExitCode -eq 0) "Kafka topic listing failed."
+$null = docker compose -f $ComposeFile exec -T $RabbitMqService rabbitmq-diagnostics -q ping
+$rabbitMqExitCode = $LASTEXITCODE
+Assert-Condition ($rabbitMqExitCode -eq 0) "RabbitMQ diagnostics ping failed."
 
 Write-Host "Local infrastructure checks passed." -ForegroundColor Green

@@ -1,20 +1,25 @@
 package org.javaup.ai.assistant;
 
-import lombok.RequiredArgsConstructor;
 import org.javaup.ai.structured.IntentRecognition;
 import org.javaup.ai.structured.StructuredOutputService;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
 
 @Service
-@RequiredArgsConstructor
 public class AssistantRouteService {
 
     private final StructuredOutputService structuredOutputService;
     private final ChatClient chatClient;
+    
+    public AssistantRouteService(StructuredOutputService structuredOutputService,
+                                 @Qualifier("unifiedGeneralChatClient") ChatClient chatClient) {
+        this.structuredOutputService = structuredOutputService;
+        this.chatClient = chatClient;
+    }
 
     public AssistantRouteDecision route(String message) {
         String normalized = message == null ? "" : message.toLowerCase();
