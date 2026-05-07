@@ -15,6 +15,7 @@ public class AssistantToolInvoker {
     private final AssistantRunService assistantRunService;
 
     public <T> T invoke(String runId, String toolName, String toolType, Object input, AssistantToolCallable<T> callable) {
+        assertToolAllowed(toolName);
         long start = System.currentTimeMillis();
         assistantRunService.appendEvent(runId, AssistantEventTypes.TOOL_STARTED, Map.of(
                 "runId", runId,
@@ -33,6 +34,14 @@ public class AssistantToolInvoker {
             assistantRunService.appendEvent(runId, AssistantEventTypes.TOOL_COMPLETED, completedPayload(runId, toolName, toolType, durationMs, "FAILED", ex.getMessage()));
             throw ex;
         }
+    }
+
+    private void assertToolAllowed(String toolName) {
+        AssistantSkillToolScope.current().ifPresent(scope -> {
+            if (!scope.allows(toolName)) {
+                throw new IllegalStateException("工具 " + toolName + " 不在 Skill " + scope.skillId() + " 的白名单内");
+            }
+        });
     }
 
     private Map<String, Object> completedPayload(String runId, String toolName, String toolType, long durationMs, String status, String message) {

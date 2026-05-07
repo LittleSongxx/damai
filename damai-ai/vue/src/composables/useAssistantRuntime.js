@@ -42,6 +42,8 @@ export function useAssistantRuntime() {
   const currentChatId = ref('')
   const currentRunId = ref('')
   const currentRoute = ref('')
+  const currentSkillId = ref('')
+  const currentSkillName = ref('')
   const currentMessages = ref([])
   const conversations = ref([])
   const runTimeline = ref([])
@@ -52,7 +54,7 @@ export function useAssistantRuntime() {
   const errorMessage = ref('')
   const refusalReason = ref('')
   const runStatus = ref('')
-  const capabilities = ref({ admin: false, allowedRoutes: ['business', 'knowledge', 'general'] })
+  const capabilities = ref({ admin: false, allowedRoutes: ['business', 'knowledge', 'general'], skills: [] })
 
   const orderedTimeline = computed(() => [...runTimeline.value].reverse())
   const hasMessages = computed(() => currentMessages.value.length > 0)
@@ -83,6 +85,8 @@ export function useAssistantRuntime() {
     errorMessage.value = ''
     runStatus.value = ''
     currentRoute.value = ''
+    currentSkillId.value = ''
+    currentSkillName.value = ''
   }
 
   const appendAssistantDelta = async (delta) => {
@@ -133,7 +137,8 @@ export function useAssistantRuntime() {
     const result = await assistantAPI.getCapabilities()
     capabilities.value = {
       admin: result?.data?.admin === true,
-      allowedRoutes: Array.isArray(result?.data?.allowedRoutes) ? result.data.allowedRoutes : ['business', 'knowledge', 'general']
+      allowedRoutes: Array.isArray(result?.data?.allowedRoutes) ? result.data.allowedRoutes : ['business', 'knowledge', 'general'],
+      skills: Array.isArray(result?.data?.skills) ? result.data.skills : []
     }
   }
 
@@ -188,6 +193,8 @@ export function useAssistantRuntime() {
         break
       case 'route.selected':
         currentRoute.value = data?.routeType || ''
+        currentSkillId.value = data?.skillId || ''
+        currentSkillName.value = data?.skillName || ''
         updateConversationTitle(currentChatId.value, data?.conversationTitle)
         recordTimeline(event, data)
         break
@@ -199,6 +206,8 @@ export function useAssistantRuntime() {
         break
       case 'skill.started':
       case 'skill.completed':
+        currentSkillId.value = data?.skillId || currentSkillId.value
+        currentSkillName.value = data?.skillName || currentSkillName.value
         recordTimeline(event, data)
         break
       case 'retrieval.started':
@@ -250,7 +259,7 @@ export function useAssistantRuntime() {
     }
   }
 
-  const sendMessage = async (presetMessage) => {
+  const sendMessage = async (presetMessage, clientContextOverrides = {}) => {
     const message = (presetMessage ?? userInput.value).trim()
     if (!message || isStreaming.value) {
       return
@@ -270,7 +279,8 @@ export function useAssistantRuntime() {
 
     try {
       const stream = await assistantAPI.sendMessage(message, currentChatId.value || null, {
-        entry: 'assistant-hub'
+        entry: 'assistant-hub',
+        ...clientContextOverrides
       })
       for await (const item of stream) {
         if (!item) {
@@ -312,6 +322,8 @@ export function useAssistantRuntime() {
     currentChatId,
     currentRunId,
     currentRoute,
+    currentSkillId,
+    currentSkillName,
     currentMessages,
     conversations,
     runTimeline,

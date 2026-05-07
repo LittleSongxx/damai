@@ -26,6 +26,10 @@ public class AssistantSkillContext {
 
     private AssistantUserProfileContext userProfileContext;
 
+    private AssistantSkillDescriptor skillDescriptor;
+
+    private AssistantSkillResourceBundle skillResources;
+
     public static AssistantSkillContext of(AiRun run, AiUserContext user, AssistantRunCreateRequest request) {
         return of(run, user, request, AssistantMemoryContext.empty());
     }
@@ -35,6 +39,10 @@ public class AssistantSkillContext {
     }
 
     public static AssistantSkillContext of(AiRun run, AiUserContext user, AssistantRunCreateRequest request, AssistantMemoryContext memoryContext, AssistantUserProfileContext userProfileContext) {
+        return of(run, user, request, memoryContext, userProfileContext, null, AssistantSkillResourceBundle.empty());
+    }
+
+    public static AssistantSkillContext of(AiRun run, AiUserContext user, AssistantRunCreateRequest request, AssistantMemoryContext memoryContext, AssistantUserProfileContext userProfileContext, AssistantSkillDescriptor skillDescriptor, AssistantSkillResourceBundle skillResources) {
         return AssistantSkillContext.builder()
                 .run(run)
                 .user(user)
@@ -42,6 +50,8 @@ public class AssistantSkillContext {
                 .clientContext(request.getClientContext())
                 .memoryContext(memoryContext)
                 .userProfileContext(userProfileContext)
+                .skillDescriptor(skillDescriptor)
+                .skillResources(skillResources == null ? AssistantSkillResourceBundle.empty() : skillResources)
                 .build();
     }
 }

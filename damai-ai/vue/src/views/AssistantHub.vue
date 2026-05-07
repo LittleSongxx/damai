@@ -5,6 +5,7 @@
         <p class="eyebrow">Unified Runtime</p>
         <h2>统一助手</h2>
         <button class="ghost-button" @click="startNewChat">新建会话</button>
+        <RouterLink v-if="capabilities?.admin" class="ghost-button ghost-button--link" to="/assistant/skills">Skill 管理</RouterLink>
       </div>
 
       <div class="history-pane__hint">
@@ -94,12 +95,33 @@
               <strong>{{ currentRoute || '未选择' }}</strong>
             </div>
             <div class="meta-stat">
+              <span>Skill</span>
+              <strong>{{ currentSkillName || currentSkillId || '-' }}</strong>
+            </div>
+            <div class="meta-stat">
               <span>Run</span>
               <strong>{{ currentRunId || '-' }}</strong>
             </div>
             <div class="meta-stat">
               <span>Status</span>
               <strong>{{ runStatus || '-' }}</strong>
+            </div>
+          </section>
+
+          <section v-if="capabilities?.skills?.length" class="meta-card">
+            <p class="eyebrow">Skills</p>
+            <h3>直选 Skill</h3>
+            <div class="skill-list">
+              <button
+                v-for="skill in capabilities?.skills"
+                :key="skill.skillId"
+                class="skill-chip"
+                :class="{ active: currentSkillId === skill.skillId }"
+                @click="sendWithSkill(skill)"
+              >
+                <span>{{ skill.name }}</span>
+                <strong>{{ skill.riskLevel }}</strong>
+              </button>
             </div>
           </section>
 
@@ -176,6 +198,7 @@
 
 <script setup>
 import { computed, onMounted } from 'vue'
+import { RouterLink } from 'vue-router'
 import Chat from '../components/Chat.vue'
 import { ensureAuthenticated } from '../api/api'
 import { useAssistantRuntime } from '../composables/useAssistantRuntime'
@@ -197,6 +220,8 @@ const {
   currentChatId,
   currentRunId,
   currentRoute,
+  currentSkillId,
+  currentSkillName,
   currentMessages,
   conversations,
   orderedTimeline,
@@ -208,6 +233,7 @@ const {
   refusalReason,
   runStatus,
   hasMessages,
+  capabilities,
   canUseOps,
   adjustTextareaHeight,
   loadCapabilities,
@@ -220,6 +246,11 @@ const {
 } = useAssistantRuntime()
 
 const starterPrompts = computed(() => allStarterPrompts.filter(prompt => canUseOps.value || !/gateway|cpu|错误日志|trace|监控|运维/i.test(prompt)))
+
+const sendWithSkill = (skill) => {
+  const message = userInput.value.trim() || skill.description || skill.name
+  sendMessage(message, { skillHint: skill.skillId })
+}
 
 onMounted(async () => {
   if (!ensureAuthenticated()) {
@@ -468,6 +499,13 @@ onMounted(async () => {
   color: var(--text-color);
 }
 
+.ghost-button--link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
 .meta-pane {
   width: 350px;
   display: flex;
@@ -530,6 +568,43 @@ onMounted(async () => {
 .clarification-list {
   display: grid;
   gap: 8px;
+}
+
+.skill-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.skill-chip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--surface-color);
+  color: var(--text-color);
+  cursor: pointer;
+  text-align: left;
+}
+
+.skill-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-chip strong {
+  font-size: 0.72rem;
+  color: var(--text-soft);
+}
+
+.skill-chip.active,
+.skill-chip:hover {
+  border-color: var(--primary-color);
 }
 
 .error-card {

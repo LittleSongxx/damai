@@ -1,6 +1,7 @@
 package org.javaup.ai.security;
 
 import lombok.RequiredArgsConstructor;
+import org.javaup.ai.assistant.AssistantSkillDescriptor;
 import org.javaup.ai.assistant.AssistantRouteType;
 import org.javaup.ai.config.AiSecurityProperties;
 import org.javaup.ai.context.AiRequestContextHolder;
@@ -39,6 +40,16 @@ public class AiPermissionService {
             return true;
         }
         return routeType != AssistantRouteType.OPS || isAdmin(user);
+    }
+
+    public boolean canAccessSkill(AiUserContext user, AssistantSkillDescriptor descriptor) {
+        if (descriptor == null) {
+            return false;
+        }
+        if (!canAccessRoute(user, descriptor.getRouteType())) {
+            return false;
+        }
+        return !Boolean.TRUE.equals(descriptor.getRequiresAdmin()) || isAdmin(user);
     }
 
     public void requireOpsAccess() {

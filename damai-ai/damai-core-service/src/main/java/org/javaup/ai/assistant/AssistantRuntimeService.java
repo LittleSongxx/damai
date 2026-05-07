@@ -33,6 +33,7 @@ public class AssistantRuntimeService {
     private final AssistantExecutorRegistry executorRegistry;
     private final org.javaup.ai.assistant.skill.business.PurchaseActionService purchaseActionService;
     private final AiPermissionService aiPermissionService;
+    private final AssistantSkillManagementService skillManagementService;
 
     public AssistantRunCreatedVo createRun(AssistantRunCreateRequest request) {
         return runService.createRun(request);
@@ -44,6 +45,7 @@ public class AssistantRuntimeService {
                 .userId(user.getUserId())
                 .admin(admin)
                 .allowedRoutes(admin ? List.of("business", "knowledge", "general", "ops") : List.of("business", "knowledge", "general"))
+                .skills(skillManagementService.listCapabilities(user))
                 .build();
     }
 
@@ -102,13 +104,7 @@ public class AssistantRuntimeService {
                 "runId", run.getRunId(),
                 "chatId", run.getConversationId()
         ));
-        runService.appendEvent(run.getRunId(), AssistantEventTypes.ROUTE_SELECTED, Map.of(
-                "runId", run.getRunId(),
-                "routeType", decision.getRouteType().getCode(),
-                "reason", decision.getReason(),
-                "fallback", decision.getFromFallback(),
-                "executionMode", plan.getExecutionMode().name()
-        ));
+        runService.appendEvent(run.getRunId(), AssistantEventTypes.ROUTE_SELECTED, routeSelectedPayload(run, plan));
 
         try {
             AssistantExecutor executor = executorRegistry.getRequired(plan.getExecutionMode());
@@ -139,6 +135,26 @@ public class AssistantRuntimeService {
                 .event(eventType)
                 .data(JSON.toJSONString(payload))
                 .build();
+    }
+
+    private Map<String, Object> routeSelectedPayload(AiRun run, AssistantExecutionPlan plan) {
+        AssistantRouteDecision decision = plan.getRouteDecision();
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("runId", run.getRunId());
+        payload.put("routeType", decision.getRouteType().getCode());
+        payload.put("reason", decision.getReason());
+        payload.put("fallback", decision.getFromFallback());
+        payload.put("executionMode", plan.getExecutionMode().name());
+        AssistantSkillDecision skillDecision = plan.getSkillDecision();
+        if (skillDecision != null) {
+            payload.put("skillId", skillDecision.getSkillId());
+            payload.put("skillReason", skillDecision.getReason());
+            payload.put("skillConfidence", skillDecision.getConfidence());
+            if (skillDecision.getDescriptor() != null) {
+                payload.put("skillName", skillDecision.getDescriptor().getName());
+            }
+        }
+        return payload;
     }
 
 }

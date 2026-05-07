@@ -12,6 +12,11 @@ const routes = [
     component: () => import('../views/AssistantHub.vue')
   },
   {
+    path: '/assistant/skills',
+    name: 'SkillManagement',
+    component: () => import('../views/SkillManagement.vue')
+  },
+  {
     path: '/legacy',
     name: 'Home',
     component: () => import('../views/Home.vue')

@@ -212,6 +212,9 @@ CREATE TABLE IF NOT EXISTS `d_ai_run` (
   `conversation_id` varchar(128) NOT NULL COMMENT '统一会话ID',
   `user_id` bigint NOT NULL COMMENT '用户ID',
   `route_type` varchar(32) DEFAULT NULL COMMENT '路由类型',
+  `skill_id` varchar(128) DEFAULT NULL COMMENT 'Skill ID',
+  `skill_version` varchar(32) DEFAULT NULL COMMENT 'Skill版本',
+  `skill_snapshot_json` longtext DEFAULT NULL COMMENT 'Skill执行快照',
   `run_status` varchar(32) NOT NULL COMMENT 'Run状态',
   `current_stage` varchar(64) DEFAULT NULL COMMENT '当前阶段',
   `client_context_json` longtext DEFAULT NULL COMMENT '客户端上下文',
@@ -271,6 +274,7 @@ CREATE TABLE IF NOT EXISTS `d_ai_tool_call` (
   `run_id` varchar(128) NOT NULL COMMENT 'Run ID',
   `conversation_id` varchar(128) DEFAULT NULL COMMENT '会话ID',
   `user_id` bigint DEFAULT NULL COMMENT '用户ID',
+  `skill_id` varchar(128) DEFAULT NULL COMMENT 'Skill ID',
   `tool_name` varchar(128) NOT NULL COMMENT '工具名称',
   `tool_type` varchar(64) DEFAULT NULL COMMENT '工具类型',
   `input_json` longtext DEFAULT NULL COMMENT '入参',
@@ -310,3 +314,102 @@ CREATE TABLE IF NOT EXISTS `d_ai_retrieval` (
   UNIQUE KEY `uk_ai_retrieval_id` (`retrieval_id`),
   KEY `idx_ai_retrieval_run` (`run_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='统一助手检索表';
+
+CREATE TABLE IF NOT EXISTS `d_ai_skill` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `skill_id` varchar(128) NOT NULL COMMENT 'Skill ID',
+  `name` varchar(128) NOT NULL COMMENT 'Skill名称',
+  `description` varchar(1024) DEFAULT NULL COMMENT 'Skill描述',
+  `version` varchar(32) DEFAULT '1.0.0' COMMENT '版本',
+  `goal` varchar(1024) DEFAULT NULL COMMENT 'Skill目标',
+  `instructions` longtext DEFAULT NULL COMMENT 'Skill执行指令',
+  `route_type` varchar(32) NOT NULL COMMENT '所属路由',
+  `category` varchar(64) DEFAULT NULL COMMENT '分类',
+  `trigger_keywords_json` longtext DEFAULT NULL COMMENT '触发关键词JSON',
+  `tool_allowlist_json` longtext DEFAULT NULL COMMENT '工具白名单JSON',
+  `examples_json` longtext DEFAULT NULL COMMENT '示例JSON',
+  `eval_cases_json` longtext DEFAULT NULL COMMENT '评测用例JSON',
+  `input_schema_json` longtext DEFAULT NULL COMMENT '输入Schema',
+  `output_schema_json` longtext DEFAULT NULL COMMENT '输出Schema',
+  `risk_level` varchar(32) DEFAULT 'LOW' COMMENT '风险等级',
+  `requires_admin` tinyint(1) DEFAULT 0 COMMENT '是否要求管理员',
+  `requires_approval` tinyint(1) DEFAULT 0 COMMENT '是否要求审批',
+  `enabled` tinyint(1) DEFAULT 1 COMMENT '是否启用',
+  `executor_type` varchar(64) DEFAULT 'java' COMMENT '执行器类型',
+  `frontend_selectable` tinyint(1) DEFAULT 1 COMMENT '是否允许前端直选',
+  `model_selectable` tinyint(1) DEFAULT 1 COMMENT '是否允许模型自动选择',
+  `primary_skill` tinyint(1) DEFAULT 0 COMMENT '是否为路由默认Skill',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ai_skill_id` (`skill_id`),
+  KEY `idx_ai_skill_route` (`route_type`,`enabled`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI Skill定义表';
+
+CREATE TABLE IF NOT EXISTS `d_ai_skill_resource` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `resource_id` varchar(128) NOT NULL COMMENT '资源ID',
+  `skill_id` varchar(128) NOT NULL COMMENT 'Skill ID',
+  `resource_type` varchar(64) NOT NULL COMMENT '资源类型',
+  `title` varchar(256) DEFAULT NULL COMMENT '资源标题',
+  `content` longtext DEFAULT NULL COMMENT '资源内容',
+  `metadata_json` longtext DEFAULT NULL COMMENT '资源元数据',
+  `enabled` tinyint(1) DEFAULT 1 COMMENT '是否启用',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ai_skill_resource_id` (`resource_id`),
+  KEY `idx_ai_skill_resource_skill` (`skill_id`,`resource_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI Skill资源表';
+
+CREATE TABLE IF NOT EXISTS `d_ai_skill_eval_case` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `case_id` varchar(128) NOT NULL COMMENT '评测用例ID',
+  `skill_id` varchar(128) NOT NULL COMMENT 'Skill ID',
+  `question` longtext NOT NULL COMMENT '评测问题',
+  `expected_output_json` longtext DEFAULT NULL COMMENT '期望输出',
+  `tags_json` longtext DEFAULT NULL COMMENT '标签JSON',
+  `enabled` tinyint(1) DEFAULT 1 COMMENT '是否启用',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ai_skill_eval_case_id` (`case_id`),
+  KEY `idx_ai_skill_eval_case_skill` (`skill_id`,`enabled`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI Skill评测用例表';
+
+CREATE TABLE IF NOT EXISTS `d_ai_skill_eval_run` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `eval_run_id` varchar(128) NOT NULL COMMENT '评测运行ID',
+  `skill_id` varchar(128) NOT NULL COMMENT 'Skill ID',
+  `user_id` bigint DEFAULT NULL COMMENT '发起用户ID',
+  `run_status` varchar(32) NOT NULL COMMENT '评测状态',
+  `case_count` int DEFAULT 0 COMMENT '用例数',
+  `passed_count` int DEFAULT 0 COMMENT '通过数',
+  `result_json` longtext DEFAULT NULL COMMENT '结果JSON',
+  `error_message` text DEFAULT NULL COMMENT '错误信息',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ai_skill_eval_run_id` (`eval_run_id`),
+  KEY `idx_ai_skill_eval_run_skill` (`skill_id`,`create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI Skill评测运行表';
+
+CREATE TABLE IF NOT EXISTS `d_ai_skill_change_log` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `change_id` varchar(128) NOT NULL COMMENT '变更ID',
+  `skill_id` varchar(128) NOT NULL COMMENT 'Skill ID',
+  `operator_user_id` bigint DEFAULT NULL COMMENT '操作用户ID',
+  `change_type` varchar(32) NOT NULL COMMENT '变更类型',
+  `before_json` longtext DEFAULT NULL COMMENT '变更前',
+  `after_json` longtext DEFAULT NULL COMMENT '变更后',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ai_skill_change_id` (`change_id`),
+  KEY `idx_ai_skill_change_skill` (`skill_id`,`create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI Skill变更审计表';

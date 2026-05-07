@@ -92,6 +92,17 @@ public class AssistantRunService {
     }
 
     @Transactional(rollbackFor = Exception.class)
+    public void bindSkill(AiRun run, AssistantSkillDescriptor descriptor) {
+        if (run == null || descriptor == null) {
+            return;
+        }
+        run.setSkillId(descriptor.getSkillId());
+        run.setSkillVersion(descriptor.getVersion());
+        run.setSkillSnapshotJson(JSON.toJSONString(descriptor));
+        runMapper.updateById(run);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
     public AiRunEvent appendEvent(String runId, String eventType, Object payload) {
         AiRun run = getRun(runId);
         if (run == null) {
@@ -210,6 +221,7 @@ public class AssistantRunService {
         toolCall.setRunId(runId);
         toolCall.setConversationId(run == null ? null : run.getConversationId());
         toolCall.setUserId(run == null ? null : run.getUserId());
+        toolCall.setSkillId(run == null ? null : run.getSkillId());
         toolCall.setToolName(toolName);
         toolCall.setToolType(toolType);
         toolCall.setInputJson(input == null ? null : JSON.toJSONString(input));

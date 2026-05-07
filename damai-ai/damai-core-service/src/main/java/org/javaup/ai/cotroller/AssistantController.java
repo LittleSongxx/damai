@@ -1,19 +1,25 @@
 package org.javaup.ai.cotroller;
 
 import lombok.RequiredArgsConstructor;
+import org.javaup.ai.assistant.AssistantSkillManagementService;
 import org.javaup.ai.assistant.AssistantRuntimeService;
 import org.javaup.ai.common.ApiResponse;
 import org.javaup.ai.context.AiRequestContextHolder;
 import org.javaup.ai.dto.AssistantRunCreateRequest;
+import org.javaup.ai.dto.AssistantSkillUpdateRequest;
 import org.javaup.ai.vo.AssistantActionResultVo;
 import org.javaup.ai.vo.AssistantConversationVo;
 import org.javaup.ai.vo.AssistantRunCreatedVo;
 import org.javaup.ai.vo.AssistantRunDetailVo;
+import org.javaup.ai.vo.AssistantSkillDetailVo;
+import org.javaup.ai.vo.AssistantSkillEvalRunVo;
+import org.javaup.ai.vo.AssistantSkillVo;
 import org.javaup.ai.vo.AiUserCapabilitiesVo;
 import org.javaup.ai.vo.ChatHistoryMessageVO;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -29,10 +35,32 @@ import java.util.List;
 public class AssistantController {
 
     private final AssistantRuntimeService assistantRuntimeService;
+    private final AssistantSkillManagementService skillManagementService;
 
     @GetMapping("/capabilities")
     public ApiResponse<AiUserCapabilitiesVo> getCapabilities() {
         return ApiResponse.ok(assistantRuntimeService.getCurrentUserCapabilities(AiRequestContextHolder.getRequiredUser()));
+    }
+
+    @GetMapping("/skills")
+    public ApiResponse<List<AssistantSkillVo>> listSkills() {
+        return ApiResponse.ok(skillManagementService.listSkills(AiRequestContextHolder.getRequiredUser()));
+    }
+
+    @GetMapping("/skills/{skillId}")
+    public ApiResponse<AssistantSkillDetailVo> getSkill(@PathVariable("skillId") String skillId) {
+        return ApiResponse.ok(skillManagementService.getSkill(skillId, AiRequestContextHolder.getRequiredUser()));
+    }
+
+    @PatchMapping("/admin/skills/{skillId}")
+    public ApiResponse<AssistantSkillVo> updateSkill(@PathVariable("skillId") String skillId,
+                                                     @RequestBody AssistantSkillUpdateRequest request) {
+        return ApiResponse.ok(skillManagementService.updateSkill(skillId, request, AiRequestContextHolder.getRequiredUser()));
+    }
+
+    @PostMapping("/admin/skills/{skillId}/eval-runs")
+    public ApiResponse<AssistantSkillEvalRunVo> createSkillEvalRun(@PathVariable("skillId") String skillId) {
+        return ApiResponse.ok(skillManagementService.createEvalRun(skillId, AiRequestContextHolder.getRequiredUser()));
     }
 
     @PostMapping("/runs")

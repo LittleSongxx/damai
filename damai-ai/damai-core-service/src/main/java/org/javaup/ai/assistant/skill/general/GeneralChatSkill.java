@@ -3,6 +3,8 @@ package org.javaup.ai.assistant.skill.general;
 import org.javaup.ai.assistant.AssistantRouteType;
 import org.javaup.ai.assistant.AssistantSkill;
 import org.javaup.ai.assistant.AssistantSkillContext;
+import org.javaup.ai.assistant.AssistantSkillDescriptor;
+import org.javaup.ai.assistant.AssistantSkillRiskLevel;
 import org.javaup.ai.assistant.AssistantSkillResult;
 import org.javaup.ai.assistant.memory.AssistantMemoryKeyService;
 import org.javaup.ai.assistant.tool.AssistantToolInvoker;
@@ -12,6 +14,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
+import java.util.List;
 import java.util.stream.Collectors;
 
 @Component
@@ -38,6 +41,38 @@ public class GeneralChatSkill implements AssistantSkill {
     @Override
     public AssistantRouteType routeType() {
         return AssistantRouteType.GENERAL;
+    }
+
+    @Override
+    public AssistantSkillDescriptor descriptor() {
+        return AssistantSkillDescriptor.builder()
+                .skillId("general.web.search")
+                .name("通用联网搜索")
+                .description("处理开放域问答、人物介绍、近期动态和需要联网补充的信息查询。")
+                .version("1.0.0")
+                .goal("处理开放域娱乐资讯、艺人资料和需要联网证据的问题。")
+                .instructions("需要实时或事实核验时优先搜索；搜索失败时说明限制。")
+                .routeType(AssistantRouteType.GENERAL)
+                .category("general")
+                .triggerKeywords(List.of("介绍", "是谁", "新闻", "近期", "搜索", "代表作", "资料"))
+                .toolAllowlist(List.of("web-search"))
+                .examples(List.of("介绍一下某位歌手", "最近有哪些娱乐新闻"))
+                .evalCases(List.of("联网证据不足时不得编造来源"))
+                .inputSchemaJson("""
+                        {"type":"object","required":["message"],"properties":{"message":{"type":"string"}}}
+                        """)
+                .outputSchemaJson("""
+                        {"type":"object","required":["message"],"properties":{"message":{"type":"string"}}}
+                        """)
+                .riskLevel(AssistantSkillRiskLevel.LOW)
+                .requiresAdmin(false)
+                .requiresApproval(false)
+                .enabled(true)
+                .executorType("java")
+                .frontendSelectable(true)
+                .modelSelectable(true)
+                .primarySkill(true)
+                .build();
     }
 
     @Override

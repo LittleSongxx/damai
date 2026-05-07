@@ -22,6 +22,8 @@ public class AssistantExecutionPlan {
 
     private AssistantRouteDecision routeDecision;
 
+    private AssistantSkillDecision skillDecision;
+
     private String responseMessage;
 
     private List<String> options;

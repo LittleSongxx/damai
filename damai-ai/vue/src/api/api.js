@@ -306,6 +306,34 @@ export const assistantAPI = {
       method: 'POST'
     })
     return response.json()
+  },
+
+  async listSkills() {
+    const response = await fetchWithTimeout(buildUrl('/assistant/skills'))
+    return response.json()
+  },
+
+  async getSkill(skillId) {
+    const response = await fetchWithTimeout(buildUrl(`/assistant/skills/${skillId}`))
+    return response.json()
+  },
+
+  async updateSkill(skillId, payload) {
+    const response = await fetchWithTimeout(buildUrl(`/assistant/admin/skills/${skillId}`), {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    })
+    return response.json()
+  },
+
+  async createSkillEvalRun(skillId) {
+    const response = await fetchWithTimeout(buildUrl(`/assistant/admin/skills/${skillId}/eval-runs`), {
+      method: 'POST'
+    })
+    return response.json()
   }
 }
 

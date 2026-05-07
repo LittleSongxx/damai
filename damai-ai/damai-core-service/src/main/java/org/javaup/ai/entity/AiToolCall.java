@@ -23,6 +23,8 @@ public class AiToolCall extends BaseTableData {
 
     private Long userId;
 
+    private String skillId;
+
     private String toolName;
 
     private String toolType;

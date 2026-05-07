@@ -14,4 +14,6 @@ public class AiUserCapabilitiesVo {
     private Boolean admin;
 
     private List<String> allowedRoutes;
+
+    private List<AssistantSkillVo> skills;
 }

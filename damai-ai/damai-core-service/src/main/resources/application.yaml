@@ -138,6 +138,18 @@ damai:
     qdrant:
       url: ${DAMAI_AI_QDRANT_URL:http://127.0.0.1:16333}
       collection: ${DAMAI_AI_QDRANT_COLLECTION:damai_ai_faq}
+    nl2sql:
+      enabled: ${DAMAI_AI_NL2SQL_ENABLED:true}
+      schema-collection: ${DAMAI_AI_NL2SQL_SCHEMA_COLLECTION:damai_ai_nl2sql_schema}
+      max-rows: ${DAMAI_AI_NL2SQL_MAX_ROWS:100}
+      schema-top-k: ${DAMAI_AI_NL2SQL_SCHEMA_TOP_K:5}
+      query-timeout-ms: ${DAMAI_AI_NL2SQL_QUERY_TIMEOUT_MS:5000}
+      repair-attempts: ${DAMAI_AI_NL2SQL_REPAIR_ATTEMPTS:1}
+      datasource:
+        driver-class-name: ${DAMAI_AI_NL2SQL_DRIVER:com.mysql.cj.jdbc.Driver}
+        url: ${DAMAI_AI_NL2SQL_URL:}
+        username: ${DAMAI_AI_NL2SQL_USERNAME:}
+        password: ${DAMAI_AI_NL2SQL_PASSWORD:}
     faq:
       alias: ${DAMAI_AI_FAQ_ALIAS:damai-ai-faq-current}
     rag:

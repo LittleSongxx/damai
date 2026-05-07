@@ -23,6 +23,14 @@ public class AssistantRouteService {
 
     public AssistantRouteDecision route(String message) {
         String normalized = message == null ? "" : message.toLowerCase();
+        if (looksLikeOpsDataQuestion(normalized)) {
+            return AssistantRouteDecision.builder()
+                    .routeType(AssistantRouteType.OPS)
+                    .reason("keyword:ops-nl2sql")
+                    .fromFallback(false)
+                    .clarificationRequired(false)
+                    .build();
+        }
         if (containsAny(normalized, "购票", "买票", "门票", "票档", "演唱会", "节目", "推荐", "下单")) {
             return AssistantRouteDecision.builder()
                     .routeType(AssistantRouteType.BUSINESS)
@@ -39,7 +47,7 @@ public class AssistantRouteService {
                     .clarificationRequired(false)
                     .build();
         }
-        if (containsAny(normalized, "trace", "日志", "jvm", "cpu", "线程", "gc", "监控", "服务健康")) {
+        if (containsAny(normalized, "trace", "日志", "jvm", "cpu", "线程", "gc", "监控", "服务健康", "消息异常", "接口调用量", "接口错误")) {
             return AssistantRouteDecision.builder()
                     .routeType(AssistantRouteType.OPS)
                     .reason("keyword:ops")
@@ -130,5 +138,18 @@ public class AssistantRouteService {
             }
         }
         return false;
+    }
+
+    private boolean looksLikeOpsDataQuestion(String normalized) {
+        if (!containsAny(normalized,
+                "nl2sql", "text2sql", "sql", "查库", "数据库", "问数", "取数", "报表",
+                "统计", "趋势", "同比", "环比", "排名", "top",
+                "订单量", "支付成功率", "退款率", "退款金额", "gmv", "成交额",
+                "失败订单", "失败原因", "票档库存", "库存告急", "余票",
+                "接口调用量", "接口错误", "错误率", "p95", "消息异常", "消费失败",
+                "token", "成本")) {
+            return false;
+        }
+        return !containsAny(normalized, "购票", "买票", "下单", "推荐");
     }
 }

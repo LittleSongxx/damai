@@ -25,6 +25,12 @@ public class AiRun extends BaseTableData {
 
     private String routeType;
 
+    private String skillId;
+
+    private String skillVersion;
+
+    private String skillSnapshotJson;
+
     private String runStatus;
 
     private String currentStage;

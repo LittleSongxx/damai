@@ -6,8 +6,11 @@ import org.javaup.ai.assistant.AssistantRouteType;
 import org.javaup.ai.assistant.AssistantRunService;
 import org.javaup.ai.assistant.AssistantSkill;
 import org.javaup.ai.assistant.AssistantSkillContext;
+import org.javaup.ai.assistant.AssistantSkillDescriptor;
+import org.javaup.ai.assistant.AssistantSkillRiskLevel;
 import org.javaup.ai.assistant.AssistantSkillResult;
 import org.javaup.ai.assistant.memory.AssistantMemoryKeyService;
+import org.javaup.ai.assistant.tool.AssistantToolInvoker;
 import org.javaup.ai.entity.AiRetrieval;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -28,24 +31,59 @@ public class KnowledgeSkill implements AssistantSkill {
     private final KnowledgePromptAssemblyService promptAssemblyService;
     private final AssistantRunService assistantRunService;
     private final AssistantMemoryKeyService memoryKeyService;
+    private final AssistantToolInvoker toolInvoker;
 
     public KnowledgeSkill(@Qualifier("unifiedKnowledgeChatClient") ChatClient unifiedKnowledgeChatClient,
                           KnowledgeRetrievalPlanner retrievalPlanner,
                           KnowledgeRetrievalOrchestrator retrievalOrchestrator,
                           KnowledgePromptAssemblyService promptAssemblyService,
                           AssistantRunService assistantRunService,
-                          AssistantMemoryKeyService memoryKeyService) {
+                          AssistantMemoryKeyService memoryKeyService,
+                          AssistantToolInvoker toolInvoker) {
         this.unifiedKnowledgeChatClient = unifiedKnowledgeChatClient;
         this.retrievalPlanner = retrievalPlanner;
         this.retrievalOrchestrator = retrievalOrchestrator;
         this.promptAssemblyService = promptAssemblyService;
         this.assistantRunService = assistantRunService;
         this.memoryKeyService = memoryKeyService;
+        this.toolInvoker = toolInvoker;
     }
 
     @Override
     public AssistantRouteType routeType() {
         return AssistantRouteType.KNOWLEDGE;
+    }
+
+    @Override
+    public AssistantSkillDescriptor descriptor() {
+        return AssistantSkillDescriptor.builder()
+                .skillId("knowledge.policy.qa")
+                .name("规则知识问答")
+                .description("基于闭域规则库回答退票、入场、实名、购票限制等平台规则问题。")
+                .version("1.0.0")
+                .goal("基于闭域 FAQ 和结构化规则提示回答大麦规则问题。")
+                .instructions("必须先检索证据；证据不足时拒绝给确定答案。")
+                .routeType(AssistantRouteType.KNOWLEDGE)
+                .category("knowledge")
+                .triggerKeywords(List.of("规则", "退票", "入场", "实名", "改签", "发票", "售后", "能退吗"))
+                .toolAllowlist(List.of("knowledge.retrieve"))
+                .examples(List.of("退票多久到账", "儿童票入场需要什么证件"))
+                .evalCases(List.of("低置信度检索必须拒绝确定结论"))
+                .inputSchemaJson("""
+                        {"type":"object","required":["message"],"properties":{"message":{"type":"string"}}}
+                        """)
+                .outputSchemaJson("""
+                        {"type":"object","required":["message"],"properties":{"message":{"type":"string"}}}
+                        """)
+                .riskLevel(AssistantSkillRiskLevel.LOW)
+                .requiresAdmin(false)
+                .requiresApproval(false)
+                .enabled(true)
+                .executorType("java")
+                .frontendSelectable(true)
+                .modelSelectable(true)
+                .primarySkill(true)
+                .build();
     }
 
     @Override
@@ -60,7 +98,8 @@ public class KnowledgeSkill implements AssistantSkill {
                 "subQuestions", plan.subQuestions()
         ));
 
-        KnowledgeRetrievalContext retrievalContext = retrievalOrchestrator.retrieve(plan);
+        KnowledgeRetrievalContext retrievalContext = toolInvoker.invoke(context.getRun().getRunId(), "knowledge.retrieve", "rag", plan, () ->
+                retrievalOrchestrator.retrieve(plan));
         KnowledgeRetrievalAssessment assessment = retrievalContext.assessment();
 
         AiRetrieval retrieval = new AiRetrieval();

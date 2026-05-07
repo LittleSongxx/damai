@@ -1,13 +1,21 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import Home from '../views/Home.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     {
       path: '/',
-      name: 'Home',
-      component: () => import('../views/Home.vue')
+      redirect: '/assistant'
+    },
+    {
+      path: '/assistant',
+      name: 'AssistantHub',
+      component: () => import('../views/AssistantHub.vue')
+    },
+    {
+      path: '/assistant/skills',
+      name: 'SkillManagement',
+      component: () => import('../views/SkillManagement.vue')
     },
     {
       path: '/damai-ai',

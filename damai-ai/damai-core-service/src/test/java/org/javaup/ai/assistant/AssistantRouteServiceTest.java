@@ -51,6 +51,23 @@ class AssistantRouteServiceTest {
     }
 
     @Test
+    void shouldRouteOpsDataQuestionToOpsBeforeBusinessKeywords() {
+        AssistantRouteDecision decision = assistantRouteService.route("统计一下今天票档库存告急的节目");
+
+        assertEquals(AssistantRouteType.OPS, decision.getRouteType());
+        assertEquals("keyword:ops-nl2sql", decision.getReason());
+        assertFalse(decision.getFromFallback());
+    }
+
+    @Test
+    void shouldKeepExplicitPurchaseRequestInBusinessRoute() {
+        AssistantRouteDecision decision = assistantRouteService.route("帮我买票并统计一下可选票档");
+
+        assertEquals(AssistantRouteType.BUSINESS, decision.getRouteType());
+        assertFalse(decision.getFromFallback());
+    }
+
+    @Test
     void shouldPreferGeneralWhenOpenDomainQuestionAsked() {
         AssistantRouteDecision decision = assistantRouteService.route("介绍一下这个歌手的代表作");
 
