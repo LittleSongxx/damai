@@ -54,4 +54,47 @@ public class AssistantSkillContext {
                 .skillResources(skillResources == null ? AssistantSkillResourceBundle.empty() : skillResources)
                 .build();
     }
+
+    public String buildUserPrompt() {
+        return """
+                用户偏好画像：
+                %s
+
+                历史摘要：
+                %s
+
+                当前问题：
+                %s
+                """.formatted(formatUserProfile(), formatMemorySummary(), message);
+    }
+
+    public String buildUserPrompt(String extraSectionName, String extraSectionContent) {
+        return """
+                用户偏好画像：
+                %s
+
+                历史摘要：
+                %s
+
+                %s：
+                %s
+
+                当前问题：
+                %s
+                """.formatted(formatUserProfile(), formatMemorySummary(), extraSectionName, extraSectionContent, message);
+    }
+
+    public String formatMemorySummary() {
+        if (memoryContext == null || !memoryContext.present()) {
+            return "无";
+        }
+        return memoryContext.summary();
+    }
+
+    public String formatUserProfile() {
+        if (userProfileContext == null || !userProfileContext.present()) {
+            return "无";
+        }
+        return userProfileContext.summary() + "；偏好标签：" + userProfileContext.preferenceTagsJson();
+    }
 }

@@ -41,3 +41,5 @@ build/
 .qoder/
 .codex/
 AGENTS.md
+.env
+vue/.env

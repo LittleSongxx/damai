@@ -41,6 +41,7 @@ import java.util.stream.Collectors;
  * @description: ai执行 dto
  * @author: 阿星不是程序员
  **/
+@Deprecated(since = "2.0.0", forRemoval = true)
 @Component
 public class AiProgram {
 

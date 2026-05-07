@@ -7,6 +7,7 @@ import org.javaup.ai.mapper.AiConversationMemorySummaryMapper;
 import org.javaup.ai.mapper.AiRunMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.ai.openai.OpenAiChatModel;
 
 import java.util.ArrayList;
 import java.util.Date;
@@ -31,7 +32,8 @@ class AssistantMemoryServiceTest {
         AiConversationMemorySummary summary = new AiConversationMemorySummary();
         summary.setSummary("用户关注退票规则");
         when(summaryMapper.selectOne(any(Wrapper.class))).thenReturn(summary);
-        AssistantMemoryService service = new AssistantMemoryService(summaryMapper, runMapper);
+        OpenAiChatModel chatModel = mock(OpenAiChatModel.class);
+        AssistantMemoryService service = new AssistantMemoryService(summaryMapper, runMapper, chatModel);
 
         AssistantMemoryContext context = service.load("chat_1", 1L);
 
@@ -44,7 +46,8 @@ class AssistantMemoryServiceTest {
         AiConversationMemorySummaryMapper summaryMapper = mock(AiConversationMemorySummaryMapper.class);
         AiRunMapper runMapper = mock(AiRunMapper.class);
         when(summaryMapper.selectOne(any(Wrapper.class))).thenReturn(null);
-        AssistantMemoryService service = new AssistantMemoryService(summaryMapper, runMapper);
+        OpenAiChatModel chatModel = mock(OpenAiChatModel.class);
+        AssistantMemoryService service = new AssistantMemoryService(summaryMapper, runMapper, chatModel);
 
         AssistantMemoryContext context = service.load("chat_1", 1L);
 
@@ -57,7 +60,8 @@ class AssistantMemoryServiceTest {
         AiRunMapper runMapper = mock(AiRunMapper.class);
         when(summaryMapper.selectOne(any(Wrapper.class))).thenReturn(null);
         when(runMapper.selectList(any(Wrapper.class))).thenReturn(runs(6));
-        AssistantMemoryService service = new AssistantMemoryService(summaryMapper, runMapper);
+        OpenAiChatModel chatModel = mock(OpenAiChatModel.class);
+        AssistantMemoryService service = new AssistantMemoryService(summaryMapper, runMapper, chatModel);
 
         service.refreshAfterRun(run("run_6", "chat_1", 1L, 6));
 
@@ -77,7 +81,8 @@ class AssistantMemoryServiceTest {
         AiRunMapper runMapper = mock(AiRunMapper.class);
         when(summaryMapper.selectOne(any(Wrapper.class))).thenReturn(null);
         when(runMapper.selectList(any(Wrapper.class))).thenReturn(runs(5));
-        AssistantMemoryService service = new AssistantMemoryService(summaryMapper, runMapper);
+        OpenAiChatModel chatModel = mock(OpenAiChatModel.class);
+        AssistantMemoryService service = new AssistantMemoryService(summaryMapper, runMapper, chatModel);
 
         service.refreshAfterRun(run("run_5", "chat_1", 1L, 5));
 

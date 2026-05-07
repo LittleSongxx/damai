@@ -23,6 +23,7 @@ import reactor.core.scheduler.Scheduler;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * @program: 大麦-ai智能服务项目。 添加 阿星不是程序员 微信，添加时备注 ai 来获取项目的完整资料 
@@ -86,21 +87,25 @@ public class ChatTypeTitleAdvisor implements BaseChatMemoryAdvisor {
             return chatClientResponse;
         }
         
-        try {
-            String content = chatClient.prompt()
-                    .user("请为以下对话总结一句简洁标题\n" + JSON.toJSONString(list) + "\n 只返回标题文本内容，不要其他样式")
-                    .call()
-                    .content();
+        final Long historyId = chatTypeHistory.getId();
+        final String messageJson = JSON.toJSONString(list);
+        CompletableFuture.runAsync(() -> {
+            try {
+                String content = chatClient.prompt()
+                        .user("请为以下对话总结一句简洁标题\n" + messageJson + "\n 只返回标题文本内容，不要其他样式")
+                        .call()
+                        .content();
 
-            log.info("生成的标题: {}", content);
+                log.info("生成的标题: {}", content);
 
-            ChatTypeHistory updatedChatTypeHistory = new ChatTypeHistory();
-            updatedChatTypeHistory.setId(chatTypeHistory.getId());
-            updatedChatTypeHistory.setTitle(content);
-            chatTypeHistoryService.updateById(updatedChatTypeHistory);
-        } catch (Exception exception) {
-            log.warn("生成会话标题失败，跳过标题写入，不影响主对话返回。conversationId={}", conversationId, exception);
-        }
+                ChatTypeHistory updatedChatTypeHistory = new ChatTypeHistory();
+                updatedChatTypeHistory.setId(historyId);
+                updatedChatTypeHistory.setTitle(content);
+                chatTypeHistoryService.updateById(updatedChatTypeHistory);
+            } catch (Exception exception) {
+                log.warn("异步生成会话标题失败，跳过标题写入。conversationId={}", conversationId, exception);
+            }
+        });
         return chatClientResponse;
     }
     

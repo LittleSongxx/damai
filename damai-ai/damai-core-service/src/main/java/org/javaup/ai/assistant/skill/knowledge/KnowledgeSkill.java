@@ -146,7 +146,7 @@ public class KnowledgeSkill implements AssistantSkill {
         if ("LOW".equals(assessment.confidenceLevel())) {
             answer = "我已经检索了当前的闭域规则库，但这轮命中的证据不够扎实，暂时不能直接给出确定结论。请补充具体场景、节目或关键词，我再基于规则继续检索。";
         } else {
-            KnowledgePromptAssemblyResult prompt = promptAssemblyService.assemble(withContext(context), retrievalContext);
+            KnowledgePromptAssemblyResult prompt = promptAssemblyService.assemble(context.buildUserPrompt(), retrievalContext);
             answer = unifiedKnowledgeChatClient.prompt()
                     .user(prompt.groundedPrompt())
                     .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, memoryKeyService.userConversationKey(context.getRun().getUserId(), context.getRun().getConversationId())))
@@ -194,30 +194,4 @@ public class KnowledgeSkill implements AssistantSkill {
         return count;
     }
 
-    private String withContext(AssistantSkillContext context) {
-        return """
-                用户偏好画像：
-                %s
-
-                历史摘要：
-                %s
-
-                当前问题：
-                %s
-                """.formatted(userProfile(context), memorySummary(context), context.getMessage());
-    }
-
-    private String memorySummary(AssistantSkillContext context) {
-        if (context.getMemoryContext() == null || !context.getMemoryContext().present()) {
-            return "无";
-        }
-        return context.getMemoryContext().summary();
-    }
-
-    private String userProfile(AssistantSkillContext context) {
-        if (context.getUserProfileContext() == null || !context.getUserProfileContext().present()) {
-            return "无";
-        }
-        return context.getUserProfileContext().summary() + "；偏好标签：" + context.getUserProfileContext().preferenceTagsJson();
-    }
 }

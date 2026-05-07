@@ -178,9 +178,14 @@ public class HybridSearchService {
                 Map.entry("订单", "订单 订单状态 支付超时 取消订单"),
                 Map.entry("安全", "安全 防诈骗 验证码 私下交易 非官方渠道")
         );
+        int expansionCount = 0;
         for (Map.Entry<String, String> entry : synonymMap.entrySet()) {
+            if (expansionCount >= 2) {
+                break;
+            }
             if (query.contains(entry.getKey())) {
                 rewritten = rewritten + " " + entry.getValue();
+                expansionCount++;
             }
         }
         return rewritten;

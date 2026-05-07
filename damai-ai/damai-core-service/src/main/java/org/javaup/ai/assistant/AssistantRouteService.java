@@ -7,10 +7,36 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class AssistantRouteService {
+
+    private static final Map<String, Double> BUSINESS_KEYWORDS = Map.ofEntries(
+            Map.entry("购票", 2.5), Map.entry("买票", 2.5), Map.entry("门票", 1.5), Map.entry("票档", 2.0),
+            Map.entry("演唱会", 1.0), Map.entry("节目", 0.5), Map.entry("推荐", 0.8), Map.entry("下单", 2.5)
+    );
+
+    private static final Map<String, Double> KNOWLEDGE_KEYWORDS = Map.ofEntries(
+            Map.entry("规则", 2.0), Map.entry("退票", 2.0), Map.entry("退款", 2.0),
+            Map.entry("实名", 1.5), Map.entry("转赠", 1.5), Map.entry("儿童票", 1.5), Map.entry("入场", 1.0),
+            Map.entry("配送", 1.0), Map.entry("电子票", 1.0), Map.entry("安检", 1.0)
+    );
+
+    private static final Map<String, Double> OPS_KEYWORDS = Map.ofEntries(
+            Map.entry("trace", 2.0), Map.entry("日志", 2.0), Map.entry("jvm", 2.0), Map.entry("cpu", 2.0),
+            Map.entry("线程", 1.5), Map.entry("gc", 1.5), Map.entry("监控", 1.5),
+            Map.entry("服务健康", 2.0), Map.entry("消息异常", 1.5), Map.entry("接口调用量", 2.0), Map.entry("接口错误", 2.0)
+    );
+
+    private static final Map<String, Double> GENERAL_KEYWORDS = Map.ofEntries(
+            Map.entry("谁是", 1.5), Map.entry("是谁", 1.5), Map.entry("介绍", 1.0), Map.entry("代表作", 1.5),
+            Map.entry("百科", 1.5), Map.entry("新闻", 1.5), Map.entry("资料", 1.0), Map.entry("最近", 0.5),
+            Map.entry("歌手", 1.0), Map.entry("艺人", 1.0), Map.entry("专辑", 1.0), Map.entry("巡演", 1.0),
+            Map.entry("新歌", 1.0), Map.entry("乐队", 1.0)
+    );
 
     private final StructuredOutputService structuredOutputService;
     private final ChatClient chatClient;
@@ -31,34 +57,17 @@ public class AssistantRouteService {
                     .clarificationRequired(false)
                     .build();
         }
-        if (containsAny(normalized, "购票", "买票", "门票", "票档", "演唱会", "节目", "推荐", "下单")) {
+        Map.Entry<AssistantRouteType, Double> best = Map.ofEntries(
+                Map.entry(AssistantRouteType.BUSINESS, scoreKeywords(normalized, BUSINESS_KEYWORDS)),
+                Map.entry(AssistantRouteType.KNOWLEDGE, scoreKeywords(normalized, KNOWLEDGE_KEYWORDS)),
+                Map.entry(AssistantRouteType.OPS, scoreKeywords(normalized, OPS_KEYWORDS)),
+                Map.entry(AssistantRouteType.GENERAL, scoreKeywords(normalized, GENERAL_KEYWORDS))
+        ).entrySet().stream().max(Comparator.comparingDouble(Map.Entry::getValue)).orElse(null);
+
+        if (best != null && best.getValue() > 0) {
             return AssistantRouteDecision.builder()
-                    .routeType(AssistantRouteType.BUSINESS)
-                    .reason("keyword:business")
-                    .fromFallback(false)
-                    .clarificationRequired(false)
-                    .build();
-        }
-        if (containsAny(normalized, "规则", "退票", "退款", "实名", "转赠", "儿童票", "入场")) {
-            return AssistantRouteDecision.builder()
-                    .routeType(AssistantRouteType.KNOWLEDGE)
-                    .reason("keyword:knowledge")
-                    .fromFallback(false)
-                    .clarificationRequired(false)
-                    .build();
-        }
-        if (containsAny(normalized, "trace", "日志", "jvm", "cpu", "线程", "gc", "监控", "服务健康", "消息异常", "接口调用量", "接口错误")) {
-            return AssistantRouteDecision.builder()
-                    .routeType(AssistantRouteType.OPS)
-                    .reason("keyword:ops")
-                    .fromFallback(false)
-                    .clarificationRequired(false)
-                    .build();
-        }
-        if (containsAny(normalized, "谁是", "是谁", "介绍", "代表作", "百科", "新闻", "资料", "最近", "歌手", "艺人", "专辑", "巡演", "新歌", "乐队")) {
-            return AssistantRouteDecision.builder()
-                    .routeType(AssistantRouteType.GENERAL)
-                    .reason("keyword:general")
+                    .routeType(best.getKey())
+                    .reason("keyword:" + best.getKey().getCode())
                     .fromFallback(false)
                     .clarificationRequired(false)
                     .build();
@@ -129,6 +138,16 @@ public class AssistantRouteService {
                 .clarificationPrompt(prompt)
                 .clarificationOptions(List.of("查询或购买演出票", "咨询购票/退票/入场规则", "联网搜索歌手、演出和娱乐资讯", "排查日志、Trace 或服务指标"))
                 .build();
+    }
+
+    private double scoreKeywords(String text, Map<String, Double> keywords) {
+        double score = 0;
+        for (Map.Entry<String, Double> entry : keywords.entrySet()) {
+            if (text.contains(entry.getKey())) {
+                score += entry.getValue();
+            }
+        }
+        return score;
     }
 
     private boolean containsAny(String value, String... keywords) {

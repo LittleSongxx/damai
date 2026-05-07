@@ -139,7 +139,7 @@ public class OpsSkill implements AssistantSkill {
                 2. 再指出最可能的问题位置。
                 3. 如果证据类型是 nl2sql，必须说明 SQL 是否已执行；如果未配置只读数据源，只展示已生成并校验的 SQL 和配置缺口。
                 4. 最后给出下一步排查建议。
-                """.formatted(memorySummary(context), prompt, JSON.toJSONString(evidence));
+                """.formatted(context.formatMemorySummary(), prompt, JSON.toJSONString(evidence));
         String answer = unifiedOpsChatClient.prompt()
                 .user(answerPrompt)
                 .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, memoryKeyService.userConversationKey(context.getRun().getUserId(), context.getRun().getConversationId())))
@@ -153,13 +153,6 @@ public class OpsSkill implements AssistantSkill {
 
     private Map<String, Object> invokeGateway(String runId, String toolName, Object input, SupplierWithException<Map<String, Object>> supplier) {
         return toolInvoker.invoke(runId, toolName, "ops", input, supplier::get);
-    }
-
-    private String memorySummary(AssistantSkillContext context) {
-        if (context.getMemoryContext() == null || !context.getMemoryContext().present()) {
-            return "无";
-        }
-        return context.getMemoryContext().summary();
     }
 
     private String extract(String prompt, Pattern pattern) {

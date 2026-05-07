@@ -39,18 +39,21 @@ public class BusinessSkill implements AssistantSkill {
     @Override
     public AssistantSkillDescriptor descriptor() {
         return AssistantSkillDescriptor.builder()
-                .skillId("business.legacy")
-                .name("业务助手默认 Skill")
-                .description("兼容旧版业务路由，承接节目推荐、票档查询和购票准备等业务问题。")
-                .version("1.0.0")
-                .goal("兼容旧版业务助手能力，处理尚未精确拆分的购票业务请求。")
+                .skillId("business.unified")
+                .name("购票业务助手")
+                .description("通过 LLM 自主选择工具完成节目搜索/推荐、详情查询、票档查询和购票预览。")
+                .version("2.0.0")
+                .goal("基于 ChatClient Tool Calling 处理购票业务全链路请求。")
                 .instructions("优先使用工具获取真实节目、票档和购票预览；不能编造业务数据。")
                 .routeType(AssistantRouteType.BUSINESS)
                 .category("business")
-                .triggerKeywords(List.of("演出", "节目", "票", "购票", "推荐", "城市", "价格"))
+                .triggerKeywords(List.of("演出", "节目", "票", "购票", "推荐", "城市", "价格",
+                        "找", "搜索", "演唱会", "脱口秀", "周末",
+                        "详情", "时间", "场馆", "地址", "艺人", "什么时候", "在哪",
+                        "票档", "库存", "余票", "多少钱", "座位", "票价"))
                 .toolAllowlist(List.of("recommendPrograms", "searchPrograms", "getProgramDetail", "preparePurchase"))
-                .examples(List.of("帮我推荐北京演唱会", "查询周杰伦演唱会票档", "帮我生成购票预览"))
-                .evalCases(List.of("业务兼容 Skill 不应绕过审批直接创建订单"))
+                .examples(List.of("帮我推荐北京演唱会", "周杰伦演唱会什么时候", "查询票档和价格", "帮我生成购票预览"))
+                .evalCases(List.of("业务 Skill 不应绕过审批直接创建订单"))
                 .inputSchemaJson("""
                         {"type":"object","required":["message"],"properties":{"message":{"type":"string"}}}
                         """)
@@ -71,7 +74,7 @@ public class BusinessSkill implements AssistantSkill {
     @Override
     public AssistantSkillResult execute(AssistantSkillContext context) {
         String content = unifiedBusinessChatClient.prompt()
-                .user(withContext(context))
+                .user(context.buildUserPrompt())
                 .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, memoryKeyService.userConversationKey(context.getRun().getUserId(), context.getRun().getConversationId())))
                 .call()
                 .content();
@@ -83,30 +86,4 @@ public class BusinessSkill implements AssistantSkill {
                 .build();
     }
 
-    private String withContext(AssistantSkillContext context) {
-        return """
-                用户偏好画像：
-                %s
-
-                历史摘要：
-                %s
-
-                当前问题：
-                %s
-                """.formatted(userProfile(context), memorySummary(context), context.getMessage());
-    }
-
-    private String memorySummary(AssistantSkillContext context) {
-        if (context.getMemoryContext() == null || !context.getMemoryContext().present()) {
-            return "无";
-        }
-        return context.getMemoryContext().summary();
-    }
-
-    private String userProfile(AssistantSkillContext context) {
-        if (context.getUserProfileContext() == null || !context.getUserProfileContext().present()) {
-            return "无";
-        }
-        return context.getUserProfileContext().summary() + "；偏好标签：" + context.getUserProfileContext().preferenceTagsJson();
-    }
 }

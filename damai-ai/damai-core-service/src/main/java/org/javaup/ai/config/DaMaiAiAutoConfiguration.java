@@ -3,7 +3,7 @@ package org.javaup.ai.config;
 
 import org.javaup.ai.advisor.ChatTypeHistoryAdvisor;
 import org.javaup.ai.advisor.ChatTypeTitleAdvisor;
-import org.javaup.ai.ai.function.AiProgram;
+import org.javaup.ai.assistant.skill.business.BusinessToolService;
 import org.javaup.ai.constants.DaMaiConstant;
 import org.javaup.ai.enums.ChatType;
 import org.javaup.ai.advisor.AiObservabilityAdvisor;
@@ -56,7 +56,7 @@ public class DaMaiAiAutoConfiguration {
     }
 
     @Bean
-    public ChatClient assistantChatClient(OpenAiChatModel model, ChatMemory chatMemory, AiProgram aiProgram,
+    public ChatClient assistantChatClient(OpenAiChatModel model, ChatMemory chatMemory, BusinessToolService businessToolService,
                                           ChatTypeHistoryService chatTypeHistoryService,
                                           @Qualifier("titleChatClient")ChatClient titleChatClient,
                                           AiObservabilityService observabilityService) {
@@ -77,7 +77,7 @@ public class DaMaiAiAutoConfiguration {
                                 .requestType(ChatType.ASSISTANT.getMsg())
                                 .build()
                 )
-                .defaultTools(aiProgram)
+                .defaultTools(businessToolService)
                 .build();
     }
     

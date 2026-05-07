@@ -3,18 +3,24 @@ package org.javaup.ai.assistant.profile;
 import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.entity.AiRun;
 import org.javaup.ai.entity.AiUserProfile;
 import org.javaup.ai.mapper.AiRunMapper;
 import org.javaup.ai.mapper.AiUserProfileMapper;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AssistantUserProfileService {
@@ -24,6 +30,7 @@ public class AssistantUserProfileService {
 
     private final AiUserProfileMapper profileMapper;
     private final AiRunMapper runMapper;
+    private final OpenAiChatModel chatModel;
 
     public AssistantUserProfileContext load(Long userId) {
         AiUserProfile profile = latestProfile(userId);
@@ -75,15 +82,50 @@ public class AssistantUserProfileService {
     private void fillProfile(AiUserProfile profile, AiRun completedRun, List<AiRun> runs) {
         Set<String> tags = new LinkedHashSet<>();
         StringBuilder summary = new StringBuilder();
+        StringBuilder allMessages = new StringBuilder();
         for (AiRun run : runs) {
             collectTags(run.getUserMessage(), tags);
             if (StringUtils.hasText(run.getUserMessage())) {
                 appendSummary(summary, run.getUserMessage());
+                allMessages.append(run.getUserMessage()).append("\n");
             }
+        }
+        Set<String> llmTags = extractTagsWithLLM(allMessages.toString());
+        if (!llmTags.isEmpty()) {
+            tags.addAll(llmTags);
         }
         profile.setLatestCoveredRunId(completedRun.getRunId());
         profile.setPreferenceTagsJson(JSON.toJSONString(tags));
         profile.setProfileSummary(summary.isEmpty() ? "暂无稳定偏好" : summary.toString());
+    }
+
+    private Set<String> extractTagsWithLLM(String messages) {
+        if (!StringUtils.hasText(messages) || messages.length() < 10) {
+            return Set.of();
+        }
+        try {
+            String result = ChatClient.builder(chatModel).build().prompt()
+                    .user("""
+                            根据以下用户消息，提取用户偏好标签。标签格式为 "类型:值"，例如 "城市:北京"、"偏好:演唱会"、"关注:退票规则"、"票档:VIP"、"时间:周末"、"艺人:周杰伦"。
+                            最多返回10个标签，用英文逗号分隔，不要其他格式。
+
+                            用户消息：
+                            %s
+                            """.formatted(messages.length() > 2000 ? messages.substring(0, 2000) : messages))
+                    .call()
+                    .content();
+            if (StringUtils.hasText(result)) {
+                return Arrays.stream(result.split(","))
+                        .map(String::trim)
+                        .filter(t -> t.contains(":") || t.contains("："))
+                        .map(t -> t.replace("：", ":"))
+                        .limit(10)
+                        .collect(Collectors.toCollection(LinkedHashSet::new));
+            }
+        } catch (Exception ex) {
+            log.warn("LLM 偏好标签提取失败，仅使用关键词标签", ex);
+        }
+        return Set.of();
     }
 
     private void appendSummary(StringBuilder summary, String message) {

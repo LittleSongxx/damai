@@ -80,7 +80,7 @@ public class GeneralChatSkill implements AssistantSkill {
         GeneralSearchPlan searchPlan = searchPlanner.plan(context.getMessage());
         WebSearchResult searchResult = executeSearch(context, searchPlan);
         String answer = unifiedGeneralChatClient.prompt()
-                .user(withContext(context, searchResult))
+                .user(context.buildUserPrompt("联网搜索结果", searchEvidence(searchResult)))
                 .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, memoryKeyService.userConversationKey(context.getRun().getUserId(), context.getRun().getConversationId())))
                 .call()
                 .content();
@@ -100,22 +100,6 @@ public class GeneralChatSkill implements AssistantSkill {
         ), () -> webSearchService.search(searchPlan.query()));
     }
 
-    private String withContext(AssistantSkillContext context, WebSearchResult searchResult) {
-        return """
-                用户偏好画像：
-                %s
-
-                历史摘要：
-                %s
-
-                联网搜索结果：
-                %s
-
-                当前问题：
-                %s
-                """.formatted(userProfile(context), memorySummary(context), searchEvidence(searchResult), context.getMessage());
-    }
-
     private String searchEvidence(WebSearchResult result) {
         if (result == null) {
             return "未执行联网搜索";
@@ -128,20 +112,6 @@ public class GeneralChatSkill implements AssistantSkill {
                 .map(document -> "标题：" + safe(document.getTitle()) + "\n链接：" + safe(document.getUrl()) + "\n摘要：" + safe(document.getSnippet()))
                 .collect(Collectors.joining("\n---\n"));
         return "供应商：" + result.getProvider() + "\n" + documents;
-    }
-
-    private String memorySummary(AssistantSkillContext context) {
-        if (context.getMemoryContext() == null || !context.getMemoryContext().present()) {
-            return "无";
-        }
-        return context.getMemoryContext().summary();
-    }
-
-    private String userProfile(AssistantSkillContext context) {
-        if (context.getUserProfileContext() == null || !context.getUserProfileContext().present()) {
-            return "无";
-        }
-        return context.getUserProfileContext().summary() + "；偏好标签：" + context.getUserProfileContext().preferenceTagsJson();
     }
 
     private String safe(String value) {

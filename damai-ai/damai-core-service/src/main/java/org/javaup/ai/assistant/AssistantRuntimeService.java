@@ -55,7 +55,19 @@ public class AssistantRuntimeService {
             return Flux.just(toEvent(AssistantEventTypes.RUN_FAILED, Map.of("runId", runId, "message", "run not found")));
         }
         if (AssistantRunStatus.CREATED.name().equals(run.getRunStatus())) {
-            processRun(run);
+            return Flux.create(sink -> {
+                try {
+                    processRun(run);
+                    List<AiRunEvent> events = runService.listEvents(runId);
+                    for (AiRunEvent event : events) {
+                        sink.next(toEvent(event));
+                    }
+                    sink.complete();
+                } catch (Exception ex) {
+                    sink.next(toEvent(AssistantEventTypes.RUN_FAILED, Map.of("runId", runId, "message", ex.getMessage())));
+                    sink.complete();
+                }
+            });
         }
         List<AiRunEvent> events = runService.listEvents(runId);
         return Flux.fromIterable(events).map(this::toEvent);

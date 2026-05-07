@@ -109,21 +109,40 @@ public class RerankService {
     }
     
     private Set<String> extractKeywords(String text) {
-        return Arrays.stream(text.split("[\\s,，。？?！!]+"))
-            .filter(s -> s.length() > 1)
-            .collect(Collectors.toSet());
+        Set<String> keywords = new LinkedHashSet<>();
+        for (String word : text.split("[\\s,，。？?！!]+")) {
+            if (word.length() > 1) {
+                keywords.add(word);
+            }
+        }
+        String chinese = text.replaceAll("[^\\u4e00-\\u9fff]", "");
+        for (int i = 0; i < chinese.length() - 1; i++) {
+            keywords.add(chinese.substring(i, i + 2));
+        }
+        return keywords;
     }
     
     private double computeRelevanceScore(Set<String> queryKeywords, String content) {
         if (queryKeywords.isEmpty()) {
             return 0.0;
         }
-        
-        long matchCount = queryKeywords.stream()
-            .filter(content::contains)
-            .count();
-        
-        return (double) matchCount / queryKeywords.size();
+        double score = 0.0;
+        for (String keyword : queryKeywords) {
+            if (content.contains(keyword)) {
+                score += 1.0 + Math.log1p(countOccurrences(content, keyword));
+            }
+        }
+        return score / queryKeywords.size();
+    }
+
+    private int countOccurrences(String text, String keyword) {
+        int count = 0;
+        int idx = 0;
+        while ((idx = text.indexOf(keyword, idx)) != -1) {
+            count++;
+            idx += keyword.length();
+        }
+        return count;
     }
     
     @Data
