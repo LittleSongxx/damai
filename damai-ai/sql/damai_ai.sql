@@ -413,3 +413,109 @@ CREATE TABLE IF NOT EXISTS `d_ai_skill_change_log` (
   UNIQUE KEY `uk_ai_skill_change_id` (`change_id`),
   KEY `idx_ai_skill_change_skill` (`skill_id`,`create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI Skill变更审计表';
+
+-- ============================================================
+-- 全量优化新增表
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS `d_ai_feedback` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `feedback_id` varchar(128) NOT NULL COMMENT '反馈ID',
+  `run_id` varchar(128) NOT NULL COMMENT '关联Run ID',
+  `conversation_id` varchar(191) DEFAULT NULL COMMENT '会话ID',
+  `user_id` bigint NOT NULL COMMENT '用户ID',
+  `rating` varchar(16) NOT NULL COMMENT '评分: up/down',
+  `comment` text DEFAULT NULL COMMENT '文字反馈',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ai_feedback_id` (`feedback_id`),
+  KEY `idx_ai_feedback_run` (`run_id`),
+  KEY `idx_ai_feedback_user` (`user_id`,`create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI用户反馈表';
+
+CREATE TABLE IF NOT EXISTS `d_ai_prompt_version` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `prompt_key` varchar(128) NOT NULL COMMENT 'Prompt标识',
+  `version` int NOT NULL DEFAULT 1 COMMENT '版本号',
+  `template` longtext NOT NULL COMMENT 'Prompt模板内容',
+  `description` varchar(512) DEFAULT NULL COMMENT '描述',
+  `active` tinyint(1) DEFAULT '1' COMMENT '是否活跃',
+  `created_by` bigint DEFAULT NULL COMMENT '创建者',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ai_prompt_key_version` (`prompt_key`,`version`),
+  KEY `idx_ai_prompt_active` (`prompt_key`,`active`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI Prompt版本管理表';
+
+CREATE TABLE IF NOT EXISTS `d_ai_rag_eval_case` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `case_id` varchar(128) NOT NULL COMMENT '用例ID',
+  `question` text NOT NULL COMMENT '问题',
+  `expected_answer` text DEFAULT NULL COMMENT '期望答案',
+  `expected_chunks` text DEFAULT NULL COMMENT '期望命中的chunkId列表(JSON)',
+  `category` varchar(64) DEFAULT NULL COMMENT '分类',
+  `difficulty` varchar(16) DEFAULT NULL COMMENT '难度: easy/medium/hard',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ai_rag_eval_case_id` (`case_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='RAG评估用例表';
+
+CREATE TABLE IF NOT EXISTS `d_ai_rag_eval_run` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `eval_run_id` varchar(128) NOT NULL COMMENT '评估运行ID',
+  `total_cases` int DEFAULT 0 COMMENT '总用例数',
+  `completed_cases` int DEFAULT 0 COMMENT '完成数',
+  `avg_recall` double DEFAULT NULL COMMENT '平均Recall@5',
+  `avg_mrr` double DEFAULT NULL COMMENT '平均MRR',
+  `avg_ndcg` double DEFAULT NULL COMMENT '平均NDCG@5',
+  `avg_faithfulness` double DEFAULT NULL COMMENT '平均Faithfulness',
+  `run_status` varchar(32) DEFAULT 'RUNNING' COMMENT '状态',
+  `error_message` text DEFAULT NULL COMMENT '错误信息',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ai_rag_eval_run_id` (`eval_run_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='RAG评估运行表';
+
+CREATE TABLE IF NOT EXISTS `d_ai_rag_eval_result` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `eval_run_id` varchar(128) NOT NULL COMMENT '评估运行ID',
+  `case_id` varchar(128) NOT NULL COMMENT '用例ID',
+  `question` text DEFAULT NULL COMMENT '问题',
+  `retrieved_chunks` text DEFAULT NULL COMMENT '检索到的chunkId列表(JSON)',
+  `generated_answer` text DEFAULT NULL COMMENT '生成的答案',
+  `recall_at_5` double DEFAULT NULL COMMENT 'Recall@5',
+  `mrr` double DEFAULT NULL COMMENT 'MRR',
+  `ndcg_at_5` double DEFAULT NULL COMMENT 'NDCG@5',
+  `faithfulness_score` double DEFAULT NULL COMMENT 'Faithfulness得分',
+  `latency_ms` bigint DEFAULT NULL COMMENT '延迟ms',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  KEY `idx_ai_rag_eval_result_run` (`eval_run_id`),
+  KEY `idx_ai_rag_eval_result_case` (`case_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='RAG评估结果表';
+
+CREATE TABLE IF NOT EXISTS `d_ai_episodic_memory` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `user_id` bigint NOT NULL COMMENT '用户ID',
+  `event_type` varchar(64) NOT NULL COMMENT '事件类型',
+  `entity_json` text DEFAULT NULL COMMENT '实体JSON',
+  `summary` text DEFAULT NULL COMMENT '摘要',
+  `weight` double DEFAULT 1.0 COMMENT '权重(衰减)',
+  `run_id` varchar(128) DEFAULT NULL COMMENT '关联Run ID',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  KEY `idx_ai_episodic_user` (`user_id`,`create_time`),
+  KEY `idx_ai_episodic_type` (`event_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI情景记忆表';

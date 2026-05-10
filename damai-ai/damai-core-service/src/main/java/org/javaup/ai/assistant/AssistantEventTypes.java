@@ -14,6 +14,8 @@ public final class AssistantEventTypes {
     public static final String ACTION_REQUIRED = "action.required";
     public static final String MESSAGE_DELTA = "message.delta";
     public static final String MESSAGE_COMPLETED = "message.completed";
+    public static final String AGENT_STEP = "agent.step";
+    public static final String FEEDBACK_RECEIVED = "feedback.received";
     public static final String RUN_COMPLETED = "run.completed";
     public static final String RUN_FAILED = "run.failed";
 

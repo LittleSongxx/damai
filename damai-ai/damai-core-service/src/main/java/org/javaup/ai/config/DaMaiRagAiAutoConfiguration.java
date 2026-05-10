@@ -88,7 +88,7 @@ public class DaMaiRagAiAutoConfiguration {
                         // AI增强: Observability可观测性
                         AiObservabilityAdvisor.builder(observabilityService)
                                 .order(OBSERVABILITY_ADVISOR_ORDER)
-                                .modelName("qwen-max-latest")
+                                .modelName("qwen3.6-plus")
                                 .requestType(ChatType.MARKDOWN.getMsg())
                                 .build()
                 )
@@ -124,7 +124,7 @@ public class DaMaiRagAiAutoConfiguration {
                         // AI增强: Observability可观测性
                         AiObservabilityAdvisor.builder(observabilityService)
                                 .order(OBSERVABILITY_ADVISOR_ORDER)
-                                .modelName("qwen-max-latest")
+                                .modelName("qwen3.6-plus")
                                 .requestType(ChatType.MARKDOWN.getMsg())
                                 .build()
                 )

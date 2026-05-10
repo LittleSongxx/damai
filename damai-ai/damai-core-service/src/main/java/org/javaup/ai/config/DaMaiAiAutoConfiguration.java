@@ -73,7 +73,7 @@ public class DaMaiAiAutoConfiguration {
                         // AI增强: Observability可观测性 - Token统计、延迟监控
                         AiObservabilityAdvisor.builder(observabilityService)
                                 .order(OBSERVABILITY_ADVISOR_ORDER)
-                                .modelName("qwen-compatible")
+                                .modelName("qwen3.6-plus")
                                 .requestType(ChatType.ASSISTANT.getMsg())
                                 .build()
                 )
@@ -100,7 +100,7 @@ public class DaMaiAiAutoConfiguration {
                         // AI增强: Observability可观测性 - Token统计、延迟监控
                         AiObservabilityAdvisor.builder(observabilityService)
                                 .order(OBSERVABILITY_ADVISOR_ORDER)
-                                .modelName("qwen-compatible")
+                                .modelName("qwen3.6-plus")
                                 .requestType(ChatType.ANALYSIS.getMsg())
                                 .build()
                 )

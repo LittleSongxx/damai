@@ -7,6 +7,12 @@ import cn.hutool.http.HttpRequest;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
+import io.qdrant.client.QdrantClient;
+import io.qdrant.client.grpc.Collections.Distance;
+import io.qdrant.client.grpc.Collections.VectorParams;
+import io.qdrant.client.grpc.Points.PointStruct;
+import io.qdrant.client.grpc.Points.ScoredPoint;
+import io.qdrant.client.grpc.Points.SearchPoints;
 import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.ai.rag.MarkdownLoader;
 import org.javaup.ai.context.AiRequestContextHolder;
@@ -39,9 +45,9 @@ public class HybridSearchService {
     private final RerankService rerankService;
     private final MarkdownLoader markdownLoader;
     private final AiWorkflowService workflowService;
-
-    @Value("${damai.ai.qdrant.url:http://127.0.0.1:16333}")
-    private String qdrantUrl;
+    private final AdvancedQueryService advancedQueryService;
+    private final ContextualCompressionService contextualCompressionService;
+    private final QdrantClient qdrantClient;
 
     @Value("${damai.ai.qdrant.collection:damai_ai_faq}")
     private String qdrantCollection;
@@ -66,11 +72,17 @@ public class HybridSearchService {
     public HybridSearchService(OpenAiEmbeddingModel embeddingModel,
                                RerankService rerankService,
                                MarkdownLoader markdownLoader,
-                               AiWorkflowService workflowService) {
+                               AiWorkflowService workflowService,
+                               AdvancedQueryService advancedQueryService,
+                               ContextualCompressionService contextualCompressionService,
+                               QdrantClient qdrantClient) {
         this.embeddingModel = embeddingModel;
         this.rerankService = rerankService;
         this.markdownLoader = markdownLoader;
         this.workflowService = workflowService;
+        this.advancedQueryService = advancedQueryService;
+        this.contextualCompressionService = contextualCompressionService;
+        this.qdrantClient = qdrantClient;
     }
 
     public void cacheDocuments(List<Document> documents) {
@@ -107,9 +119,10 @@ public class HybridSearchService {
 
     public RagSearchResultVo hybridSearchWithTrace(String query, int topK, boolean enableRerank) {
         ensureDocumentsLoaded();
-        String rewrittenQuery = rewriteQuery(query);
+        AdvancedQueryService.QueryRewriteResult rewriteResult = advancedQueryService.rewriteQuery(query);
+        String rewrittenQuery = rewriteResult.primaryQuery();
 
-        List<RagSourceVo> denseSources = denseSearch(rewrittenQuery, topK * 2);
+        List<RagSourceVo> denseSources = multiQueryDenseSearch(rewriteResult.allQueries(), topK * 2);
         List<RagSourceVo> sparseSources = sparseSearch(rewrittenQuery, topK * 2);
         List<RagSourceVo> fusedSources = mergeWithRrf(denseSources, sparseSources, topK * 2);
         List<RagSourceVo> finalSources = enableRerank ? rerankSources(rewrittenQuery, fusedSources, topK) : shrink(fusedSources, topK);
@@ -117,6 +130,7 @@ public class HybridSearchService {
                 .map(source -> documentCache.get(source.getChunkId()))
                 .filter(Objects::nonNull)
                 .toList();
+        documents = contextualCompressionService.compress(query, new ArrayList<>(documents));
 
         AiRetrievalTrace trace = new AiRetrievalTrace();
         trace.setRunId(AiRequestContextHolder.getOptional().map(ctx -> ctx.getRunId()).orElse(null));
@@ -151,44 +165,86 @@ public class HybridSearchService {
         return hybridSearch(query, topK, true);
     }
 
-    public String rewriteQuery(String query) {
-        if (!StringUtils.hasText(query)) {
-            return query;
+    public List<String> searchChunkIds(String query, int topK) {
+        List<Document> docs = hybridSearch(query, topK);
+        return docs.stream()
+                .map(d -> d.getMetadata().getOrDefault("chunkId", d.getId()).toString())
+                .toList();
+    }
+
+    /**
+     * HyDE 检索：生成假想文档，用假想文档的 embedding 做 dense search。
+     */
+    public List<RagSourceVo> hydeSearch(String query, int topK) {
+        try {
+            String hypothetical = advancedQueryService.generateHypotheticalDocument(query);
+            return denseSearch(hypothetical, topK);
+        } catch (Exception e) {
+            log.warn("HyDE 检索失败，回退到普通 dense search", e);
+            return denseSearch(query, topK);
         }
-        String rewritten = query;
-        Map<String, String> synonymMap = Map.ofEntries(
-                Map.entry("退票", "退票 退款 取消订单 条件退 手续费"),
-                Map.entry("退款", "退款 退票 退钱 原路退回 到账"),
-                Map.entry("买票", "买票 购票 订票 下单 抢票"),
-                Map.entry("购票", "购票 买票 订票 下单 限购"),
-                Map.entry("取消", "取消 作废 退订 延期"),
-                Map.entry("演出", "演出 节目 表演 演唱会"),
-                Map.entry("门票", "门票 票 入场券 票档"),
-                Map.entry("实名", "实名 实名认证 身份证 证件 观演人"),
-                Map.entry("观演人", "观演人 实名 入场人 证件"),
-                Map.entry("电子票", "电子票 二维码 身份证电子票 数字票 票夹 换票"),
-                Map.entry("数字票", "数字票 电子票 转赠 票夹"),
-                Map.entry("转赠", "转赠 转票 赠送 数字票"),
-                Map.entry("入场", "入场 安检 检票 场馆 证件核验"),
-                Map.entry("安检", "安检 禁带 违禁品 摄录设备 液体"),
-                Map.entry("儿童", "儿童票 儿童 亲子 身高 年龄 监护人"),
-                Map.entry("配送", "配送 快递 收货地址 物流"),
-                Map.entry("取票", "取票 自取 现场取票 换票"),
-                Map.entry("支付", "支付 付款 超时 重复支付 支付失败"),
-                Map.entry("订单", "订单 订单状态 支付超时 取消订单"),
-                Map.entry("安全", "安全 防诈骗 验证码 私下交易 非官方渠道")
-        );
-        int expansionCount = 0;
-        for (Map.Entry<String, String> entry : synonymMap.entrySet()) {
-            if (expansionCount >= 2) {
-                break;
-            }
-            if (query.contains(entry.getKey())) {
-                rewritten = rewritten + " " + entry.getValue();
-                expansionCount++;
+    }
+
+    /**
+     * 增量重索引：只更新 contentHash 发生变化的文档，跳过未变更的。
+     */
+    public Map<String, Object> incrementalReindex() {
+        List<Document> allDocuments = markdownLoader.loadMarkdowns();
+        List<Document> changedDocuments = new ArrayList<>();
+        List<Document> unchangedDocuments = new ArrayList<>();
+        for (Document doc : allDocuments) {
+            String chunkId = chunkId(doc);
+            Document cached = chunkId != null ? documentCache.get(chunkId) : null;
+            if (cached == null || !Objects.equals(
+                    cached.getMetadata().get("contentHash"),
+                    doc.getMetadata().get("contentHash"))) {
+                changedDocuments.add(doc);
+            } else {
+                unchangedDocuments.add(doc);
             }
         }
-        return rewritten;
+        cacheDocuments(allDocuments);
+        int qdrantUpserted = 0;
+        int esUpserted = 0;
+        if (!changedDocuments.isEmpty()) {
+            qdrantUpserted = bulkUpsertQdrant(changedDocuments);
+            esUpserted = bulkUpsertEs(changedDocuments);
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("totalDocuments", allDocuments.size());
+        result.put("changedDocuments", changedDocuments.size());
+        result.put("unchangedDocuments", unchangedDocuments.size());
+        result.put("qdrantUpserted", qdrantUpserted);
+        result.put("esUpserted", esUpserted);
+        result.put("indexVersion", markdownLoader.getCurrentIndexVersion());
+        log.info("增量索引完成: total={}, changed={}, unchanged={}",
+                allDocuments.size(), changedDocuments.size(), unchangedDocuments.size());
+        return result;
+    }
+
+    /**
+     * Multi-query dense search: 对多个查询变体分别做 dense search，合并去重。
+     */
+    private List<RagSourceVo> multiQueryDenseSearch(List<String> queries, int topK) {
+        if (queries.size() <= 1) {
+            return denseSearch(queries.isEmpty() ? "" : queries.get(0), topK);
+        }
+        Map<String, RagSourceVo> merged = new LinkedHashMap<>();
+        Map<String, Double> bestScores = new HashMap<>();
+        for (String q : queries) {
+            List<RagSourceVo> results = denseSearch(q, topK);
+            for (RagSourceVo source : results) {
+                merged.putIfAbsent(source.getChunkId(), source);
+                bestScores.merge(source.getChunkId(), source.getScore() == null ? 0 : source.getScore(), Math::max);
+            }
+        }
+        return merged.entrySet().stream()
+                .sorted((a, b) -> Double.compare(
+                        bestScores.getOrDefault(b.getKey(), 0D),
+                        bestScores.getOrDefault(a.getKey(), 0D)))
+                .limit(topK)
+                .map(Map.Entry::getValue)
+                .collect(Collectors.toList());
     }
 
     private void ensureDocumentsLoaded() {
@@ -200,20 +256,22 @@ public class HybridSearchService {
     private List<RagSourceVo> denseSearch(String query, int topK) {
         try {
             float[] vector = embeddingModel.embed(query);
-            JSONObject request = new JSONObject();
-            request.put("vector", vector);
-            request.put("limit", topK);
-            request.put("with_payload", true);
-            JSONObject response = executeQdrant("/collections/" + qdrantCollection + "/points/search", request.toJSONString(), "POST");
-            JSONArray result = response.getJSONArray("result");
-            if (result == null) {
-                return List.of();
+            List<Float> vectorList = new ArrayList<>(vector.length);
+            for (float v : vector) {
+                vectorList.add(v);
             }
+            List<ScoredPoint> scoredPoints = qdrantClient.searchAsync(
+                    SearchPoints.newBuilder()
+                            .setCollectionName(qdrantCollection)
+                            .addAllVector(vectorList)
+                            .setLimit(topK)
+                            .setWithPayload(io.qdrant.client.WithPayloadSelectorFactory.enable(true))
+                            .build()
+            ).get();
             List<RagSourceVo> sources = new ArrayList<>();
-            for (int i = 0; i < result.size(); i++) {
-                JSONObject item = result.getJSONObject(i);
-                JSONObject payload = item.getJSONObject("payload");
-                sources.add(buildSource(payload, item.getDouble("score")));
+            for (ScoredPoint point : scoredPoints) {
+                Map<String, io.qdrant.client.grpc.JsonWithInt.Value> payloadMap = point.getPayloadMap();
+                sources.add(buildSourceFromGrpc(payloadMap, (double) point.getScore()));
             }
             return sources;
         } catch (Exception ex) {
@@ -281,37 +339,94 @@ public class HybridSearchService {
     }
 
     private void recreateQdrantCollection() {
-        JSONObject body = new JSONObject();
-        JSONObject vectors = new JSONObject();
-        vectors.put("size", embeddingDimensions);
-        vectors.put("distance", "Cosine");
-        body.put("vectors", vectors);
-        executeQdrant("/collections/" + qdrantCollection, body.toJSONString(), "PUT");
+        try {
+            qdrantClient.deleteCollectionAsync(qdrantCollection).get();
+        } catch (Exception ignored) {
+        }
+        try {
+            qdrantClient.createCollectionAsync(qdrantCollection,
+                    VectorParams.newBuilder()
+                            .setSize(embeddingDimensions)
+                            .setDistance(Distance.Cosine)
+                            .build()
+            ).get();
+            log.info("Qdrant collection '{}' 创建成功 (dim={}, Cosine)", qdrantCollection, embeddingDimensions);
+        } catch (Exception ex) {
+            log.error("Qdrant collection 创建失败", ex);
+        }
     }
 
     private int bulkUpsertQdrant(List<Document> documents) {
-        JSONArray points = new JSONArray();
+        List<PointStruct> points = new ArrayList<>();
         for (Document document : documents) {
             String chunkId = chunkId(document);
             if (!StringUtils.hasText(chunkId) || !StringUtils.hasText(document.getText())) {
                 continue;
             }
-            JSONObject point = new JSONObject();
-            point.put("id", chunkId);
-            point.put("vector", embeddingModel.embed(document.getText()));
-            JSONObject payload = new JSONObject(new HashMap<>(document.getMetadata()));
-            payload.put("text", document.getText());
-            payload.put("title", payload.getOrDefault("title", payload.getOrDefault("name", "FAQ")));
-            point.put("payload", payload);
-            points.add(point);
+            float[] vector = embeddingModel.embed(document.getText());
+            List<Float> vectorList = new ArrayList<>(vector.length);
+            for (float v : vector) {
+                vectorList.add(v);
+            }
+            Map<String, io.qdrant.client.grpc.JsonWithInt.Value> payloadMap = new HashMap<>();
+            for (Map.Entry<String, Object> entry : document.getMetadata().entrySet()) {
+                if (entry.getValue() != null) {
+                    payloadMap.put(entry.getKey(), io.qdrant.client.ValueFactory.value(String.valueOf(entry.getValue())));
+                }
+            }
+            payloadMap.put("text", io.qdrant.client.ValueFactory.value(document.getText()));
+            String title = document.getMetadata().getOrDefault("title",
+                    document.getMetadata().getOrDefault("name", "FAQ")).toString();
+            payloadMap.put("title", io.qdrant.client.ValueFactory.value(title));
+
+            points.add(PointStruct.newBuilder()
+                    .setId(io.qdrant.client.PointIdFactory.id(chunkId.hashCode() & 0xFFFFFFFFL))
+                    .setVectors(io.qdrant.client.VectorsFactory.vectors(vectorList))
+                    .putAllPayload(payloadMap)
+                    .build());
         }
         if (points.isEmpty()) {
             return 0;
         }
-        JSONObject body = new JSONObject();
-        body.put("points", points);
-        executeQdrant("/collections/" + qdrantCollection + "/points?wait=true", body.toJSONString(), "PUT");
+        try {
+            qdrantClient.upsertAsync(qdrantCollection, points).get();
+        } catch (Exception ex) {
+            log.error("Qdrant bulk upsert 失败", ex);
+        }
         return points.size();
+    }
+
+    /**
+     * 增量 upsert ES：只更新变更的文档而不重建整个索引。
+     */
+    private int bulkUpsertEs(List<Document> documents) {
+        if (documents.isEmpty()) {
+            return 0;
+        }
+        StringBuilder bulk = new StringBuilder();
+        int count = 0;
+        for (Document document : documents) {
+            String cid = chunkId(document);
+            if (!StringUtils.hasText(cid) || !StringUtils.hasText(document.getText())) {
+                continue;
+            }
+            bulk.append(JSON.toJSONString(Map.of("index", Map.of("_index", faqAlias, "_id", cid)))).append('\n');
+            Map<String, Object> source = new HashMap<>(document.getMetadata());
+            source.put("chunkId", cid);
+            source.put("title", source.getOrDefault("title", source.getOrDefault("name", "FAQ")));
+            source.put("text", document.getText());
+            source.putIfAbsent("searchText", document.getText());
+            bulk.append(JSON.toJSONString(source)).append('\n');
+            count++;
+        }
+        if (count > 0) {
+            HttpRequest request = HttpRequest.post("http://" + esAddress + "/_bulk")
+                    .header("Authorization", esAuthorization())
+                    .header("Content-Type", "application/x-ndjson")
+                    .body(bulk.toString());
+            request.execute().body();
+        }
+        return count;
     }
 
     private EsReindexResult recreateEsIndex(List<Document> documents) {
@@ -323,6 +438,9 @@ public class HybridSearchService {
         properties.put("sourceFile", field("keyword"));
         properties.put("chunkType", field("keyword"));
         properties.put("label", field("keyword"));
+        properties.put("indexVersion", field("keyword"));
+        properties.put("docVersion", field("keyword"));
+        properties.put("contentHash", field("keyword"));
         properties.put("title", field("text"));
         properties.put("docTitle", field("text"));
         properties.put("section", field("text"));
@@ -371,22 +489,15 @@ public class HybridSearchService {
         return new JSONObject(Map.of("type", type));
     }
 
-    private JSONObject executeQdrant(String path, String body, String method) {
-        String url = qdrantUrl + path;
-        HttpRequest request = buildJsonRequest(url, method, body);
-        String response = request.execute().body();
-        return JSON.parseObject(response == null ? "{}" : response);
-    }
-
     private JSONObject executeEs(String path, String body, String method) {
         String url = "http://" + esAddress + path;
-        HttpRequest request = buildJsonRequest(url, method, body)
+        HttpRequest request = buildEsRequest(url, method, body)
                 .header("Authorization", esAuthorization());
         String response = request.execute().body();
         return JSON.parseObject(response == null ? "{}" : response);
     }
 
-    private HttpRequest buildJsonRequest(String url, String method, String body) {
+    private HttpRequest buildEsRequest(String url, String method, String body) {
         HttpRequest request = switch (method) {
             case "PUT" -> HttpRequest.put(url);
             case "POST" -> HttpRequest.post(url);
@@ -409,6 +520,26 @@ public class HybridSearchService {
                 .snippet(text == null ? "" : text.substring(0, Math.min(200, text.length())))
                 .score(score)
                 .build();
+    }
+
+    private RagSourceVo buildSourceFromGrpc(Map<String, io.qdrant.client.grpc.JsonWithInt.Value> payloadMap, Double score) {
+        String text = grpcString(payloadMap, "text");
+        return RagSourceVo.builder()
+                .chunkId(grpcString(payloadMap, "chunkId"))
+                .title(grpcString(payloadMap, "title"))
+                .source(grpcString(payloadMap, "source"))
+                .section(grpcString(payloadMap, "section"))
+                .snippet(text == null ? "" : text.substring(0, Math.min(200, text.length())))
+                .score(score)
+                .build();
+    }
+
+    private String grpcString(Map<String, io.qdrant.client.grpc.JsonWithInt.Value> map, String key) {
+        io.qdrant.client.grpc.JsonWithInt.Value value = map.get(key);
+        if (value == null || !value.hasStringValue()) {
+            return null;
+        }
+        return value.getStringValue();
     }
 
     private String chunkId(Document document) {

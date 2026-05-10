@@ -1,0 +1,24 @@
+package org.javaup.ai.entity;
+
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.Data;
+import org.javaup.ai.entity.base.BaseTableData;
+
+@Data
+@TableName("d_ai_rag_eval_run")
+public class AiRagEvalRun extends BaseTableData {
+
+    @TableId(type = IdType.AUTO)
+    private Long id;
+    private String evalRunId;
+    private Integer totalCases;
+    private Integer completedCases;
+    private Double avgRecall;
+    private Double avgMrr;
+    private Double avgNdcg;
+    private Double avgFaithfulness;
+    private String runStatus;
+    private String errorMessage;
+}

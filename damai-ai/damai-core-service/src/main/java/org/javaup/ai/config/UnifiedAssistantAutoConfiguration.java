@@ -35,7 +35,7 @@ public class UnifiedAssistantAutoConfiguration {
                         MessageChatMemoryAdvisor.builder(chatMemory).order(MESSAGE_CHAT_MEMORY_ADVISOR_ORDER).build(),
                         AiObservabilityAdvisor.builder(observabilityService)
                                 .order(OBSERVABILITY_ADVISOR_ORDER)
-                                .modelName("qwen-compatible")
+                                .modelName("qwen3.6-plus")
                                 .requestType("UnifiedBusiness")
                                 .build()
                 )
@@ -54,7 +54,7 @@ public class UnifiedAssistantAutoConfiguration {
                         MessageChatMemoryAdvisor.builder(chatMemory).order(MESSAGE_CHAT_MEMORY_ADVISOR_ORDER).build(),
                         AiObservabilityAdvisor.builder(observabilityService)
                                 .order(OBSERVABILITY_ADVISOR_ORDER)
-                                .modelName("qwen-compatible")
+                                .modelName("qwen3.6-plus")
                                 .requestType("UnifiedKnowledge")
                                 .build()
                 )
@@ -77,7 +77,7 @@ public class UnifiedAssistantAutoConfiguration {
                         MessageChatMemoryAdvisor.builder(chatMemory).order(MESSAGE_CHAT_MEMORY_ADVISOR_ORDER).build(),
                         AiObservabilityAdvisor.builder(observabilityService)
                                 .order(OBSERVABILITY_ADVISOR_ORDER)
-                                .modelName("qwen-compatible")
+                                .modelName("qwen3.6-plus")
                                 .requestType("UnifiedGeneral")
                                 .build()
                 )
@@ -95,7 +95,7 @@ public class UnifiedAssistantAutoConfiguration {
                         MessageChatMemoryAdvisor.builder(chatMemory).order(MESSAGE_CHAT_MEMORY_ADVISOR_ORDER).build(),
                         AiObservabilityAdvisor.builder(observabilityService)
                                 .order(OBSERVABILITY_ADVISOR_ORDER)
-                                .modelName("qwen-compatible")
+                                .modelName("qwen3.6-plus")
                                 .requestType("UnifiedOps")
                                 .build()
                 )

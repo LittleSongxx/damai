@@ -17,6 +17,8 @@ import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
+import reactor.core.publisher.Flux;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -142,21 +144,24 @@ public class KnowledgeSkill implements AssistantSkill {
         retrievalCompletedPayload.put("sources", assessment.sources());
         assistantRunService.appendEvent(context.getRun().getRunId(), AssistantEventTypes.RETRIEVAL_COMPLETED, retrievalCompletedPayload);
 
-        String answer;
         if ("LOW".equals(assessment.confidenceLevel())) {
-            answer = "我已经检索了当前的闭域规则库，但这轮命中的证据不够扎实，暂时不能直接给出确定结论。请补充具体场景、节目或关键词，我再基于规则继续检索。";
-        } else {
-            KnowledgePromptAssemblyResult prompt = promptAssemblyService.assemble(context.buildUserPrompt(), retrievalContext);
-            answer = unifiedKnowledgeChatClient.prompt()
-                    .user(prompt.groundedPrompt())
-                    .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, memoryKeyService.userConversationKey(context.getRun().getUserId(), context.getRun().getConversationId())))
-                    .call()
-                    .content();
+            String answer = "我已经检索了当前的闭域规则库，但这轮命中的证据不够扎实，暂时不能直接给出确定结论。请补充具体场景、节目或关键词，我再基于规则继续检索。";
+            return AssistantSkillResult.builder()
+                    .message(answer)
+                    .responseSummary(answer)
+                    .retrieval(retrieval)
+                    .build();
         }
 
+        KnowledgePromptAssemblyResult prompt = promptAssemblyService.assemble(context.buildUserPrompt(), retrievalContext);
+        Flux<String> tokenStream = unifiedKnowledgeChatClient.prompt()
+                .user(prompt.groundedPrompt())
+                .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, memoryKeyService.userConversationKey(context.getRun().getUserId(), context.getRun().getConversationId())))
+                .stream()
+                .content();
+
         return AssistantSkillResult.builder()
-                .message(answer)
-                .responseSummary(answer)
+                .messageStream(tokenStream)
                 .retrieval(retrieval)
                 .build();
     }

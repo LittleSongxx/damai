@@ -141,7 +141,13 @@ public class SkillExecutor implements AssistantExecutor {
             policyGuard.verifyAfterExecution(descriptor, result);
         }
         runService.appendEvent(run.getRunId(), AssistantEventTypes.SKILL_COMPLETED, skillEventPayload(run, decision, skill, descriptor, skillDecision, System.currentTimeMillis() - skillStartTime));
-        messageEmitter.emitMessage(run.getRunId(), run.getConversationId(), result.getMessage());
+        if (result.getMessageStream() != null) {
+            String fullAnswer = messageEmitter.emitStream(run.getRunId(), run.getConversationId(), result.getMessageStream());
+            result.setMessage(fullAnswer);
+            result.setResponseSummary(fullAnswer);
+        } else {
+            messageEmitter.emitMessage(run.getRunId(), run.getConversationId(), result.getMessage());
+        }
         runService.appendEvent(run.getRunId(), AssistantEventTypes.MESSAGE_COMPLETED, Map.of(
                 "runId", run.getRunId(),
                 "chatId", run.getConversationId()

@@ -54,10 +54,10 @@ spring:
       api-key: ${DAMAI_AI_ALIBABA_API_KEY:}
       chat:
         options:
-          model: ${DAMAI_AI_OPENAI_CHAT_MODEL:qwen-max-latest}
+          model: ${DAMAI_AI_OPENAI_CHAT_MODEL:qwen3.6-plus}
       embedding:
         options:
-          model: ${DAMAI_AI_OPENAI_EMBEDDING_MODEL:text-embedding-v3}
+          model: ${DAMAI_AI_OPENAI_EMBEDDING_MODEL:text-embedding-v4}
           dimensions: ${DAMAI_AI_OPENAI_EMBEDDING_DIMENSIONS:1024}
     deepseek:
       base-url: ${DAMAI_AI_DEEPSEEK_BASE_URL:https://api.deepseek.com}
@@ -133,10 +133,16 @@ damai:
         enabled: ${DAMAI_AI_BOCHA_ENABLED:true}
         api-key: ${DAMAI_AI_BOCHA_API_KEY:}
         url: ${DAMAI_AI_BOCHA_URL:https://api.bochaai.com/v1/web-search}
+    rerank:
+      model: ${DAMAI_AI_RERANK_MODEL:qwen3-rerank}
+      api-url: ${DAMAI_AI_RERANK_API_URL:https://dashscope.aliyuncs.com/api/v1/services/rerank}
+      top-n: ${DAMAI_AI_RERANK_TOP_N:10}
     prometheus:
       url: ${DAMAI_AI_PROMETHEUS_URL:http://127.0.0.1:9090}
     qdrant:
       url: ${DAMAI_AI_QDRANT_URL:http://127.0.0.1:16333}
+      grpc-host: ${DAMAI_AI_QDRANT_GRPC_HOST:127.0.0.1}
+      grpc-port: ${DAMAI_AI_QDRANT_GRPC_PORT:16334}
       collection: ${DAMAI_AI_QDRANT_COLLECTION:damai_ai_faq}
     nl2sql:
       enabled: ${DAMAI_AI_NL2SQL_ENABLED:true}
@@ -165,6 +171,32 @@ damai:
         run-completed-queue: ${DAMAI_AI_MEMORY_RUN_COMPLETED_QUEUE:damai.ai.memory.run_completed.q}
         run-completed-routing-key: ${DAMAI_AI_MEMORY_RUN_COMPLETED_ROUTING_KEY:ai.run.completed}
         run-completed-dlq: ${DAMAI_AI_MEMORY_RUN_COMPLETED_DLQ:damai.ai.memory.run_completed.dlq}
+    tracing:
+      enabled: ${DAMAI_AI_TRACING_ENABLED:true}
+      otlp-endpoint: ${DAMAI_AI_OTLP_ENDPOINT:http://127.0.0.1:4317}
+      service-name: ${DAMAI_AI_TRACING_SERVICE_NAME:damai-ai}
+      log-exporter-enabled: ${DAMAI_AI_TRACING_LOG_ENABLED:true}
+    guardrails:
+      enabled: ${DAMAI_AI_GUARDRAILS_ENABLED:true}
+      pii-enabled: ${DAMAI_AI_GUARDRAILS_PII_ENABLED:true}
+      hallucination-enabled: ${DAMAI_AI_GUARDRAILS_HALLUCINATION_ENABLED:true}
+      toxicity-enabled: ${DAMAI_AI_GUARDRAILS_TOXICITY_ENABLED:true}
+      block-on-pii: ${DAMAI_AI_GUARDRAILS_BLOCK_ON_PII:true}
+    agent-loop:
+      enabled: ${DAMAI_AI_AGENT_LOOP_ENABLED:true}
+      max-steps: ${DAMAI_AI_AGENT_LOOP_MAX_STEPS:5}
+      step-timeout-ms: ${DAMAI_AI_AGENT_LOOP_STEP_TIMEOUT_MS:30000}
+    llm-fallback:
+      primary-model: ${DAMAI_AI_LLM_PRIMARY_MODEL:qwen3.6-plus}
+      fallback-model: ${DAMAI_AI_LLM_FALLBACK_MODEL:qwen-turbo-latest}
+      timeout-ms: ${DAMAI_AI_LLM_TIMEOUT_MS:15000}
+    retry:
+      max-retries: ${DAMAI_AI_RETRY_MAX:1}
+      retryable-on-timeout: ${DAMAI_AI_RETRY_ON_TIMEOUT:true}
+    drift-detection:
+      enabled: ${DAMAI_AI_DRIFT_DETECTION_ENABLED:false}
+      sample-rate: ${DAMAI_AI_DRIFT_SAMPLE_RATE:0.05}
+      cron: ${DAMAI_AI_DRIFT_CRON:0 0 3 * * ?}
 # AI可观测性配置 - 模型价格（单位：元/1K tokens）
 # 参考价格，请以各厂商官网为准
 ai:
@@ -173,9 +205,12 @@ ai:
       deepseek-chat:
         input: 0.001
         output: 0.002
-      qwen-max-latest:
-        input: 0.02
-        output: 0.06
+      qwen3.6-plus:
+        input: 0.004
+        output: 0.012
+      qwen3-rerank:
+        input: 0.002
+        output: 0.0
       gpt-4:
         input: 0.21
         output: 0.42

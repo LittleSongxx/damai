@@ -56,17 +56,17 @@ public class AssistantRuntimeService {
         }
         if (AssistantRunStatus.CREATED.name().equals(run.getRunStatus())) {
             return Flux.create(sink -> {
+                int lastSeenIndex = 0;
                 try {
                     processRun(run);
-                    List<AiRunEvent> events = runService.listEvents(runId);
-                    for (AiRunEvent event : events) {
-                        sink.next(toEvent(event));
-                    }
-                    sink.complete();
                 } catch (Exception ex) {
                     sink.next(toEvent(AssistantEventTypes.RUN_FAILED, Map.of("runId", runId, "message", ex.getMessage())));
-                    sink.complete();
                 }
+                List<AiRunEvent> events = runService.listEvents(runId);
+                for (int i = lastSeenIndex; i < events.size(); i++) {
+                    sink.next(toEvent(events.get(i)));
+                }
+                sink.complete();
             });
         }
         List<AiRunEvent> events = runService.listEvents(runId);
