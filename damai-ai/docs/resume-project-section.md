@@ -1,8 +1,35 @@
-# 大麦 AI 智能助手平台
+# damai-ai — 票务智能助手平台技术亮点
 
-**技术栈**：Spring Boot 3 · Spring AI · Qdrant (gRPC) · Elasticsearch · MySQL · RabbitMQ · Prometheus · Vue 3 · SSE
+> **Author**: Song · **技术栈**: Spring Boot 3 · Spring AI 1.0 · Qdrant (gRPC) · Elasticsearch · MySQL · RabbitMQ · Prometheus · Vue 3 · SSE
 
-**项目定位**：面向票务领域的 AI 智能助手平台，围绕 **Assistant Run → Skill → Tool** 工作流，落地了 Hybrid RAG 闭域知识问答、LLM Tool Calling 购票业务、联网搜索、NL2SQL 运维查询、MCP 日志/指标监控等五大能力模块。后端 Java 代码 281 个源文件，单元测试 91 个全量通过；闭域知识语料 34 篇 Markdown、236 个 FAQ 分段。
+面向票务领域的 AI 智能助手平台，围绕 **Assistant Run → Skill → Tool** 工作流，落地了 Hybrid RAG 闭域知识问答、LLM Tool Calling 购票业务、联网搜索、NL2SQL 运维查询、MCP 日志/指标监控等五大能力模块。后端 Java 代码 281 个源文件，单元测试 91 个全量通过；闭域知识语料 34 篇 Markdown、236 个 FAQ 分段。
+
+```mermaid
+graph TB
+    subgraph Skills["五大能力模块"]
+        K[Hybrid RAG<br/>知识问答]
+        B[Tool Calling<br/>购票业务]
+        G[联网搜索<br/>通用问答]
+        N[NL2SQL<br/>运维查询]
+        M[MCP 监控<br/>日志/指标]
+    end
+
+    subgraph Engine["Skill 执行引擎"]
+        Route[意图路由] --> Select[Skill 选择]
+        Select --> Guard[策略守卫]
+        Guard --> Exec[执行 + 工具沙箱]
+        Exec --> Emit[SSE 流式输出]
+    end
+
+    subgraph Memory["记忆系统"]
+        Conv[对话记忆压缩]
+        Profile[用户画像提取]
+        Episodic[情景记忆]
+    end
+
+    Engine --> Skills
+    Engine --> Memory
+```
 
 ---
 
@@ -25,6 +52,22 @@
 
 实现了完整的 **Corrective RAG** 流水线，用于平台规则问答（退票、入场、实名、限购等）：
 
+```mermaid
+flowchart TD
+    Q[用户问题] --> QR[Query Rewrite + Multi-query]
+    QR --> V[Qdrant 向量检索<br/>text-embedding-v3 1024d]
+    QR --> S[ES BM25 稀疏检索]
+    V --> RRF[RRF 融合]
+    S --> RRF
+    RRF --> RK[qwen3-rerank 精排]
+    RK --> CC[上下文压缩]
+    CC --> EV{五维置信度}
+    EV -->|HIGH/MEDIUM| PA[接地 Prompt 组装 → LLM 回答]
+    EV -->|LOW| CR[CRAG 纠正循环]
+    CR -->|改善| RRF
+    CR -->|仍 LOW| RF[拒绝回答]
+```
+
 1. **检索规划**：`KnowledgeRetrievalPlanner` 生成检索计划，固定参数 topK=8、证据源上限 6 条、上下文预算 4000 字符。
 2. **混合检索**：`HybridSearchService` 执行 Qdrant 向量检索（`text-embedding-v3` 1024 维）+ Elasticsearch BM25 稀疏检索 + RRF 融合排序。
 3. **LLM Query Rewrite + Multi-query**：`AdvancedQueryService.rewriteQuery()` 将口语化查询改写为 1 个主查询 + 2 个变体查询，提升召回率。
@@ -40,6 +83,25 @@
 ---
 
 ## 三、LLM Tool Calling 购票业务
+
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    participant LLM as 大模型
+    participant Tool as 业务工具
+    participant Pro as damai-pro
+
+    U->>LLM: "帮我买周杰伦演唱会的票"
+    LLM->>Tool: searchPrograms("周杰伦")
+    Tool->>Pro: 网关 API 调用
+    Pro-->>Tool: 节目列表
+    Tool-->>LLM: 搜索结果
+    LLM->>Tool: getProgramDetail(id)
+    Tool-->>LLM: 详情 + 票档
+    LLM->>Tool: preparePurchase(...)
+    Tool-->>LLM: 下单预览 + AiAction
+    LLM-->>U: 展示预览卡片 (人在环审批)
+```
 
 1. **业务技能**：`BusinessSkill` 使用 Spring AI `ChatClient` Tool Calling，LLM 自主选择 `recommendPrograms`（节目推荐）、`searchPrograms`（节目搜索）、`getProgramDetail`（详情查询）、`preparePurchase`（购票预览）四个工具完成购票全链路。
 2. **购票准备 + 人在环**：`PurchasePrepareSkill` 声明 `requiresApproval=true`，由 `BusinessSkillParameterExtractor` 提取购票参数（LLM 结构化输出 + 正则降级），调用 `PurchasePreparationService` 匹配节目、票档、实名购票人后生成下单预览，创建 `AiAction` 待审批动作。前端展示预览卡片，用户确认后才可创建订单。策略守卫强制保障：声明需审批的 Skill 结果必须包含 `pendingAction`。

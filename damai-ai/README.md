@@ -1,160 +1,266 @@
-# damai-ai
+# damai-ai — 票务智能助手平台
 
-`damai-ai` 是大麦体系中的智能助手工程，基于 Spring AI 将大模型、RAG、MCP、业务工具调用和传统票务系统连接起来。它不单独替代 `damai-pro`，而是在 `damai-pro` 的节目、用户、订单、日志和指标数据之上提供自然语言交互能力。
+面向票务领域的 AI 智能助手，围绕 **Assistant Run → Skill → Tool** 工作流，将大模型能力与传统票务系统深度整合。基于 Spring AI 全面重构，实现了 Hybrid RAG 知识问答、LLM Tool Calling 购票、联网搜索、NL2SQL 运维查询、MCP 日志/指标监控等五大核心能力。
 
-## 项目定位
+> **Author**: Song &lt;2212565023@qq.com&gt; · [GitHub](https://github.com/LittleSongxx/damai)
 
-`damai-ai` 重点解决三类问题：
+---
 
-- **业务助手**：理解用户购票意图，调用节目检索、节目详情、票档查询、观演人和下单准备等工具。
-- **规则助手**：基于 FAQ、Markdown、PDF 等知识内容做 RAG 检索，回答购票、退票、入场等规则问题。
-- **运维助手**：通过 MCP 查询日志与 Prometheus 指标，辅助定位服务异常、接口失败和资源问题。
+## 系统架构总览
+
+```mermaid
+graph TB
+    subgraph Frontend["Vue 3 前端"]
+        UI[对话界面 / 事件流 / Markdown 渲染]
+    end
+
+    subgraph Core["damai-core-service :6089"]
+        Router[意图路由器]
+        SkillEngine[Skill 执行引擎]
+        RAG[Hybrid RAG 管线]
+        Tools[业务工具调用]
+        Memory[记忆与画像]
+        NL2SQL[NL2SQL 引擎]
+    end
+
+    subgraph MCP["MCP Server 集群"]
+        LogMCP["日志 MCP :8085"]
+        MetricsMCP["指标 MCP :8086"]
+    end
+
+    subgraph Models["模型层"]
+        Qwen[阿里百炼 / Qwen]
+        DeepSeek[DeepSeek]
+        Ollama[Ollama 本地模型]
+    end
+
+    subgraph Infra["基础设施"]
+        MySQL[(MySQL)]
+        Qdrant[(Qdrant 向量库)]
+        ES[(Elasticsearch)]
+        RabbitMQ[(RabbitMQ)]
+        Prometheus[(Prometheus)]
+    end
+
+    subgraph Pro["damai-pro 票务系统"]
+        Gateway[API Gateway :6085]
+        BizServices[业务微服务集群]
+    end
+
+    UI -->|SSE| Core
+    Router --> SkillEngine
+    SkillEngine --> RAG
+    SkillEngine --> Tools
+    SkillEngine --> NL2SQL
+    RAG --> Qdrant
+    RAG --> ES
+    Tools --> Gateway
+    Gateway --> BizServices
+    Core --> Models
+    Core --> MCP
+    LogMCP --> ES
+    MetricsMCP --> Prometheus
+    Memory --> MySQL
+    Memory --> RabbitMQ
+```
+
+## 核心能力
+
+| 能力模块 | 说明 |
+| --- | --- |
+| **Skill 执行引擎** | 统一 SkillExecutor 流水线：路由选择 → 策略守卫 → Schema 校验 → 工具沙箱 → 流式输出 → 14 种生命周期事件 |
+| **Hybrid RAG (CRAG)** | Query Rewrite + Multi-query → 向量检索 + BM25 稀疏检索 → RRF 融合 → Rerank 精排 → 上下文压缩 → 五维置信度评估 → 纠正循环 → 接地回答 |
+| **LLM Tool Calling** | 业务技能通过 Spring AI ChatClient 自主选择工具完成购票全链路，支持人在环审批 |
+| **联网搜索** | 开放域问答时通过 Tavily/博查 获取联网证据，LLM 基于证据生成回答 |
+| **NL2SQL 运维** | 自然语言 → SQL 生成 → AST 七层安全校验 → 执行 → 失败自动修复重试 |
+| **MCP 监控** | 日志 MCP（7 个工具）+ 指标 MCP（8 个工具），LLM 汇总证据输出诊断建议 |
+
+## Assistant Run 执行流程
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant FE as Vue 前端
+    participant Core as Core Service
+    participant Router as 意图路由器
+    participant Skill as Skill 执行器
+    participant LLM as 大模型
+    participant Tool as 工具/RAG/MCP
+
+    User->>FE: 发送消息
+    FE->>Core: 创建 Assistant Run (SSE)
+    Core->>Core: 记录会话/消息/运行状态
+    Core->>Router: 路由判断
+    Router-->>Core: KNOWLEDGE / BUSINESS / OPS / GENERAL
+    Core->>Skill: 选择并执行 Skill
+    Skill->>Skill: 策略守卫 + Schema 校验 + 工具沙箱
+    Skill->>LLM: 调用模型
+    LLM-->>Skill: Tool Call / 生成内容
+    Skill->>Tool: 执行工具调用
+    Tool-->>Skill: 返回结果
+    Skill-->>Core: 运行事件流
+    Core-->>FE: SSE 事件流 (14 种事件类型)
+    Core->>Core: 写入审计/记忆/可观测数据
+    FE-->>User: 渲染回答 + 证据卡片
+```
 
 ## 技术栈
 
 | 分类 | 技术 |
 | --- | --- |
-| 后端基础 | Java 17、Maven、Spring Boot 3.5、MyBatis Plus |
-| AI 框架 | Spring AI 1.0、ChatClient、Advisor、Tool Calling、Structured Output |
-| 模型接入 | OpenAI 兼容接口、阿里百炼、DeepSeek、Ollama |
-| RAG | Spring AI RAG、Markdown/PDF Reader、VectorStore、Qdrant |
-| 记忆与会话 | JDBC Chat Memory、自定义会话、运行事件、用户画像 |
-| 工具调用 | 业务工具服务、MCP Client、MCP Server WebFlux SSE |
-| 数据与消息 | MySQL、RabbitMQ、Elasticsearch、Easy-ES |
-| 可观测性 | Actuator、Prometheus、Token/耗时统计、日志与指标 MCP |
-| 前端 | Vue 3、Vite、Naive UI、Pinia、Markdown 渲染 |
+| 后端基础 | Java 17 · Maven · Spring Boot 3.5 · MyBatis Plus |
+| AI 框架 | Spring AI 1.0 · ChatClient · Advisor · Tool Calling · Structured Output |
+| 模型接入 | 阿里百炼 (Qwen) · DeepSeek · Ollama 本地部署 |
+| RAG | Qdrant (gRPC) · Elasticsearch BM25 · qwen3-rerank · 上下文压缩 |
+| 记忆与画像 | JDBC Chat Memory · RabbitMQ 异步刷新 · 情景记忆 · 用户画像提取 |
+| 工具调用 | Spring AI @Tool · MCP Client/Server (WebFlux SSE) |
+| 数据与消息 | MySQL · RabbitMQ · Elasticsearch · Easy-ES |
+| 安全 | RBAC · 工具沙箱白名单 · NL2SQL AST 校验 · 风险等级守卫 |
+| 可观测性 | Actuator · Prometheus · Token/耗时统计 · 全链路追溯 |
+| 前端 | Vue 3 · Vite 6 · TypeScript · Naive UI · Pinia · marked + highlight.js |
+| 测试 | JUnit 5 · Testcontainers · WireMock · Vitest (前端) |
 
 ## 模块结构
 
-| 模块 | 说明 |
-| --- | --- |
-| `damai-core-service` | AI 核心服务，负责会话、路由、技能执行、RAG、业务工具、记忆和可观测性 |
-| `damai-mcp-server/damai-mcp-log-service` | 日志 MCP 服务，通过 SSE 暴露日志检索工具，依赖 Elasticsearch |
-| `damai-mcp-server/damai-mcp-metrics-service` | 指标 MCP 服务，通过 SSE 暴露 Prometheus 指标查询工具 |
-| `vue` | AI 助手前端，负责对话、运行事件展示、Markdown 渲染和业务跳转 |
-| `sql` | `damai_ai` 数据库初始化脚本 |
+```
+damai-ai/
+├── damai-core-service/          # AI 核心服务 (281+ 源文件, 91 单元测试)
+│   └── src/main/java/org/javaup/ai/
+│       ├── assistant/           # Skill 引擎、路由、执行器、记忆、画像
+│       ├── service/             # RAG、Rerank、Hybrid Search、NL2SQL
+│       ├── guardrails/          # 安全守卫与输入过滤
+│       ├── security/            # 认证、权限、RBAC
+│       ├── structured/          # 结构化输出
+│       ├── workflow/            # 工作流编排
+│       └── ...
+├── damai-mcp-server/
+│   ├── damai-mcp-log-service/   # 日志 MCP (ES 查询, 7 个工具)
+│   └── damai-mcp-metrics-service/ # 指标 MCP (Prometheus, 8 个工具)
+├── vue/                         # AI 助手前端
+├── sql/                         # 数据库初始化脚本
+└── docs/                        # 项目文档
+```
 
 ## 服务与端口
 
-| 服务 | 默认端口 | 入口类 |
+| 服务 | 端口 | 入口类 |
 | --- | --- | --- |
-| `damai-core-service` | `6089` | `org.javaup.ai.DaMaiAiCoreApplication` |
-| `damai-mcp-log-service` | `8085` | `org.javaup.mcp.DaMaiMcpLogApplication` |
-| `damai-mcp-metrics-service` | `8086` | `org.javaup.mcp.DaMaiMcpMetricsApplication` |
-| `damai-ai/vue` | `15174` | Vite 开发服务 |
+| damai-core-service | `6089` | `org.javaup.ai.DaMaiAiCoreApplication` |
+| damai-mcp-log-service | `8085` | `org.javaup.mcp.DaMaiMcpLogApplication` |
+| damai-mcp-metrics-service | `8086` | `org.javaup.mcp.DaMaiMcpMetricsApplication` |
+| AI 前端 (Vite) | `15174` | — |
 
 ## 环境变量
 
-复制模板：
-
 ```bash
-cp damai-ai/.env.example damai-ai/.env
+cp .env.example .env
 ```
-
-重要变量：
 
 | 变量 | 说明 |
 | --- | --- |
-| `DAMAI_AI_PORT` | AI 核心服务端口，默认 `6089` |
+| `DAMAI_AI_PORT` | 核心服务端口，默认 `6089` |
 | `DAMAI_AI_MYSQL_URL` | `damai_ai` 数据库连接 |
-| `DAMAI_AI_ALIBABA_API_KEY` | 阿里百炼/OpenAI 兼容模型 API Key |
+| `DAMAI_AI_ALIBABA_API_KEY` | 阿里百炼 API Key |
 | `DAMAI_AI_DEEPSEEK_API_KEY` | DeepSeek API Key |
 | `DAMAI_AI_OLLAMA_BASE_URL` | 本地 Ollama 地址 |
+| `DAMAI_AI_QDRANT_URL` | Qdrant 向量库地址 |
 | `DAMAI_AI_MCP_LOG_URL` | 日志 MCP SSE 地址 |
 | `DAMAI_AI_MCP_METRICS_URL` | 指标 MCP SSE 地址 |
-| `DAMAI_AI_QDRANT_URL` | Qdrant 向量库地址 |
-| `DAMAI_AI_*_URL` | 指向 `damai-pro` 网关的业务接口地址 |
-| `VITE_DAMAI_AI_PROXY_TARGET` | AI 前端代理目标，默认核心服务 `6089` |
+| `DAMAI_AI_*_URL` | 指向 `damai-pro` 网关的业务接口 |
+| `VITE_DAMAI_AI_PROXY_TARGET` | 前端代理目标 |
 
-API Key 只应写入本地 `.env` 或 IDE 运行配置，不要硬编码到源码或提交到仓库。
+> **安全提示**: API Key 仅写入本地 `.env` 或 IDE 运行配置，禁止硬编码或提交到仓库。
 
 ## 快速启动
 
-### 推荐：工作区一键启动
-
-在工作区根目录执行：
+### 一键启动（推荐）
 
 ```bash
 bash scripts/damai-stack.sh start
 ```
 
-该脚本会同时启动 `damai-pro`、`damai-ai`、MCP 服务、用户端前端和 AI 前端，并自动检查 `damai_ai` 所需表结构。
+脚本自动完成 Docker 依赖 → 数据库初始化 → Maven 构建 → 后端启动 → 前端启动。
 
-### 手动启动后端
-
-先确保 `damai-pro` 的 Docker 依赖和数据库已启动，再执行：
+### 手动启动
 
 ```bash
+# 1. 确保 damai-pro Docker 依赖已启动
+# 2. 启动后端
 mvn -f damai-ai/pom.xml -pl damai-core-service spring-boot:run
 mvn -f damai-ai/pom.xml -pl damai-mcp-server/damai-mcp-log-service spring-boot:run
 mvn -f damai-ai/pom.xml -pl damai-mcp-server/damai-mcp-metrics-service spring-boot:run
+
+# 3. 启动前端
+cd damai-ai/vue && npm install && npm run dev -- --host 127.0.0.1 --port 15174 --strictPort
 ```
 
-### 手动启动前端
+## Hybrid RAG 流程 (CRAG)
 
-```bash
-cd damai-ai/vue
-npm install
-npm run dev -- --host 127.0.0.1 --port 15174 --strictPort
+```mermaid
+flowchart TD
+    Q[用户问题] --> Rewrite[Query Rewrite + Multi-query]
+    Rewrite --> Dense[Qdrant 向量检索<br/>text-embedding-v3 1024d]
+    Rewrite --> Sparse[ES BM25 稀疏检索]
+    Dense --> RRF[RRF 融合排序]
+    Sparse --> RRF
+    RRF --> Rerank[qwen3-rerank 精排]
+    Rerank --> Compress[上下文压缩]
+    Compress --> Eval{五维置信度评估}
+    Eval -->|HIGH ≥0.72| Assemble[接地 Prompt 组装]
+    Eval -->|MEDIUM ≥0.45| Assemble
+    Eval -->|LOW <0.45| Correct[CRAG 纠正循环]
+    Correct --> |纠正查询/子问题分解/HyDE| RRF
+    Correct -->|仍 LOW| Refuse[拒绝回答]
+    Assemble --> LLM[LLM 生成回答]
+    LLM --> Answer[带证据的回答]
 ```
 
-## 核心架构
+## Skill 治理体系
 
-### 统一助手运行流
+```mermaid
+flowchart LR
+    subgraph Lifecycle["Skill 生命周期"]
+        direction TB
+        Select[路由选择<br/>关键词加权 / skillHint 直选]
+        Guard[策略守卫<br/>启用状态 / RBAC / 风险等级]
+        Schema[Schema 校验<br/>输入输出必填字段]
+        Sandbox[工具沙箱<br/>白名单作用域]
+        Exec[执行]
+        Emit[SSE 流式发射<br/>真流式 / 分块发射]
+    end
+    Select --> Guard --> Schema --> Sandbox --> Exec --> Emit
 
-1. 前端创建一次 Assistant Run。
-2. `damai-core-service` 记录会话、消息和运行状态。
-3. 路由器判断用户意图：业务、知识、运维或通用聊天。
-4. 执行器加载用户上下文、记忆、画像和权限。
-5. 对应技能执行工具调用、RAG 检索、MCP 查询或大模型回答。
-6. 运行事件流式返回前端，同时写入审计、记忆和可观测数据。
-
-### 业务助手
-
-业务助手通过 `BusinessToolService` 调用传统票务能力，例如节目推荐、节目搜索、节目详情、票档查询和下单准备。它负责自然语言理解与工具编排，真正的库存、座位、订单和支付一致性仍由 `damai-pro` 负责。
-
-### 知识助手
-
-知识助手基于 RAG 流程工作：
-
-1. 加载规则文档。
-2. 写入向量库。
-3. 对用户问题做检索规划。
-4. 评估检索证据置信度。
-5. 生成带依据的回答。
-6. 低置信度时拒绝编造确定答案。
-
-### 运维助手
-
-运维助手通过 MCP 接入外部能力：
-
-- `damai-mcp-log-service` 查询 Elasticsearch 中的日志和 API 采集数据。
-- `damai-mcp-metrics-service` 查询 Prometheus 中的 JVM、内存、线程和接口指标。
-- 核心服务将证据汇总给模型，由模型输出诊断建议。
+    subgraph Management["运营管理"]
+        DB[DB 热更新<br/>名称/关键词/工具/风险]
+        Eval[Skill 自动评测<br/>用例执行 + 结果校验]
+        Audit[变更审计日志]
+    end
+```
 
 ## 与 damai-pro 的关系
 
-`damai-pro` 是业务事实源，`damai-ai` 是智能交互层。AI 能够帮助用户更自然地完成查询和购票，但不会绕过 `damai-pro` 的网关、登录态、库存、订单和支付约束。
+`damai-pro` 是**业务事实源**（库存、座位、订单、支付），`damai-ai` 是**智能交互层**。AI 帮助用户自然地完成查询和购票，但不绕过 `damai-pro` 的网关鉴权、库存扣减和支付约束。
 
-联调前请确认：
-
-- `damai-gateway-service` 可访问：`http://127.0.0.1:6085`
-- `damai-pro` 用户端可访问：`http://127.0.0.1:15173`
-- `damai-ai` 前端可访问：`http://127.0.0.1:15174`
-- `damai-ai/.env` 中业务接口地址指向当前 `damai-pro` 网关。
+联调前确认：
+- `damai-gateway-service` → `http://127.0.0.1:6085`
+- `damai-pro` 用户端 → `http://127.0.0.1:15173`
+- `damai-ai` 前端 → `http://127.0.0.1:15174`
+- `.env` 中业务接口地址指向 `damai-pro` 网关
 
 ## 常见问题
 
-- **模型鉴权失败**：检查 `DAMAI_AI_ALIBABA_API_KEY`、`DAMAI_AI_DEEPSEEK_API_KEY` 是否填写正确。
-- **本地模型不可用**：检查 Ollama 是否启动，模型名是否与 `DAMAI_AI_OLLAMA_CHAT_MODEL` 一致。
-- **RAG 返回为空**：检查 Qdrant 地址、集合名、文档加载路径和向量维度配置。
-- **MCP 连接失败**：确认 `8085`、`8086` 服务已启动，SSE 地址配置正确。
-- **AI 无法调用业务接口**：确认 `damai-pro` 网关、登录态、用户端端口和 `DAMAI_AI_*_URL` 是否一致。
-- **日志或指标为空**：确认 Elasticsearch、Prometheus 和对应采集链路已有数据。
+| 问题 | 排查方向 |
+| --- | --- |
+| 模型鉴权失败 | 检查 `DAMAI_AI_ALIBABA_API_KEY` / `DAMAI_AI_DEEPSEEK_API_KEY` |
+| 本地模型不可用 | 确认 Ollama 已启动且模型名匹配 `DAMAI_AI_OLLAMA_CHAT_MODEL` |
+| RAG 返回为空 | 检查 Qdrant 地址、集合名、文档加载路径和向量维度 |
+| MCP 连接失败 | 确认 8085/8086 服务已启动，SSE 地址正确 |
+| 无法调用业务接口 | 确认 `damai-pro` 网关可达、登录态有效 |
+| 日志/指标为空 | 确认 ES 和 Prometheus 中有数据 |
 
 ## 相关文档
 
-- [`../damai-pro/docs/damai-ai-integration.md`](../damai-pro/docs/damai-ai-integration.md)：AI 与票务系统一体化联调。
-- [`vue/README.md`](vue/README.md)：AI 前端说明。
-- [`../README.md`](../README.md)：工作区总览。
-
+- [`vue/README.md`](vue/README.md) — AI 前端说明
+- [`docs/resume-project-section.md`](docs/resume-project-section.md) — 项目技术亮点总结
+- [`../damai-pro/docs/damai-ai-integration.md`](../damai-pro/docs/damai-ai-integration.md) — AI + Pro 联调指南
+- [`../README.md`](../README.md) — 工作区总览
