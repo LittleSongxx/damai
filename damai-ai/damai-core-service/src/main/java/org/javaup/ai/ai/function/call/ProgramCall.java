@@ -31,6 +31,9 @@ public class ProgramCall {
 
     @Autowired
     private ProgramMapper programMapper;
+
+    @Autowired
+    private DaMaiRequestAuthSupport requestAuthSupport;
     
     public List<ProgramSearchVo> recommendList(ProgramRecommendFunctionDto programRecommendFunctionDto){
         LambdaEsQueryWrapper<ProgramSearchVo> wrapper = EsWrappers.lambdaQuery(ProgramSearchVo.class)
@@ -48,8 +51,7 @@ public class ProgramCall {
     }
 
     public ProgramDetailResultVo detail(ProgramDetailDto programDetailDto) {
-        String result = HttpRequest.post(PROGRAM_DETAIL_URL)
-                .header("no_verify", "true")
+        String result = requestAuthSupport.apply(HttpRequest.post(PROGRAM_DETAIL_URL))
                 .body(JSON.toJSONString(programDetailDto))
                 .timeout(20000)
                 .execute().body();

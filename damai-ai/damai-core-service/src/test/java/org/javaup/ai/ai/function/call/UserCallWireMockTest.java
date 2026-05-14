@@ -4,6 +4,7 @@ import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
 import org.javaup.ai.vo.UserDetailVo;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
@@ -33,6 +34,7 @@ class UserCallWireMockTest {
                 return wireMock.baseUrl() + "/damai/user/user/current";
             }
         };
+        ReflectionTestUtils.setField(userCall, "requestAuthSupport", new DaMaiRequestAuthSupport());
 
         UserDetailVo user = userCall.currentUser("token-test");
 

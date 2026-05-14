@@ -9,6 +9,7 @@ import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.ResourcePatternResolver;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -84,7 +85,10 @@ public class MarkdownLoader {
             for (Resource resource : resources) {
                 String fileName = safeFileName(resource);
                 try {
-                    String markdown = new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                    String markdown;
+                    try (InputStream inputStream = resource.getInputStream()) {
+                        markdown = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+                    }
                     List<FaqSection> sections = parseFaqSections(fileName, markdown);
                     faqCount += sections.size();
                     for (FaqSection section : sections) {

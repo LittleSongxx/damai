@@ -7,6 +7,7 @@ import org.javaup.ai.vo.TicketUserVo;
 import org.javaup.ai.vo.UserDetailVo;
 import org.javaup.ai.vo.result.TicketUserResultVo;
 import org.javaup.ai.vo.result.UserDetailResultVo;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
@@ -25,13 +26,15 @@ import static org.javaup.ai.constants.DaMaiConstant.USER_DETAIL_URL;
  **/
 @Component
 public class UserCall {
+
+    @Autowired
+    private DaMaiRequestAuthSupport requestAuthSupport;
     
     public UserDetailVo userDetail(String mobile){
         Map<String,String> params = new HashMap<>(2);
         params.put("mobile", mobile);
         UserDetailResultVo userDetailResultVo = new UserDetailResultVo();
-        String result = HttpRequest.post(userDetailUrl())
-                .header("no_verify", "true")
+        String result = requestAuthSupport.apply(HttpRequest.post(userDetailUrl()))
                 .body(JSON.toJSONString(params))
                 .timeout(20000)
                 .execute().body();
@@ -44,10 +47,9 @@ public class UserCall {
 
     public UserDetailVo currentUser(String token) {
         UserDetailResultVo userDetailResultVo;
-        String result = HttpRequest.post(currentUserUrl())
+        String result = requestAuthSupport.apply(HttpRequest.post(currentUserUrl()))
                 .header("token", token)
                 .header("code", currentUserCode())
-                .header("no_verify", "true")
                 .timeout(20000)
                 .execute().body();
         userDetailResultVo = JSON.parseObject(result, UserDetailResultVo.class);
@@ -61,8 +63,7 @@ public class UserCall {
         Map<String,Object> params = new HashMap<>(2);
         params.put("userId", userId);
         TicketUserResultVo ticketUserResultVo = new TicketUserResultVo();
-        String result = HttpRequest.post(ticketUserListUrl())
-                .header("no_verify", "true")
+        String result = requestAuthSupport.apply(HttpRequest.post(ticketUserListUrl()))
                 .body(JSON.toJSONString(params))
                 .timeout(20000)
                 .execute().body();

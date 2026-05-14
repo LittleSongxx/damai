@@ -3,13 +3,20 @@ package org.javaup.ai.assistant;
 import com.alibaba.fastjson.JSON;
 import lombok.RequiredArgsConstructor;
 import org.javaup.ai.context.AiRequestContextHolder;
+import org.javaup.ai.context.AiRequestContext;
 import org.javaup.ai.context.AiUserContext;
 import org.javaup.ai.dto.AssistantRunCreateRequest;
 import org.javaup.ai.assistant.executor.AssistantExecutionContext;
 import org.javaup.ai.assistant.executor.AssistantExecutor;
 import org.javaup.ai.assistant.executor.AssistantExecutorRegistry;
+import org.javaup.ai.assistant.executor.AssistantMessageEmitter;
+import org.javaup.ai.assistant.runtime.AssistantRuntimeLeaseService;
+import org.javaup.ai.assistant.runtime.AssistantStageTraceService;
 import org.javaup.ai.entity.AiRun;
 import org.javaup.ai.entity.AiRunEvent;
+import org.javaup.ai.guardrails.GuardrailAuditService;
+import org.javaup.ai.guardrails.GuardrailResult;
+import org.javaup.ai.guardrails.InputGuardrailService;
 import org.javaup.ai.security.AiPermissionService;
 import org.javaup.ai.vo.AiUserCapabilitiesVo;
 import org.javaup.ai.vo.AssistantActionResultVo;
@@ -19,6 +26,8 @@ import org.javaup.ai.vo.ChatHistoryMessageVO;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.util.List;
 import java.util.Map;
@@ -34,6 +43,12 @@ public class AssistantRuntimeService {
     private final org.javaup.ai.assistant.skill.business.PurchaseActionService purchaseActionService;
     private final AiPermissionService aiPermissionService;
     private final AssistantSkillManagementService skillManagementService;
+    private final AssistantRunEventStreamService eventStreamService;
+    private final AssistantMessageEmitter messageEmitter;
+    private final InputGuardrailService inputGuardrailService;
+    private final GuardrailAuditService guardrailAuditService;
+    private final AssistantRuntimeLeaseService runtimeLeaseService;
+    private final AssistantStageTraceService stageTraceService;
 
     public AssistantRunCreatedVo createRun(AssistantRunCreateRequest request) {
         return runService.createRun(request);
@@ -54,23 +69,23 @@ public class AssistantRuntimeService {
         if (run == null) {
             return Flux.just(toEvent(AssistantEventTypes.RUN_FAILED, Map.of("runId", runId, "message", "run not found")));
         }
+        eventStreamService.ensureRunStream(runId);
         if (AssistantRunStatus.CREATED.name().equals(run.getRunStatus())) {
-            return Flux.create(sink -> {
-                int lastSeenIndex = 0;
-                try {
-                    processRun(run);
-                } catch (Exception ex) {
-                    sink.next(toEvent(AssistantEventTypes.RUN_FAILED, Map.of("runId", runId, "message", ex.getMessage())));
-                }
-                List<AiRunEvent> events = runService.listEvents(runId);
-                for (int i = lastSeenIndex; i < events.size(); i++) {
-                    sink.next(toEvent(events.get(i)));
-                }
-                sink.complete();
-            });
+            if (runService.claimRunForProcessing(runId)) {
+                launchProcess(runId, snapshotContext());
+            }
         }
         List<AiRunEvent> events = runService.listEvents(runId);
-        return Flux.fromIterable(events).map(this::toEvent);
+        Flux<ServerSentEvent<String>> replay = Flux.fromIterable(events).map(this::toEvent);
+        if (hasTerminalEvent(events)) {
+            return replay;
+        }
+        int lastOrder = events.isEmpty() ? 0 : events.get(events.size() - 1).getEventOrder();
+        Flux<ServerSentEvent<String>> live = eventStreamService.stream(runId)
+                .filter(event -> event.getEventOrder() != null && event.getEventOrder() > lastOrder)
+                .takeUntil(event -> isTerminalEvent(event.getEventType()))
+                .map(this::toEvent);
+        return Flux.concat(replay, live);
     }
 
     public List<org.javaup.ai.vo.AssistantConversationVo> listConversations() {
@@ -89,6 +104,9 @@ public class AssistantRuntimeService {
                 .pendingAction(run == null ? null : runService.getPendingAction(runId))
                 .latestAction(run == null ? null : runService.getLatestAction(runId))
                 .retrieval(run == null ? null : runService.getLatestRetrieval(runId))
+                .stageTraces(run == null ? List.of() : runService.listStageTraces(runId))
+                .retrievalTraces(run == null ? List.of() : runService.listRetrievalTraces(runId))
+                .memorySummary(run == null ? null : runService.getLatestMemorySummary(run.getConversationId(), run.getUserId()))
                 .build();
     }
 
@@ -100,7 +118,11 @@ public class AssistantRuntimeService {
         return purchaseActionService.reject(runId, actionId);
     }
 
-    private void processRun(AiRun run) {
+    private void processRun(String runId) {
+        AiRun run = runService.getRunInternal(runId);
+        if (run == null) {
+            return;
+        }
         AssistantRunCreateRequest request = new AssistantRunCreateRequest();
         request.setChatId(run.getConversationId());
         request.setMessage(run.getUserMessage());
@@ -108,7 +130,43 @@ public class AssistantRuntimeService {
             request.setClientContext(JSON.parseObject(run.getClientContextJson()));
         }
         AiUserContext user = AiRequestContextHolder.getRequiredUser();
-        AssistantExecutionPlan plan = executionPlanner.plan(run, user, request);
+        GuardrailResult inputGuardrail = inputGuardrailService.check(request.getMessage());
+        if (inputGuardrail.getAction() != GuardrailResult.Action.PASS) {
+            guardrailAuditService.publish(run.getRunId(), "input", inputGuardrail, request.getMessage());
+            if (inputGuardrail.isBlocked()) {
+                String blockedMessage = inputGuardrail.getSanitizedContent() == null
+                        ? "抱歉，这个请求触发了输入安全策略，无法继续处理。"
+                        : inputGuardrail.getSanitizedContent();
+                messageEmitter.emitMessage(run.getRunId(), run.getConversationId(), blockedMessage);
+                runService.appendEvent(run.getRunId(), AssistantEventTypes.MESSAGE_COMPLETED, Map.of(
+                        "runId", run.getRunId(),
+                        "chatId", run.getConversationId()
+                ));
+                runService.markCompleted(run, "GUARDRAIL_BLOCKED", blockedMessage);
+                runService.appendEvent(run.getRunId(), AssistantEventTypes.RUN_COMPLETED, Map.of(
+                        "runId", run.getRunId(),
+                        "status", runService.getRunInternal(run.getRunId()).getRunStatus()
+                ));
+                return;
+            }
+        }
+        AssistantStageTraceService.StageSpan planningSpan = stageTraceService.startStage(
+                "PLANNING",
+                "AssistantPlanning",
+                request.getMessage(),
+                null,
+                Map.of("conversationId", run.getConversationId()));
+        AssistantExecutionPlan plan;
+        try {
+            plan = executionPlanner.plan(run, user, request);
+            stageTraceService.complete(planningSpan, plan.getReason(), null, null, null, null, Map.of(
+                    "routeType", plan.getRouteDecision() == null || plan.getRouteDecision().getRouteType() == null ? "" : plan.getRouteDecision().getRouteType().getCode(),
+                    "executionMode", plan.getExecutionMode() == null ? "" : plan.getExecutionMode().name()
+            ));
+        } catch (Exception ex) {
+            stageTraceService.fail(planningSpan, ex, Map.of());
+            throw ex;
+        }
         AssistantRouteDecision decision = plan.getRouteDecision();
         AiRequestContextHolder.enrich(run.getConversationId(), run.getRunId(), decision.getRouteType().getLegacyChatType().getCode(), decision.getRouteType().getCode());
         runService.startRun(run, decision.getRouteType(), plan.getExecutionMode() == AssistantExecutionMode.CLARIFICATION ? "CLARIFYING" : "ROUTED");
@@ -135,8 +193,32 @@ public class AssistantRuntimeService {
         }
     }
 
+    private void launchProcess(String runId, AiRequestContext context) {
+        Mono.fromRunnable(() -> {
+                    try {
+                        if (context != null) {
+                            AiRequestContextHolder.set(context);
+                        }
+                        AiRun run = runService.getRunInternal(runId);
+                        if (run != null) {
+                            runService.updateStage(runId, "WAITING_LEASE");
+                        }
+                        try (AssistantRuntimeLeaseService.LeaseHandle ignored = run == null
+                                ? AssistantRuntimeLeaseService.LeaseHandle.noop()
+                                : runtimeLeaseService.acquireConversationLease(run.getConversationId(), runId)) {
+                            processRun(runId);
+                        }
+                    } finally {
+                        AiRequestContextHolder.clear();
+                    }
+                })
+                .subscribeOn(Schedulers.boundedElastic())
+                .subscribe();
+    }
+
     private ServerSentEvent<String> toEvent(AiRunEvent event) {
         return ServerSentEvent.<String>builder()
+                .id(event.getEventId())
                 .event(event.getEventType())
                 .data(event.getPayloadJson())
                 .build();
@@ -167,6 +249,28 @@ public class AssistantRuntimeService {
             }
         }
         return payload;
+    }
+
+    private boolean hasTerminalEvent(List<AiRunEvent> events) {
+        return events.stream().anyMatch(event -> isTerminalEvent(event.getEventType()));
+    }
+
+    private boolean isTerminalEvent(String eventType) {
+        return AssistantEventTypes.RUN_COMPLETED.equals(eventType) || AssistantEventTypes.RUN_FAILED.equals(eventType);
+    }
+
+    private AiRequestContext snapshotContext() {
+        AiRequestContext context = AiRequestContextHolder.get();
+        if (context == null) {
+            return null;
+        }
+        return AiRequestContext.builder()
+                .user(context.getUser())
+                .conversationId(context.getConversationId())
+                .runId(context.getRunId())
+                .chatType(context.getChatType())
+                .requestType(context.getRequestType())
+                .build();
     }
 
 }

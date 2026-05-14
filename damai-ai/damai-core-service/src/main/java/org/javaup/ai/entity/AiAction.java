@@ -31,11 +31,29 @@ public class AiAction extends BaseTableData {
 
     private String previewJson;
 
+    private String previewSummary;
+
+    private String snapshotHash;
+
+    private String idempotencyKey;
+
     private String resultJson;
+
+    private String orderNumber;
+
+    private String failureCode;
+
+    private String failureMessage;
+
+    private Integer version;
 
     private Date expiresAt;
 
     private Date approvedAt;
+
+    private Date processingStartedAt;
+
+    private Date completedAt;
 
     private Date rejectedAt;
 }

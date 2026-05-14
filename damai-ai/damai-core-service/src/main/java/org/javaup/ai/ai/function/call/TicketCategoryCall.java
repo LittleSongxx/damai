@@ -7,6 +7,7 @@ import org.javaup.ai.dto.TicketCategoryListByProgramDto;
 import org.javaup.ai.enums.BaseCode;
 import org.javaup.ai.vo.TicketCategoryDetailVo;
 import org.javaup.ai.vo.result.TicketCategoryListResultVo;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -22,9 +23,11 @@ import static org.javaup.ai.constants.DaMaiConstant.TICKET_LIST_URL;
 @Component
 public class TicketCategoryCall {
 
+    @Autowired
+    private DaMaiRequestAuthSupport requestAuthSupport;
+
     public List<TicketCategoryDetailVo> selectListByProgram(TicketCategoryListByProgramDto ticketCategoryListByProgramDto) {
-        String result = HttpRequest.post(TICKET_LIST_URL)
-                .header("no_verify", "true")
+        String result = requestAuthSupport.apply(HttpRequest.post(TICKET_LIST_URL))
                 .body(JSON.toJSONString(ticketCategoryListByProgramDto))
                 .timeout(20000)
                 .execute().body();

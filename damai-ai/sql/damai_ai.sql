@@ -115,12 +115,16 @@ CREATE TABLE IF NOT EXISTS `d_ai_retrieval_trace` (
   `run_id` varchar(128) DEFAULT NULL COMMENT '工作流ID',
   `chat_id` varchar(225) DEFAULT NULL COMMENT '会话ID',
   `user_id` bigint DEFAULT NULL COMMENT '用户ID',
+  `parent_trace_id` varchar(128) DEFAULT NULL COMMENT '父追踪ID',
+  `trace_type` varchar(32) DEFAULT NULL COMMENT '追踪类型(snapshot/stage/route)',
+  `step_key` varchar(64) DEFAULT NULL COMMENT '阶段标识',
   `original_query` text DEFAULT NULL COMMENT '原始Query',
   `rewritten_query` text DEFAULT NULL COMMENT '改写Query',
   `dense_hits_json` longtext DEFAULT NULL COMMENT '向量召回结果',
   `sparse_hits_json` longtext DEFAULT NULL COMMENT '稀疏召回结果',
   `fused_hits_json` longtext DEFAULT NULL COMMENT '融合结果',
   `final_hits_json` longtext DEFAULT NULL COMMENT '最终命中结果',
+  `metadata_json` longtext DEFAULT NULL COMMENT '附加元数据',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
   `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
   `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
@@ -183,6 +187,8 @@ CREATE TABLE IF NOT EXISTS `d_ai_conversation_memory_summary` (
   `user_id` bigint NOT NULL COMMENT '用户ID',
   `covered_run_id` varchar(128) DEFAULT NULL COMMENT '摘要覆盖到的Run ID',
   `summary` longtext DEFAULT NULL COMMENT '会话压缩摘要',
+  `memory_json` longtext DEFAULT NULL COMMENT '结构化会话记忆',
+  `summary_version` int DEFAULT 1 COMMENT '摘要结构版本',
   `compression_count` int DEFAULT 1 COMMENT '压缩次数',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
   `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
@@ -221,6 +227,7 @@ CREATE TABLE IF NOT EXISTS `d_ai_run` (
   `user_message` longtext DEFAULT NULL COMMENT '用户输入',
   `response_summary` longtext DEFAULT NULL COMMENT '响应摘要',
   `error_message` text DEFAULT NULL COMMENT '错误信息',
+  `event_seq` int DEFAULT 0 COMMENT '当前事件序号',
   `completed_at` datetime DEFAULT NULL COMMENT '完成时间',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
   `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
@@ -256,17 +263,45 @@ CREATE TABLE IF NOT EXISTS `d_ai_action` (
   `action_type` varchar(64) NOT NULL COMMENT '动作类型',
   `action_status` varchar(32) NOT NULL COMMENT '动作状态',
   `preview_json` longtext DEFAULT NULL COMMENT '动作预览',
+  `preview_summary` text DEFAULT NULL COMMENT '动作摘要',
+  `snapshot_hash` varchar(128) DEFAULT NULL COMMENT '审批快照摘要Hash',
+  `idempotency_key` varchar(128) DEFAULT NULL COMMENT '下单幂等键',
   `result_json` longtext DEFAULT NULL COMMENT '动作结果',
+  `order_number` varchar(64) DEFAULT NULL COMMENT '创建出的订单号',
+  `failure_code` varchar(64) DEFAULT NULL COMMENT '失败代码',
+  `failure_message` text DEFAULT NULL COMMENT '失败信息',
+  `version` int DEFAULT 0 COMMENT '乐观锁版本',
   `expires_at` datetime DEFAULT NULL COMMENT '过期时间',
   `approved_at` datetime DEFAULT NULL COMMENT '批准时间',
+  `processing_started_at` datetime DEFAULT NULL COMMENT '开始处理时间',
+  `completed_at` datetime DEFAULT NULL COMMENT '处理完成时间',
   `rejected_at` datetime DEFAULT NULL COMMENT '拒绝时间',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
   `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
   `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_ai_action_id` (`action_id`),
-  KEY `idx_ai_action_run` (`run_id`,`action_status`)
+  KEY `idx_ai_action_run` (`run_id`,`action_status`),
+  KEY `idx_ai_action_idempotency` (`idempotency_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='统一助手动作表';
+
+CREATE TABLE IF NOT EXISTS `d_ai_guardrail_hit` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `hit_id` varchar(128) NOT NULL COMMENT '命中ID',
+  `run_id` varchar(128) DEFAULT NULL COMMENT 'Run ID',
+  `conversation_id` varchar(128) DEFAULT NULL COMMENT '会话ID',
+  `user_id` bigint DEFAULT NULL COMMENT '用户ID',
+  `stage` varchar(64) NOT NULL COMMENT '命中阶段',
+  `guardrail_action` varchar(32) NOT NULL COMMENT '处置动作',
+  `rule_names` text DEFAULT NULL COMMENT '命中规则',
+  `content_preview` text DEFAULT NULL COMMENT '脱敏后的内容摘要',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ai_guardrail_hit_id` (`hit_id`),
+  KEY `idx_ai_guardrail_run_stage` (`run_id`,`stage`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='统一助手Guardrail命中审计表';
 
 CREATE TABLE IF NOT EXISTS `d_ai_tool_call` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
@@ -519,3 +554,184 @@ CREATE TABLE IF NOT EXISTS `d_ai_episodic_memory` (
   KEY `idx_ai_episodic_user` (`user_id`,`create_time`),
   KEY `idx_ai_episodic_type` (`event_type`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI情景记忆表';
+
+-- ============================================================
+-- 兼容旧库的增量迁移
+-- 说明：上面的 CREATE TABLE IF NOT EXISTS 只会初始化新库。
+--      下面这段确保已有 damai_ai 库补齐本次改造需要的新字段和索引。
+-- ============================================================
+
+SET @damai_ai_schema := DATABASE();
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_run'
+      AND COLUMN_NAME = 'event_seq'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_run` ADD COLUMN `event_seq` int DEFAULT 0 COMMENT ''当前事件序号'' AFTER `error_message`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_action'
+      AND COLUMN_NAME = 'preview_summary'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_action` ADD COLUMN `preview_summary` text DEFAULT NULL COMMENT ''动作摘要'' AFTER `preview_json`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_action'
+      AND COLUMN_NAME = 'snapshot_hash'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_action` ADD COLUMN `snapshot_hash` varchar(128) DEFAULT NULL COMMENT ''审批快照摘要Hash'' AFTER `preview_summary`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_action'
+      AND COLUMN_NAME = 'idempotency_key'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_action` ADD COLUMN `idempotency_key` varchar(128) DEFAULT NULL COMMENT ''下单幂等键'' AFTER `snapshot_hash`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_action'
+      AND COLUMN_NAME = 'order_number'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_action` ADD COLUMN `order_number` varchar(64) DEFAULT NULL COMMENT ''创建出的订单号'' AFTER `result_json`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_action'
+      AND COLUMN_NAME = 'failure_code'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_action` ADD COLUMN `failure_code` varchar(64) DEFAULT NULL COMMENT ''失败代码'' AFTER `order_number`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_action'
+      AND COLUMN_NAME = 'failure_message'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_action` ADD COLUMN `failure_message` text DEFAULT NULL COMMENT ''失败信息'' AFTER `failure_code`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_action'
+      AND COLUMN_NAME = 'version'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_action` ADD COLUMN `version` int DEFAULT 0 COMMENT ''乐观锁版本'' AFTER `failure_message`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_action'
+      AND COLUMN_NAME = 'processing_started_at'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_action` ADD COLUMN `processing_started_at` datetime DEFAULT NULL COMMENT ''开始处理时间'' AFTER `approved_at`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_action'
+      AND COLUMN_NAME = 'completed_at'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_action` ADD COLUMN `completed_at` datetime DEFAULT NULL COMMENT ''处理完成时间'' AFTER `processing_started_at`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.STATISTICS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_action'
+      AND INDEX_NAME = 'idx_ai_action_idempotency'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_action` ADD KEY `idx_ai_action_idempotency` (`idempotency_key`)'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+UPDATE `d_ai_run`
+SET `event_seq` = 0
+WHERE `event_seq` IS NULL;
+
+UPDATE `d_ai_action`
+SET `version` = 0
+WHERE `version` IS NULL;

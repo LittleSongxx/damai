@@ -2,6 +2,9 @@ package org.javaup.ai.assistant.tool;
 
 import org.javaup.ai.assistant.AssistantEventTypes;
 import org.javaup.ai.assistant.AssistantRunService;
+import org.javaup.ai.guardrails.GuardrailAuditService;
+import org.javaup.ai.guardrails.GuardrailResult;
+import org.javaup.ai.guardrails.ToolGuardrailService;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -13,13 +16,14 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class AssistantToolInvokerTest {
 
     @Test
     void shouldRecordSuccessfulToolInvocation() {
         AssistantRunService runService = mock(AssistantRunService.class);
-        AssistantToolInvoker invoker = new AssistantToolInvoker(runService);
+        AssistantToolInvoker invoker = invoker(runService);
 
         String result = invoker.invoke("run_1", "toolA", "ops", "input", () -> "output");
 
@@ -32,7 +36,7 @@ class AssistantToolInvokerTest {
     @Test
     void shouldRecordFailedToolInvocationAndRethrow() {
         AssistantRunService runService = mock(AssistantRunService.class);
-        AssistantToolInvoker invoker = new AssistantToolInvoker(runService);
+        AssistantToolInvoker invoker = invoker(runService);
 
         IllegalStateException exception = assertThrows(IllegalStateException.class, () ->
                 invoker.invoke("run_1", "toolA", "ops", "input", () -> {
@@ -49,7 +53,7 @@ class AssistantToolInvokerTest {
     @Test
     void shouldRejectToolOutsideCurrentSkillScope() {
         AssistantRunService runService = mock(AssistantRunService.class);
-        AssistantToolInvoker invoker = new AssistantToolInvoker(runService);
+        AssistantToolInvoker invoker = invoker(runService);
 
         IllegalStateException exception;
         try (AssistantSkillToolScope.ScopeHandle ignored = AssistantSkillToolScope.open("business.program.search", List.of("searchPrograms"))) {
@@ -64,7 +68,7 @@ class AssistantToolInvokerTest {
     @Test
     void shouldRejectAnyToolWhenCurrentSkillScopeHasEmptyAllowlist() {
         AssistantRunService runService = mock(AssistantRunService.class);
-        AssistantToolInvoker invoker = new AssistantToolInvoker(runService);
+        AssistantToolInvoker invoker = invoker(runService);
 
         IllegalStateException exception;
         try (AssistantSkillToolScope.ScopeHandle ignored = AssistantSkillToolScope.open("knowledge.policy", List.of())) {
@@ -79,7 +83,7 @@ class AssistantToolInvokerTest {
     @Test
     void shouldAllowPrefixWildcardInCurrentSkillScope() {
         AssistantRunService runService = mock(AssistantRunService.class);
-        AssistantToolInvoker invoker = new AssistantToolInvoker(runService);
+        AssistantToolInvoker invoker = invoker(runService);
 
         String result;
         try (AssistantSkillToolScope.ScopeHandle ignored = AssistantSkillToolScope.open("ops.nl2sql.query", List.of("nl2sql.*"))) {
@@ -88,5 +92,12 @@ class AssistantToolInvokerTest {
 
         assertEquals("output", result);
         verify(runService).appendEvent(eq("run_1"), eq(AssistantEventTypes.TOOL_STARTED), any());
+    }
+
+    private AssistantToolInvoker invoker(AssistantRunService runService) {
+        ToolGuardrailService toolGuardrailService = mock(ToolGuardrailService.class);
+        GuardrailAuditService guardrailAuditService = mock(GuardrailAuditService.class);
+        when(toolGuardrailService.check(any(), any(), any())).thenReturn(GuardrailResult.pass());
+        return new AssistantToolInvoker(runService, toolGuardrailService, guardrailAuditService);
     }
 }

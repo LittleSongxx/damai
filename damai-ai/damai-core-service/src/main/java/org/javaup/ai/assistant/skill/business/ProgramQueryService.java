@@ -47,8 +47,12 @@ public class ProgramQueryService {
         if (CollectionUtil.isEmpty(programs)) {
             return null;
         }
+        return getProgramDetailRawById(programs.get(0).getId());
+    }
+
+    public ProgramDetailVo getProgramDetailRawById(Long programId) {
         ProgramDetailDto detailDto = new ProgramDetailDto();
-        detailDto.setId(programs.get(0).getId());
+        detailDto.setId(programId);
         ProgramDetailResultVo detailResultVo = programCall.detail(detailDto);
         if (detailResultVo == null || detailResultVo.getData() == null) {
             return null;

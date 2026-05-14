@@ -14,4 +14,7 @@ public class AiGuardrailsProperties {
     private boolean hallucinationEnabled = true;
     private boolean toxicityEnabled = true;
     private boolean blockOnPii = true;
+    private boolean promptInjectionEnabled = true;
+    private boolean blockOnPromptInjection = true;
+    private boolean bufferHighRiskStreaming = true;
 }

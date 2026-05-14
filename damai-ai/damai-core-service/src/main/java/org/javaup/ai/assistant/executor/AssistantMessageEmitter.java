@@ -37,16 +37,25 @@ public class AssistantMessageEmitter {
      * 返回完整拼接后的回答文本（用于 responseSummary / ChatMemory）。
      */
     public String emitStream(String runId, String chatId, Flux<String> tokenStream) {
+        return consumeStream(tokenStream, token -> runService.appendEvent(runId, AssistantEventTypes.MESSAGE_DELTA, Map.of(
+                "runId", runId,
+                "chatId", chatId,
+                "delta", token
+        )));
+    }
+
+    public String collectStream(Flux<String> tokenStream) {
+        return consumeStream(tokenStream, token -> {
+        });
+    }
+
+    private String consumeStream(Flux<String> tokenStream, java.util.function.Consumer<String> chunkConsumer) {
         StringBuilder fullAnswer = new StringBuilder();
         AtomicReference<Throwable> errorRef = new AtomicReference<>();
         tokenStream.doOnNext(token -> {
             if (token != null && !token.isEmpty()) {
                 fullAnswer.append(token);
-                runService.appendEvent(runId, AssistantEventTypes.MESSAGE_DELTA, Map.of(
-                        "runId", runId,
-                        "chatId", chatId,
-                        "delta", token
-                ));
+                chunkConsumer.accept(token);
             }
         }).doOnError(errorRef::set).blockLast();
 

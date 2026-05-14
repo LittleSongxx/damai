@@ -42,6 +42,25 @@ class AssistantMemoryServiceTest {
     }
 
     @Test
+    void shouldLoadStructuredMemoryWhenPresent() {
+        AiConversationMemorySummaryMapper summaryMapper = mock(AiConversationMemorySummaryMapper.class);
+        AiRunMapper runMapper = mock(AiRunMapper.class);
+        AiConversationMemorySummary summary = new AiConversationMemorySummary();
+        summary.setSummary("用户关注退票规则");
+        summary.setMemoryJson("""
+                {"summary":"用户关注退票规则","conversationGoal":"查询退票","stableFacts":["关注退票"],"pendingQuestions":["多久到账"],"retrievalHints":["退票","到账"]}
+                """);
+        when(summaryMapper.selectOne(any(Wrapper.class))).thenReturn(summary);
+        OpenAiChatModel chatModel = mock(OpenAiChatModel.class);
+        AssistantMemoryService service = new AssistantMemoryService(summaryMapper, runMapper, chatModel);
+
+        AssistantMemoryContext context = service.load("chat_1", 1L);
+
+        assertEquals("查询退票", context.structuredMemory().conversationGoal());
+        assertEquals(List.of("退票", "到账"), context.structuredMemory().retrievalHints());
+    }
+
+    @Test
     void shouldReturnEmptyMemoryWhenNoSummaryExists() {
         AiConversationMemorySummaryMapper summaryMapper = mock(AiConversationMemorySummaryMapper.class);
         AiRunMapper runMapper = mock(AiRunMapper.class);

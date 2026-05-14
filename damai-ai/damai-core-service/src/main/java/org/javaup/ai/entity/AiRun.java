@@ -43,5 +43,7 @@ public class AiRun extends BaseTableData {
 
     private String errorMessage;
 
+    private Integer eventSeq;
+
     private Date completedAt;
 }

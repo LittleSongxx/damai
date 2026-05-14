@@ -23,5 +23,9 @@ public class AiConversationMemorySummary extends BaseTableData {
 
     private String summary;
 
+    private String memoryJson;
+
+    private Integer summaryVersion;
+
     private Integer compressionCount;
 }

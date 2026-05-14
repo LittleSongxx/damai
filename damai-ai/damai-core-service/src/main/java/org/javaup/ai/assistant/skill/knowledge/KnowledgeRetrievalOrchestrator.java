@@ -2,6 +2,7 @@ package org.javaup.ai.assistant.skill.knowledge;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.javaup.ai.assistant.runtime.AssistantStageTraceService;
 import org.javaup.ai.service.AdvancedQueryService;
 import org.javaup.ai.service.HybridSearchService;
 import org.javaup.ai.vo.RagSearchResultVo;
@@ -38,6 +39,8 @@ public class KnowledgeRetrievalOrchestrator {
     private final KnowledgeRetrievalPlanner retrievalPlanner;
     private final KnowledgeRetrievalEvaluator retrievalEvaluator;
     private final AdvancedQueryService advancedQueryService;
+    private final KnowledgeRetrievalTraceService retrievalTraceService;
+    private final AssistantStageTraceService stageTraceService;
 
     public KnowledgeRetrievalContext retrieve(String message) {
         KnowledgeRetrievalPlan plan = retrievalPlanner.plan(message);
@@ -45,7 +48,36 @@ public class KnowledgeRetrievalOrchestrator {
     }
 
     public KnowledgeRetrievalContext retrieve(KnowledgeRetrievalPlan plan) {
-        RagSearchResultVo firstPass = hybridSearchService.hybridSearchWithTrace(plan.normalizedQuery(), plan.topK(), plan.enableRerank());
+        AssistantStageTraceService.StageSpan firstPassSpan = stageTraceService.startStage(
+                "KNOWLEDGE_RETRIEVAL_FIRST_PASS",
+                "KnowledgeRetrieval",
+                plan.normalizedQuery(),
+                null,
+                Map.of("topK", plan.topK(), "enableRerank", plan.enableRerank(), "subQuestions", plan.subQuestions()));
+        RagSearchResultVo firstPass;
+        try {
+            firstPass = hybridSearchService.hybridSearchWithTrace(plan.normalizedQuery(), plan.topK(), plan.enableRerank());
+            stageTraceService.complete(firstPassSpan, firstPass.getRewrittenQuery(), null, null, null, null, Map.of(
+                    "denseHitCount", size(firstPass.getDenseSources()),
+                    "sparseHitCount", size(firstPass.getSparseSources()),
+                    "fusedHitCount", size(firstPass.getFusedSources()),
+                    "finalHitCount", size(firstPass.getSources())
+            ));
+        } catch (Exception ex) {
+            stageTraceService.fail(firstPassSpan, ex, Map.of());
+            throw ex;
+        }
+        retrievalTraceService.saveStageTrace(
+                "stage",
+                "knowledge.retrieval.first_pass",
+                firstPass.getRetrievalTraceId(),
+                plan.normalizedQuery(),
+                firstPass.getRewrittenQuery(),
+                firstPass.getDenseSources(),
+                firstPass.getSparseSources(),
+                firstPass.getFusedSources(),
+                firstPass.getSources(),
+                Map.of("topK", plan.topK(), "enableRerank", plan.enableRerank()));
         StructuredRuleSupportService.SupportBundle supportBundle = structuredRuleSupportService.lookup(plan.normalizedQuery());
         KnowledgeRetrievalAssessment assessment = retrievalEvaluator.assess(firstPass, supportBundle.sources(), "none", plan);
 
@@ -64,55 +96,112 @@ public class KnowledgeRetrievalOrchestrator {
      */
     private CragCorrectionResult runCorrectiveRetrieval(RagSearchResultVo firstPass, KnowledgeRetrievalPlan plan) {
         log.info("CRAG: 首轮置信度低，启动纠正检索 query='{}'", plan.normalizedQuery());
+        AssistantStageTraceService.StageSpan correctionSpan = stageTraceService.startStage(
+                "KNOWLEDGE_RETRIEVAL_CORRECTIVE",
+                "KnowledgeRetrieval",
+                plan.normalizedQuery(),
+                null,
+                metadata("parentTraceId", firstPass.getRetrievalTraceId()));
         List<RagSourceVo> allCorrectedSources = new ArrayList<>();
         List<Document> allCorrectedDocuments = new ArrayList<>();
         String action = "crag_corrective";
-
-        String correctiveQuery = retrievalPlanner.correctiveQuery(firstPass.getRewrittenQuery(), plan.normalizedQuery());
-        RagSearchResultVo corrected = hybridSearchService.hybridSearchWithTrace(correctiveQuery, plan.topK(), plan.enableRerank());
-        mergeSources(allCorrectedSources, corrected.getSources());
-        mergeDocuments(allCorrectedDocuments, corrected.getDocuments());
-
         try {
-            List<String> subQuestions = advancedQueryService.decomposeSubQuestions(plan.normalizedQuery());
-            if (subQuestions.size() > 1) {
-                action = "crag_sub_question_decomposition";
-                log.info("CRAG: Sub-question Decomposition 拆解为 {} 个子问题", subQuestions.size());
-                for (String subQ : subQuestions) {
-                    RagSearchResultVo subResult = hybridSearchService.hybridSearchWithTrace(subQ, Math.max(3, plan.topK() / 2), plan.enableRerank());
-                    mergeSources(allCorrectedSources, subResult.getSources());
-                    mergeDocuments(allCorrectedDocuments, subResult.getDocuments());
+            String correctiveQuery = retrievalPlanner.correctiveQuery(firstPass.getRewrittenQuery(), plan.normalizedQuery());
+            RagSearchResultVo corrected = hybridSearchService.hybridSearchWithTrace(correctiveQuery, plan.topK(), plan.enableRerank());
+            retrievalTraceService.saveStageTrace(
+                    "stage",
+                    "knowledge.retrieval.corrective_query",
+                    firstPass.getRetrievalTraceId(),
+                    plan.normalizedQuery(),
+                    correctiveQuery,
+                    corrected.getDenseSources(),
+                    corrected.getSparseSources(),
+                    corrected.getFusedSources(),
+                    corrected.getSources(),
+                    Map.of("topK", plan.topK()));
+            mergeSources(allCorrectedSources, corrected.getSources());
+            mergeDocuments(allCorrectedDocuments, corrected.getDocuments());
+
+            try {
+                List<String> subQuestions = advancedQueryService.decomposeSubQuestions(plan.normalizedQuery());
+                if (subQuestions.size() > 1) {
+                    action = "crag_sub_question_decomposition";
+                    log.info("CRAG: Sub-question Decomposition 拆解为 {} 个子问题", subQuestions.size());
+                    for (String subQ : subQuestions) {
+                        RagSearchResultVo subResult = hybridSearchService.hybridSearchWithTrace(subQ, Math.max(3, plan.topK() / 2), plan.enableRerank());
+                        retrievalTraceService.saveStageTrace(
+                                "stage",
+                                "knowledge.retrieval.sub_question",
+                                firstPass.getRetrievalTraceId(),
+                                subQ,
+                                subResult.getRewrittenQuery(),
+                                subResult.getDenseSources(),
+                                subResult.getSparseSources(),
+                                subResult.getFusedSources(),
+                                subResult.getSources(),
+                                Map.of("topK", Math.max(3, plan.topK() / 2)));
+                        mergeSources(allCorrectedSources, subResult.getSources());
+                        mergeDocuments(allCorrectedDocuments, subResult.getDocuments());
+                    }
                 }
+            } catch (Exception e) {
+                log.warn("CRAG: Sub-question Decomposition 失败，跳过", e);
             }
-        } catch (Exception e) {
-            log.warn("CRAG: Sub-question Decomposition 失败，跳过", e);
-        }
 
-        try {
-            List<RagSourceVo> hydeSources = hybridSearchService.hydeSearch(plan.normalizedQuery(), plan.topK());
-            if (!hydeSources.isEmpty()) {
-                action = action.contains("sub_question") ? "crag_sub_question_and_hyde" : "crag_hyde";
-                log.info("CRAG: HyDE 检索命中 {} 个文档", hydeSources.size());
-                mergeSources(allCorrectedSources, hydeSources);
+            try {
+                List<RagSourceVo> hydeSources = hybridSearchService.hydeSearch(plan.normalizedQuery(), plan.topK());
+                if (!hydeSources.isEmpty()) {
+                    action = action.contains("sub_question") ? "crag_sub_question_and_hyde" : "crag_hyde";
+                    log.info("CRAG: HyDE 检索命中 {} 个文档", hydeSources.size());
+                    retrievalTraceService.saveStageTrace(
+                            "stage",
+                            "knowledge.retrieval.hyde",
+                            firstPass.getRetrievalTraceId(),
+                            plan.normalizedQuery(),
+                            plan.normalizedQuery(),
+                            hydeSources,
+                            null,
+                            null,
+                            hydeSources,
+                            Map.of("topK", plan.topK()));
+                    mergeSources(allCorrectedSources, hydeSources);
+                }
+            } catch (Exception e) {
+                log.warn("CRAG: HyDE 检索失败，跳过", e);
             }
-        } catch (Exception e) {
-            log.warn("CRAG: HyDE 检索失败，跳过", e);
+
+            RagSearchResultVo mergedResult = RagSearchResultVo.builder()
+                    .originalQuery(corrected.getOriginalQuery())
+                    .normalizedQuery(corrected.getNormalizedQuery())
+                    .rewrittenQuery(corrected.getRewrittenQuery())
+                    .retrievalTraceId(corrected.getRetrievalTraceId())
+                    .denseSources(corrected.getDenseSources())
+                    .sparseSources(corrected.getSparseSources())
+                    .fusedSources(corrected.getFusedSources())
+                    .sources(dedup(allCorrectedSources))
+                    .documents(dedupDocuments(allCorrectedDocuments))
+                    .build();
+            retrievalTraceService.saveStageTrace(
+                    "stage",
+                    "knowledge.retrieval.corrective_merged",
+                    firstPass.getRetrievalTraceId(),
+                    plan.normalizedQuery(),
+                    corrected.getRewrittenQuery(),
+                    corrected.getDenseSources(),
+                    corrected.getSparseSources(),
+                    corrected.getFusedSources(),
+                    mergedResult.getSources(),
+                    Map.of("action", action, "mergedSourceCount", mergedResult.getSources().size()));
+            stageTraceService.complete(correctionSpan, action, null, null, null, null, Map.of(
+                    "mergedSourceCount", mergedResult.getSources().size(),
+                    "action", action
+            ));
+            log.info("CRAG: 纠正检索完成, action={}, mergedSources={}", action, mergedResult.getSources().size());
+            return new CragCorrectionResult(mergedResult, action);
+        } catch (Exception ex) {
+            stageTraceService.fail(correctionSpan, ex, metadata("parentTraceId", firstPass.getRetrievalTraceId()));
+            throw ex;
         }
-
-        RagSearchResultVo mergedResult = RagSearchResultVo.builder()
-                .originalQuery(corrected.getOriginalQuery())
-                .normalizedQuery(corrected.getNormalizedQuery())
-                .rewrittenQuery(corrected.getRewrittenQuery())
-                .retrievalTraceId(corrected.getRetrievalTraceId())
-                .denseSources(corrected.getDenseSources())
-                .sparseSources(corrected.getSparseSources())
-                .fusedSources(corrected.getFusedSources())
-                .sources(dedup(allCorrectedSources))
-                .documents(dedupDocuments(allCorrectedDocuments))
-                .build();
-
-        log.info("CRAG: 纠正检索完成, action={}, mergedSources={}", action, mergedResult.getSources().size());
-        return new CragCorrectionResult(mergedResult, action);
     }
 
     private void mergeSources(List<RagSourceVo> target, List<RagSourceVo> sources) {
@@ -170,5 +259,17 @@ public class KnowledgeRetrievalOrchestrator {
     }
 
     private record CragCorrectionResult(RagSearchResultVo result, String action) {
+    }
+
+    private int size(List<?> values) {
+        return values == null ? 0 : values.size();
+    }
+
+    private Map<String, Object> metadata(String key, Object value) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        if (value != null) {
+            metadata.put(key, value);
+        }
+        return metadata;
     }
 }

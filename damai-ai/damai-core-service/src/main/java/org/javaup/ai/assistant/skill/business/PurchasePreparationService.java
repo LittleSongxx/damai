@@ -17,12 +17,13 @@ import org.javaup.ai.vo.TicketUserVo;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Date;
+import java.util.HexFormat;
 import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -58,27 +59,25 @@ public class PurchasePreparationService {
         orderCreateDto.setTicketCategoryId(ticketCategoryId);
         orderCreateDto.setTicketCount(request.getTicketCount());
 
-        Map<String, Object> previewData = new HashMap<>(8);
-        previewData.put("programTitle", programDetailVo.getTitle());
-        previewData.put("actor", programDetailVo.getActor());
-        previewData.put("cityName", programDetailVo.getAreaName());
-        previewData.put("ticketCategoryPrice", request.getTicketCategoryPrice());
-        previewData.put("ticketCount", request.getTicketCount());
-        previewData.put("ticketUsers", matchedUsers.stream().map(TicketUserVo::getRelName).toList());
-        previewData.put("programOrderCreateDto", orderCreateDto);
-
         String runId = AiRequestContextHolder.getOptional().map(context -> context.getRunId()).orElseThrow(() -> new RuntimeException("缺少 run 上下文"));
-        AiAction action = assistantRunService.createAction(runId, AssistantActionType.PURCHASE_APPROVAL, previewData);
+        Date now = new Date();
+        Date expiresAt = new Date(now.getTime() + 15 * 60 * 1000L);
+        PurchaseActionSnapshot snapshot = buildSnapshot(request, programDetailVo, matchedUsers, ticketCategoryId, orderCreateDto, now, expiresAt);
+        AiAction action = assistantRunService.createAction(
+                runId,
+                AssistantActionType.PURCHASE_APPROVAL,
+                snapshot,
+                snapshot.getPreviewSummary(),
+                snapshot.getSnapshotHash(),
+                buildIdempotencyKey(runId, snapshot.getSnapshotHash()),
+                expiresAt
+        );
 
         AssistantActionPreviewVo previewVo = new AssistantActionPreviewVo();
         previewVo.setActionRequired(true);
         previewVo.setActionId(action.getActionId());
         previewVo.setActionType(action.getActionType());
-        previewVo.setPreviewSummary(String.format("节目《%s》, 票价%s, 数量%s, 购票人%s。请确认后再正式创建订单。",
-                programDetailVo.getTitle(),
-                request.getTicketCategoryPrice(),
-                request.getTicketCount(),
-                String.join("、", matchedUsers.stream().map(TicketUserVo::getRelName).toList())));
+        previewVo.setPreviewSummary(snapshot.getPreviewSummary());
         return previewVo;
     }
 
@@ -109,5 +108,52 @@ public class PurchasePreparationService {
 
     private String normalizeIdNumber(String value) {
         return value == null ? "" : value.replaceAll("\\s+", "").trim();
+    }
+
+    private PurchaseActionSnapshot buildSnapshot(CreateOrderFunctionDto request,
+                                                 ProgramDetailVo programDetailVo,
+                                                 List<TicketUserVo> matchedUsers,
+                                                 Long ticketCategoryId,
+                                                 ProgramOrderCreateDto orderCreateDto,
+                                                 Date generatedAt,
+                                                 Date expiresAt) {
+        PurchaseActionSnapshot snapshot = new PurchaseActionSnapshot();
+        snapshot.setProgramId(programDetailVo.getId());
+        snapshot.setUserId(AiRequestContextHolder.getRequiredUser().getUserId());
+        snapshot.setUserMobile(AiRequestContextHolder.getRequiredUser().getMobile());
+        snapshot.setProgramTitle(programDetailVo.getTitle());
+        snapshot.setActor(programDetailVo.getActor());
+        snapshot.setCityName(programDetailVo.getAreaName());
+        snapshot.setTicketCategoryId(ticketCategoryId);
+        snapshot.setTicketCategoryPrice(request.getTicketCategoryPrice());
+        snapshot.setTicketCount(request.getTicketCount());
+        snapshot.setTicketUsers(matchedUsers.stream().map(TicketUserVo::getRelName).toList());
+        snapshot.setTicketUserIds(matchedUsers.stream().map(TicketUserVo::getId).toList());
+        snapshot.setGeneratedAt(generatedAt);
+        snapshot.setExpiresAt(expiresAt);
+        snapshot.setProgramOrderCreateDto(orderCreateDto);
+        snapshot.setPreviewSummary(String.format("节目《%s》, 票价%s, 数量%s, 购票人%s。请确认后再正式创建订单。",
+                programDetailVo.getTitle(),
+                request.getTicketCategoryPrice(),
+                request.getTicketCount(),
+                String.join("、", snapshot.getTicketUsers())));
+        snapshot.setSnapshotHash(snapshotHash(snapshot));
+        return snapshot;
+    }
+
+    private String snapshotHash(PurchaseActionSnapshot snapshot) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            String raw = snapshot.getProgramId() + "|" + snapshot.getUserId() + "|" + snapshot.getTicketCategoryId()
+                    + "|" + snapshot.getTicketCategoryPrice() + "|" + snapshot.getTicketCount() + "|" + snapshot.getTicketUserIds();
+            return HexFormat.of().formatHex(digest.digest(raw.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("无法生成购票快照签名", ex);
+        }
+    }
+
+    private String buildIdempotencyKey(String runId, String snapshotHash) {
+        String suffix = snapshotHash == null ? "na" : snapshotHash.substring(0, Math.min(16, snapshotHash.length()));
+        return "assistant:" + runId + ":" + suffix;
     }
 }

@@ -1,5 +1,6 @@
 package org.javaup.ai.assistant.executor;
 
+import com.alibaba.fastjson.JSON;
 import org.javaup.ai.assistant.AssistantEventTypes;
 import org.javaup.ai.assistant.AssistantExecutionMode;
 import org.javaup.ai.assistant.AssistantRouteDecision;
@@ -23,6 +24,9 @@ import org.javaup.ai.assistant.tool.AssistantSkillToolRegistry;
 import org.javaup.ai.assistant.tool.AssistantSkillToolScope;
 import org.javaup.ai.entity.AiAction;
 import org.javaup.ai.entity.AiRun;
+import org.javaup.ai.guardrails.GuardrailAuditService;
+import org.javaup.ai.guardrails.GuardrailResult;
+import org.javaup.ai.guardrails.ResponseGuardrailService;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -43,6 +47,8 @@ public class SkillExecutor implements AssistantExecutor {
     private final AssistantSkillPolicyGuard policyGuard;
     private final AssistantSkillSchemaValidator schemaValidator;
     private final AssistantSkillToolRegistry toolRegistry;
+    private final ResponseGuardrailService responseGuardrailService;
+    private final GuardrailAuditService guardrailAuditService;
 
     public SkillExecutor(AssistantRunService runService,
                          AssistantSkillRegistry skillRegistry,
@@ -51,7 +57,7 @@ public class SkillExecutor implements AssistantExecutor {
                          AssistantUserProfileService userProfileService,
                          AssistantRunCompletedPublisher runCompletedPublisher) {
         this(runService, skillRegistry, messageEmitter, memoryService, userProfileService, runCompletedPublisher,
-                (AssistantSkillDefinitionService) null, null, null, null);
+                (AssistantSkillDefinitionService) null, null, null, null, null, null);
     }
 
     @Autowired
@@ -64,12 +70,16 @@ public class SkillExecutor implements AssistantExecutor {
                          ObjectProvider<AssistantSkillDefinitionService> skillDefinitionServiceProvider,
                          ObjectProvider<AssistantSkillPolicyGuard> policyGuardProvider,
                          ObjectProvider<AssistantSkillSchemaValidator> schemaValidatorProvider,
-                         ObjectProvider<AssistantSkillToolRegistry> toolRegistryProvider) {
+                         ObjectProvider<AssistantSkillToolRegistry> toolRegistryProvider,
+                         ObjectProvider<ResponseGuardrailService> responseGuardrailServiceProvider,
+                         ObjectProvider<GuardrailAuditService> guardrailAuditServiceProvider) {
         this(runService, skillRegistry, messageEmitter, memoryService, userProfileService, runCompletedPublisher,
                 skillDefinitionServiceProvider == null ? null : skillDefinitionServiceProvider.getIfAvailable(),
                 policyGuardProvider == null ? null : policyGuardProvider.getIfAvailable(),
                 schemaValidatorProvider == null ? null : schemaValidatorProvider.getIfAvailable(),
-                toolRegistryProvider == null ? null : toolRegistryProvider.getIfAvailable());
+                toolRegistryProvider == null ? null : toolRegistryProvider.getIfAvailable(),
+                responseGuardrailServiceProvider == null ? null : responseGuardrailServiceProvider.getIfAvailable(),
+                guardrailAuditServiceProvider == null ? null : guardrailAuditServiceProvider.getIfAvailable());
     }
 
     private SkillExecutor(AssistantRunService runService,
@@ -81,7 +91,9 @@ public class SkillExecutor implements AssistantExecutor {
                           AssistantSkillDefinitionService skillDefinitionService,
                           AssistantSkillPolicyGuard policyGuard,
                           AssistantSkillSchemaValidator schemaValidator,
-                          AssistantSkillToolRegistry toolRegistry) {
+                          AssistantSkillToolRegistry toolRegistry,
+                          ResponseGuardrailService responseGuardrailService,
+                          GuardrailAuditService guardrailAuditService) {
         this.runService = runService;
         this.skillRegistry = skillRegistry;
         this.messageEmitter = messageEmitter;
@@ -92,6 +104,8 @@ public class SkillExecutor implements AssistantExecutor {
         this.policyGuard = policyGuard;
         this.schemaValidator = schemaValidator;
         this.toolRegistry = toolRegistry;
+        this.responseGuardrailService = responseGuardrailService;
+        this.guardrailAuditService = guardrailAuditService;
     }
 
     @Override
@@ -142,11 +156,25 @@ public class SkillExecutor implements AssistantExecutor {
         }
         runService.appendEvent(run.getRunId(), AssistantEventTypes.SKILL_COMPLETED, skillEventPayload(run, decision, skill, descriptor, skillDecision, System.currentTimeMillis() - skillStartTime));
         if (result.getMessageStream() != null) {
-            String fullAnswer = messageEmitter.emitStream(run.getRunId(), run.getConversationId(), result.getMessageStream());
-            result.setMessage(fullAnswer);
-            result.setResponseSummary(fullAnswer);
+            String fullAnswer;
+            if (responseGuardrailService != null && responseGuardrailService.shouldBufferBeforeStreaming(descriptor)) {
+                fullAnswer = messageEmitter.collectStream(result.getMessageStream());
+                String guarded = applyResponseGuardrails(run, result, fullAnswer);
+                result.setMessage(guarded);
+                result.setResponseSummary(guarded);
+                messageEmitter.emitMessage(run.getRunId(), run.getConversationId(), guarded);
+            } else {
+                fullAnswer = messageEmitter.emitStream(run.getRunId(), run.getConversationId(), result.getMessageStream());
+                String guarded = applyResponseGuardrails(run, result, fullAnswer);
+                result.setMessage(guarded);
+                result.setResponseSummary(guarded);
+                emitReplacementIfNeeded(run, fullAnswer, guarded);
+            }
         } else {
-            messageEmitter.emitMessage(run.getRunId(), run.getConversationId(), result.getMessage());
+            String guarded = applyResponseGuardrails(run, result, result.getMessage());
+            result.setMessage(guarded);
+            result.setResponseSummary(guarded);
+            messageEmitter.emitMessage(run.getRunId(), run.getConversationId(), guarded);
         }
         runService.appendEvent(run.getRunId(), AssistantEventTypes.MESSAGE_COMPLETED, Map.of(
                 "runId", run.getRunId(),
@@ -154,13 +182,7 @@ public class SkillExecutor implements AssistantExecutor {
         ));
         AiAction pendingAction = result.getPendingAction();
         if (pendingAction != null) {
-            runService.appendEvent(run.getRunId(), AssistantEventTypes.ACTION_REQUIRED, Map.of(
-                    "runId", run.getRunId(),
-                    "actionId", pendingAction.getActionId(),
-                    "actionType", pendingAction.getActionType(),
-                    "previewJson", pendingAction.getPreviewJson(),
-                    "status", pendingAction.getActionStatus()
-            ));
+            runService.appendEvent(run.getRunId(), AssistantEventTypes.ACTION_REQUIRED, actionPayload(run.getRunId(), pendingAction));
             runService.markWaitingAction(run, "WAITING_ACTION", result.getResponseSummary());
         } else {
             runService.markCompleted(run, "RESPONDED", result.getResponseSummary());
@@ -203,5 +225,48 @@ public class SkillExecutor implements AssistantExecutor {
 
     private String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private String applyResponseGuardrails(AiRun run, AssistantSkillResult result, String content) {
+        if (responseGuardrailService == null || content == null || content.isBlank()) {
+            return content;
+        }
+        GuardrailResult guardrailResult = responseGuardrailService.check(content, result.getEvidenceChunks());
+        if (guardrailResult.getAction() == GuardrailResult.Action.PASS) {
+            return content;
+        }
+        if (guardrailAuditService != null) {
+            guardrailAuditService.publish(run.getRunId(), "response_output", guardrailResult, content);
+        }
+        if (guardrailResult.getSanitizedContent() != null && !guardrailResult.getSanitizedContent().isBlank()) {
+            return guardrailResult.getSanitizedContent();
+        }
+        if (guardrailResult.isBlocked()) {
+            return "抱歉，本次回答触发了输出安全策略，已被拦截。";
+        }
+        return content;
+    }
+
+    private void emitReplacementIfNeeded(AiRun run, String originalContent, String guardedContent) {
+        if (guardedContent == null || originalContent == null || guardedContent.equals(originalContent)) {
+            return;
+        }
+        runService.appendEvent(run.getRunId(), AssistantEventTypes.MESSAGE_REPLACED, Map.of(
+                "runId", run.getRunId(),
+                "chatId", run.getConversationId(),
+                "content", guardedContent
+        ));
+    }
+
+    private Map<String, Object> actionPayload(String runId, AiAction action) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("runId", runId);
+        payload.put("actionId", action.getActionId());
+        payload.put("actionType", action.getActionType());
+        payload.put("status", action.getActionStatus());
+        payload.put("previewSummary", action.getPreviewSummary());
+        payload.put("expiresAt", action.getExpiresAt());
+        payload.put("preview", action.getPreviewJson() == null ? Map.of() : JSON.parseObject(action.getPreviewJson()));
+        return payload;
     }
 }

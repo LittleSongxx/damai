@@ -55,7 +55,7 @@ public class OutputGuardrailService {
                 return GuardrailResult.builder()
                         .action(GuardrailResult.Action.WARN)
                         .reasons(allReasons)
-                        .sanitizedContent(content + "\n\n⚠️ 注意：以上回答可能包含未经验证的信息，请以官方资料为准。")
+                        .sanitizedContent(content + "\n\n注意：以上回答可能包含未经验证的信息，请以官方资料为准。")
                         .build();
             }
         }

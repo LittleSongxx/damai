@@ -1,7 +1,9 @@
 package org.javaup.ai.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.javaup.ai.assistant.runtime.AssistantObservedChatService;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -19,9 +21,17 @@ import java.util.List;
 public class AdvancedQueryService {
 
     private final ChatClient chatClient;
+    private final AssistantObservedChatService observedChatService;
 
-    public AdvancedQueryService(@Qualifier("unifiedKnowledgeChatClient") ChatClient chatClient) {
+    public AdvancedQueryService(ChatClient chatClient) {
+        this(chatClient, null);
+    }
+
+    @Autowired
+    public AdvancedQueryService(@Qualifier("unifiedKnowledgeChatClient") ChatClient chatClient,
+                                AssistantObservedChatService observedChatService) {
         this.chatClient = chatClient;
+        this.observedChatService = observedChatService;
     }
 
     /**
@@ -47,10 +57,7 @@ public class AdvancedQueryService {
                     输出3行查询：
                     """.formatted(originalQuery);
 
-            String result = chatClient.prompt()
-                    .user(prompt)
-                    .call()
-                    .content();
+            String result = callObserved("KNOWLEDGE_QUERY_REWRITE", "KnowledgeQueryRewrite", prompt);
 
             List<String> queries = parseLines(result, 3);
             if (queries.isEmpty()) {
@@ -89,10 +96,7 @@ public class AdvancedQueryService {
                     子问题：
                     """.formatted(query);
 
-            String result = chatClient.prompt()
-                    .user(prompt)
-                    .call()
-                    .content();
+            String result = callObserved("KNOWLEDGE_SUB_QUESTION", "KnowledgeSubQuestion", prompt);
 
             List<String> subQuestions = parseLines(result, 4);
             if (subQuestions.isEmpty()) {
@@ -131,10 +135,7 @@ public class AdvancedQueryService {
                     知识库文档：
                     """.formatted(query);
 
-            String result = chatClient.prompt()
-                    .user(prompt)
-                    .call()
-                    .content();
+            String result = callObserved("KNOWLEDGE_HYDE", "KnowledgeHyde", prompt);
 
             if (StringUtils.hasText(result)) {
                 log.info("HyDE 假想文档生成完成，长度={}", result.length());
@@ -162,6 +163,13 @@ public class AdvancedQueryService {
             }
         }
         return lines;
+    }
+
+    private String callObserved(String stageKey, String requestType, String prompt) {
+        if (observedChatService == null) {
+            return chatClient.prompt().user(prompt).call().content();
+        }
+        return observedChatService.call(chatClient, stageKey, requestType, "qwen3.6-plus", prompt);
     }
 
     public record QueryRewriteResult(String primaryQuery, List<String> allQueries) {

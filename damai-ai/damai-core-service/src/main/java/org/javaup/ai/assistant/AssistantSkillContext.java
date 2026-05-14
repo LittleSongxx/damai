@@ -88,7 +88,22 @@ public class AssistantSkillContext {
         if (memoryContext == null || !memoryContext.present()) {
             return "无";
         }
-        return memoryContext.summary();
+        if (memoryContext.structuredMemory() == null) {
+            return memoryContext.summary();
+        }
+        return """
+                摘要：%s
+                目标：%s
+                稳定事实：%s
+                未决问题：%s
+                检索提示：%s
+                """.formatted(
+                emptyAsNone(memoryContext.structuredMemory().summary()),
+                emptyAsNone(memoryContext.structuredMemory().conversationGoal()),
+                joinOrNone(memoryContext.structuredMemory().stableFacts()),
+                joinOrNone(memoryContext.structuredMemory().pendingQuestions()),
+                joinOrNone(memoryContext.structuredMemory().retrievalHints())
+        );
     }
 
     public String formatUserProfile() {
@@ -96,5 +111,13 @@ public class AssistantSkillContext {
             return "无";
         }
         return userProfileContext.summary() + "；偏好标签：" + userProfileContext.preferenceTagsJson();
+    }
+
+    private String joinOrNone(java.util.List<String> values) {
+        return values == null || values.isEmpty() ? "无" : String.join("；", values);
+    }
+
+    private String emptyAsNone(String value) {
+        return value == null || value.isBlank() ? "无" : value;
     }
 }

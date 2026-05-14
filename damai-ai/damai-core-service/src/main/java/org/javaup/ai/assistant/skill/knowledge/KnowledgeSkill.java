@@ -10,6 +10,7 @@ import org.javaup.ai.assistant.AssistantSkillDescriptor;
 import org.javaup.ai.assistant.AssistantSkillRiskLevel;
 import org.javaup.ai.assistant.AssistantSkillResult;
 import org.javaup.ai.assistant.memory.AssistantMemoryKeyService;
+import org.javaup.ai.assistant.runtime.AssistantObservedChatService;
 import org.javaup.ai.assistant.tool.AssistantToolInvoker;
 import org.javaup.ai.entity.AiRetrieval;
 import org.springframework.ai.chat.client.ChatClient;
@@ -23,6 +24,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Component
 public class KnowledgeSkill implements AssistantSkill {
@@ -34,6 +36,9 @@ public class KnowledgeSkill implements AssistantSkill {
     private final AssistantRunService assistantRunService;
     private final AssistantMemoryKeyService memoryKeyService;
     private final AssistantToolInvoker toolInvoker;
+    private final KnowledgeShadowRoutingService shadowRoutingService;
+    private final KnowledgeRetrievalTraceService retrievalTraceService;
+    private final AssistantObservedChatService observedChatService;
 
     public KnowledgeSkill(@Qualifier("unifiedKnowledgeChatClient") ChatClient unifiedKnowledgeChatClient,
                           KnowledgeRetrievalPlanner retrievalPlanner,
@@ -41,7 +46,10 @@ public class KnowledgeSkill implements AssistantSkill {
                           KnowledgePromptAssemblyService promptAssemblyService,
                           AssistantRunService assistantRunService,
                           AssistantMemoryKeyService memoryKeyService,
-                          AssistantToolInvoker toolInvoker) {
+                          AssistantToolInvoker toolInvoker,
+                          KnowledgeShadowRoutingService shadowRoutingService,
+                          KnowledgeRetrievalTraceService retrievalTraceService,
+                          AssistantObservedChatService observedChatService) {
         this.unifiedKnowledgeChatClient = unifiedKnowledgeChatClient;
         this.retrievalPlanner = retrievalPlanner;
         this.retrievalOrchestrator = retrievalOrchestrator;
@@ -49,6 +57,9 @@ public class KnowledgeSkill implements AssistantSkill {
         this.assistantRunService = assistantRunService;
         this.memoryKeyService = memoryKeyService;
         this.toolInvoker = toolInvoker;
+        this.shadowRoutingService = shadowRoutingService;
+        this.retrievalTraceService = retrievalTraceService;
+        this.observedChatService = observedChatService;
     }
 
     @Override
@@ -91,13 +102,35 @@ public class KnowledgeSkill implements AssistantSkill {
     @Override
     public AssistantSkillResult execute(AssistantSkillContext context) {
         KnowledgeRetrievalPlan plan = retrievalPlanner.plan(context.getMessage());
+        KnowledgeShadowRouteResult shadowRoute = shadowRoutingService.shadowRoute(plan.normalizedQuery());
+        retrievalTraceService.saveStageTrace(
+                "route",
+                "knowledge.shadow_route",
+                null,
+                plan.normalizedQuery(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                Map.of("shadowRoute", shadowRoute)
+        );
+        assistantRunService.appendEvent(context.getRun().getRunId(), AssistantEventTypes.KNOWLEDGE_ROUTE_SHADOWED, Map.of(
+                "runId", context.getRun().getRunId(),
+                "query", plan.normalizedQuery(),
+                "mode", shadowRoute.mode(),
+                "scopeCandidates", shadowRoute.scopeCandidates(),
+                "topicCandidates", shadowRoute.topicCandidates(),
+                "documentCandidates", shadowRoute.documentCandidates()
+        ));
         assistantRunService.appendEvent(context.getRun().getRunId(), AssistantEventTypes.RETRIEVAL_STARTED, Map.of(
                 "runId", context.getRun().getRunId(),
                 "query", context.getMessage(),
                 "normalizedQuery", plan.normalizedQuery(),
                 "topK", plan.topK(),
                 "enableRerank", plan.enableRerank(),
-                "subQuestions", plan.subQuestions()
+                "subQuestions", plan.subQuestions(),
+                "shadowRoute", shadowRoute
         ));
 
         KnowledgeRetrievalContext retrievalContext = toolInvoker.invoke(context.getRun().getRunId(), "knowledge.retrieve", "rag", plan, () ->
@@ -118,7 +151,7 @@ public class KnowledgeSkill implements AssistantSkill {
         retrieval.setConfidenceScore(assessment.confidenceScore());
         retrieval.setConfidenceLevel(assessment.confidenceLevel());
         retrieval.setCorrectiveAction(assessment.correctiveAction());
-        retrieval.setRetrievalPlanJson(JSON.toJSONString(buildRetrievalPlanPayload(retrievalContext)));
+        retrieval.setRetrievalPlanJson(JSON.toJSONString(buildRetrievalPlanPayload(retrievalContext, shadowRoute)));
         assistantRunService.saveRetrieval(retrieval);
 
         Map<String, Object> retrievalCompletedPayload = new LinkedHashMap<>();
@@ -142,6 +175,7 @@ public class KnowledgeSkill implements AssistantSkill {
         retrievalCompletedPayload.put("denseHitCount", retrievalContext.searchResult().getDenseSources() == null ? 0 : retrievalContext.searchResult().getDenseSources().size());
         retrievalCompletedPayload.put("sparseHitCount", retrievalContext.searchResult().getSparseSources() == null ? 0 : retrievalContext.searchResult().getSparseSources().size());
         retrievalCompletedPayload.put("sources", assessment.sources());
+        retrievalCompletedPayload.put("shadowRoute", shadowRoute);
         assistantRunService.appendEvent(context.getRun().getRunId(), AssistantEventTypes.RETRIEVAL_COMPLETED, retrievalCompletedPayload);
 
         if ("LOW".equals(assessment.confidenceLevel())) {
@@ -154,19 +188,27 @@ public class KnowledgeSkill implements AssistantSkill {
         }
 
         KnowledgePromptAssemblyResult prompt = promptAssemblyService.assemble(context.buildUserPrompt(), retrievalContext);
-        Flux<String> tokenStream = unifiedKnowledgeChatClient.prompt()
-                .user(prompt.groundedPrompt())
-                .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, memoryKeyService.userConversationKey(context.getRun().getUserId(), context.getRun().getConversationId())))
-                .stream()
-                .content();
+        Flux<String> tokenStream = observedChatService.stream(
+                unifiedKnowledgeChatClient,
+                "KNOWLEDGE_ANSWER",
+                "KnowledgeAnswer",
+                "qwen3.6-plus",
+                memoryKeyService.userConversationKey(context.getRun().getUserId(), context.getRun().getConversationId()),
+                prompt.groundedPrompt()
+        );
 
         return AssistantSkillResult.builder()
                 .messageStream(tokenStream)
                 .retrieval(retrieval)
+                .evidenceChunks(retrievalContext.answerDocuments().stream()
+                        .map(document -> document == null ? null : document.getText())
+                        .filter(text -> text != null && !text.isBlank())
+                        .collect(Collectors.toList()))
                 .build();
     }
 
-    private Map<String, Object> buildRetrievalPlanPayload(KnowledgeRetrievalContext retrievalContext) {
+    private Map<String, Object> buildRetrievalPlanPayload(KnowledgeRetrievalContext retrievalContext,
+                                                          KnowledgeShadowRouteResult shadowRoute) {
         KnowledgeRetrievalPlan plan = retrievalContext.plan();
         return Map.of(
                 "topK", plan.topK(),
@@ -175,7 +217,8 @@ public class KnowledgeSkill implements AssistantSkill {
                 "evidenceSnippetLimit", plan.evidenceSnippetLimit(),
                 "evidenceContextCharBudget", plan.evidenceContextCharBudget(),
                 "subQuestions", plan.subQuestions(),
-                "usedStructuredSupport", !retrievalContext.supportBundle().sources().isEmpty()
+                "usedStructuredSupport", !retrievalContext.supportBundle().sources().isEmpty(),
+                "shadowRoute", shadowRoute
         );
     }
 

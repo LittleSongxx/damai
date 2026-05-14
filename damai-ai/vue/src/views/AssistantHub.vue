@@ -108,6 +108,44 @@
             </div>
           </section>
 
+          <section class="meta-card">
+            <p class="eyebrow">Memory</p>
+            <h3>长期记忆</h3>
+            <p v-if="!hasMemorySummary" class="empty-text">完成至少一轮运行后，这里会展示当前会话的摘要、目标和后续待补充信息。</p>
+            <template v-else>
+              <div class="memory-block">
+                <span class="memory-label">摘要</span>
+                <p>{{ structuredMemory.summary }}</p>
+              </div>
+              <div v-if="structuredMemory.conversationGoal" class="memory-block">
+                <span class="memory-label">当前目标</span>
+                <p>{{ structuredMemory.conversationGoal }}</p>
+              </div>
+              <div v-if="structuredMemory.stableFacts.length" class="memory-block">
+                <span class="memory-label">稳定事实</span>
+                <ul class="detail-list">
+                  <li v-for="fact in structuredMemory.stableFacts" :key="fact">{{ fact }}</li>
+                </ul>
+              </div>
+              <div v-if="structuredMemory.pendingQuestions.length" class="memory-block">
+                <span class="memory-label">待确认</span>
+                <ul class="detail-list">
+                  <li v-for="question in structuredMemory.pendingQuestions" :key="question">{{ question }}</li>
+                </ul>
+              </div>
+              <div v-if="structuredMemory.retrievalHints.length" class="memory-block">
+                <span class="memory-label">检索提示</span>
+                <div class="pill-list">
+                  <span v-for="hint in structuredMemory.retrievalHints" :key="hint" class="detail-pill">{{ hint }}</span>
+                </div>
+              </div>
+              <div class="meta-footnote">
+                <span>版本 {{ memorySummary?.summaryVersion || 1 }}</span>
+                <span>压缩 {{ memorySummary?.compressionCount || 0 }} 次</span>
+              </div>
+            </template>
+          </section>
+
           <section v-if="capabilities?.skills?.length" class="meta-card">
             <p class="eyebrow">Skills</p>
             <h3>直选 Skill</h3>
@@ -137,6 +175,80 @@
             </ol>
           </section>
 
+          <section class="meta-card">
+            <p class="eyebrow">Stages</p>
+            <h3>阶段观测</h3>
+            <p v-if="!stageTraceItems.length" class="empty-text">这里会展示规划、检索、查询改写和答案生成各阶段的耗时与模型调用信息。</p>
+            <ul v-else class="trace-list">
+              <li v-for="trace in stageTraceItems" :key="trace.id" class="trace-item">
+                <div class="trace-header">
+                  <strong>{{ trace.label }}</strong>
+                  <span class="trace-status" :class="trace.statusClass">{{ trace.statusText }}</span>
+                </div>
+                <div class="trace-meta">
+                  <span>{{ trace.requestType || 'Runtime' }}</span>
+                  <span>{{ trace.latencyText }}</span>
+                </div>
+                <div class="trace-meta">
+                  <span>{{ trace.modelName || '未记录模型' }}</span>
+                  <span v-if="trace.totalTokens">tokens {{ trace.totalTokens }}</span>
+                  <span v-else-if="trace.promptTokens || trace.completionTokens">
+                    {{ trace.promptTokens || 0 }}/{{ trace.completionTokens || 0 }}
+                  </span>
+                </div>
+                <p v-if="trace.metadataSummary" class="trace-note">{{ trace.metadataSummary }}</p>
+                <p v-if="trace.errorMessage" class="trace-note trace-note--error">{{ trace.errorMessage }}</p>
+              </li>
+            </ul>
+          </section>
+
+          <section class="meta-card">
+            <p class="eyebrow">Retrieval</p>
+            <h3>检索细节</h3>
+            <p v-if="!retrievalTraceItems.length" class="empty-text">知识问答运行后，这里会展示 shadow route、首轮检索、纠正检索和结果合并过程。</p>
+            <ul v-else class="trace-list">
+              <li v-for="trace in retrievalTraceItems" :key="trace.id" class="trace-item">
+                <div class="trace-header">
+                  <strong>{{ trace.label }}</strong>
+                  <span class="trace-status trace-status--neutral">{{ trace.traceType || 'stage' }}</span>
+                </div>
+                <p v-if="trace.originalQuery" class="trace-query">Q: {{ trace.originalQuery }}</p>
+                <p v-if="trace.rewrittenQuery && trace.rewrittenQuery !== trace.originalQuery" class="trace-query">R: {{ trace.rewrittenQuery }}</p>
+                <div class="trace-meta">
+                  <span>dense {{ trace.denseHitCount }}</span>
+                  <span>sparse {{ trace.sparseHitCount }}</span>
+                  <span>fused {{ trace.fusedHitCount }}</span>
+                  <span>final {{ trace.finalHitCount }}</span>
+                </div>
+                <p v-if="trace.metadataSummary" class="trace-note">{{ trace.metadataSummary }}</p>
+                <div v-if="trace.shadowRoute?.scopeCandidates?.length" class="memory-block">
+                  <span class="memory-label">Scope</span>
+                  <div class="pill-list">
+                    <span v-for="candidate in trace.shadowRoute.scopeCandidates.slice(0, 3)" :key="`${trace.id}-scope-${candidate.name}`" class="detail-pill">
+                      {{ candidate.name }} · {{ candidate.score }}
+                    </span>
+                  </div>
+                </div>
+                <div v-if="trace.shadowRoute?.topicCandidates?.length" class="memory-block">
+                  <span class="memory-label">Topic</span>
+                  <div class="pill-list">
+                    <span v-for="candidate in trace.shadowRoute.topicCandidates.slice(0, 3)" :key="`${trace.id}-topic-${candidate.name}`" class="detail-pill">
+                      {{ candidate.name }} · {{ candidate.score }}
+                    </span>
+                  </div>
+                </div>
+                <div v-if="trace.shadowRoute?.documentCandidates?.length" class="memory-block">
+                  <span class="memory-label">Document</span>
+                  <div class="pill-list">
+                    <span v-for="candidate in trace.shadowRoute.documentCandidates.slice(0, 3)" :key="`${trace.id}-document-${candidate.name}`" class="detail-pill">
+                      {{ candidate.name }} · {{ candidate.score }}
+                    </span>
+                  </div>
+                </div>
+              </li>
+            </ul>
+          </section>
+
           <section v-if="evidenceCards.length" class="meta-card">
             <p class="eyebrow">Evidence</p>
             <h3>来源证据</h3>
@@ -153,8 +265,10 @@
             <h3>待审批动作</h3>
             <p class="approval-summary">{{ pendingAction.summary || pendingAction.previewText || '请确认是否执行该动作。' }}</p>
             <div class="approval-actions">
-              <button class="primary-button" @click="approveAction">批准</button>
-              <button class="ghost-button ghost-button--soft" @click="rejectAction">拒绝</button>
+              <button class="primary-button" :disabled="pendingAction.processing" @click="approveAction">
+                {{ pendingAction.processing ? '处理中' : '批准' }}
+              </button>
+              <button class="ghost-button ghost-button--soft" :disabled="pendingAction.processing" @click="rejectAction">拒绝</button>
             </div>
           </section>
 
@@ -226,6 +340,9 @@ const {
   conversations,
   orderedTimeline,
   evidenceCards,
+  stageTraces,
+  retrievalTraces,
+  memorySummary,
   pendingAction,
   toolCalls,
   clarificationOptions,
@@ -245,7 +362,76 @@ const {
   rejectAction
 } = useAssistantRuntime()
 
+const stageLabels = {
+  PLANNING: '运行规划',
+  KNOWLEDGE_QUERY_REWRITE: '查询改写',
+  KNOWLEDGE_SUB_QUESTION: '子问题拆解',
+  KNOWLEDGE_HYDE: 'HyDE 假想文档',
+  KNOWLEDGE_RETRIEVAL_FIRST_PASS: '首轮检索',
+  KNOWLEDGE_RETRIEVAL_CORRECTIVE: '纠正检索',
+  KNOWLEDGE_ANSWER: '答案生成'
+}
+
+const retrievalLabels = {
+  'knowledge.shadow_route': 'Shadow Route',
+  'knowledge.retrieval.first_pass': '首轮检索结果',
+  'knowledge.retrieval.corrective_query': '纠正查询',
+  'knowledge.retrieval.sub_question': '子问题检索',
+  'knowledge.retrieval.hyde': 'HyDE 检索',
+  'knowledge.retrieval.corrective_merged': '纠正结果合并'
+}
+
 const starterPrompts = computed(() => allStarterPrompts.filter(prompt => canUseOps.value || !/gateway|cpu|错误日志|trace|监控|运维/i.test(prompt)))
+
+const structuredMemory = computed(() => memorySummary.value?.structuredMemory || {
+  summary: '',
+  conversationGoal: '',
+  stableFacts: [],
+  pendingQuestions: [],
+  retrievalHints: []
+})
+
+const hasMemorySummary = computed(() => memorySummary.value?.hasContent === true)
+
+const stageTraceItems = computed(() => [...stageTraces.value]
+  .slice()
+  .sort((left, right) => new Date(right.createTime || 0).getTime() - new Date(left.createTime || 0).getTime())
+  .map(trace => {
+    const metadata = trace.metadata || {}
+    const metadataSummary = [
+      metadata.action ? `action=${metadata.action}` : '',
+      metadata.finalHitCount != null ? `final=${metadata.finalHitCount}` : '',
+      metadata.mergedSourceCount != null ? `merged=${metadata.mergedSourceCount}` : '',
+      metadata.streamed ? 'stream' : ''
+    ].filter(Boolean).join(' · ')
+    return {
+      ...trace,
+      label: stageLabels[trace.stepKey] || trace.stepKey || '未命名阶段',
+      latencyText: trace.latencyMs != null ? `${trace.latencyMs} ms` : '进行中',
+      statusText: trace.success === false ? '失败' : (trace.success === true ? '完成' : '运行中'),
+      statusClass: trace.success === false ? 'trace-status--error' : (trace.success === true ? 'trace-status--ok' : 'trace-status--running'),
+      metadataSummary
+    }
+  }))
+
+const retrievalTraceItems = computed(() => [...retrievalTraces.value]
+  .slice()
+  .sort((left, right) => new Date(right.createTime || 0).getTime() - new Date(left.createTime || 0).getTime())
+  .map(trace => {
+    const metadata = trace.metadata || {}
+    const shadowRoute = metadata.shadowRoute || null
+    const metadataSummary = [
+      metadata.action ? `action=${metadata.action}` : '',
+      metadata.topK != null ? `topK=${metadata.topK}` : '',
+      metadata.mergedSourceCount != null ? `merged=${metadata.mergedSourceCount}` : ''
+    ].filter(Boolean).join(' · ')
+    return {
+      ...trace,
+      label: retrievalLabels[trace.stepKey] || trace.stepKey || '检索步骤',
+      metadataSummary,
+      shadowRoute
+    }
+  }))
 
 const sendWithSkill = (skill) => {
   const message = userInput.value.trim() || skill.description || skill.name
@@ -532,7 +718,9 @@ onMounted(async () => {
 
 .step-list,
 .tool-list,
-.source-list {
+.source-list,
+.trace-list,
+.detail-list {
   margin: 16px 0 0;
   padding: 0;
   list-style: none;
@@ -557,6 +745,128 @@ onMounted(async () => {
 
 .approval-summary,
 .empty-text {
+  color: var(--text-soft);
+}
+
+.memory-block + .memory-block {
+  margin-top: 16px;
+}
+
+.memory-block p {
+  margin: 6px 0 0;
+  color: var(--text-soft);
+}
+
+.memory-label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-color);
+}
+
+.detail-list {
+  display: grid;
+  gap: 8px;
+}
+
+.detail-list li {
+  color: var(--text-soft);
+}
+
+.pill-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.detail-pill {
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: rgba(255, 90, 54, 0.08);
+  color: var(--text-color);
+  font-size: 0.8rem;
+}
+
+.meta-footnote {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  font-size: 0.78rem;
+  color: var(--text-soft);
+}
+
+.trace-list {
+  display: grid;
+  gap: 12px;
+}
+
+.trace-item {
+  padding: 14px 0 0;
+  border-top: 1px solid var(--border-color);
+}
+
+.trace-item:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.trace-header,
+.trace-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.trace-meta {
+  margin-top: 8px;
+  font-size: 0.82rem;
+  color: var(--text-soft);
+}
+
+.trace-query,
+.trace-note {
+  margin: 8px 0 0;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.trace-note--error {
+  color: #b42318;
+}
+
+.trace-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.trace-status--ok {
+  background: rgba(18, 183, 106, 0.12);
+  color: #027a48;
+}
+
+.trace-status--running {
+  background: rgba(47, 128, 237, 0.12);
+  color: #175cd3;
+}
+
+.trace-status--error {
+  background: rgba(201, 52, 52, 0.12);
+  color: #b42318;
+}
+
+.trace-status--neutral {
+  background: rgba(18, 32, 63, 0.08);
   color: var(--text-soft);
 }
 

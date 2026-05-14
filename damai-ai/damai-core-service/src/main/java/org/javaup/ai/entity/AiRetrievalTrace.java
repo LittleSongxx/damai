@@ -23,6 +23,12 @@ public class AiRetrievalTrace extends BaseTableData {
 
     private Long userId;
 
+    private String parentTraceId;
+
+    private String traceType;
+
+    private String stepKey;
+
     private String originalQuery;
 
     private String rewrittenQuery;
@@ -34,4 +40,6 @@ public class AiRetrievalTrace extends BaseTableData {
     private String fusedHitsJson;
 
     private String finalHitsJson;
+
+    private String metadataJson;
 }

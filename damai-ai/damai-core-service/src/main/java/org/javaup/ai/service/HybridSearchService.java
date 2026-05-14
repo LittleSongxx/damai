@@ -136,12 +136,20 @@ public class HybridSearchService {
         trace.setRunId(AiRequestContextHolder.getOptional().map(ctx -> ctx.getRunId()).orElse(null));
         trace.setChatId(AiRequestContextHolder.getOptional().map(ctx -> ctx.getConversationId()).orElse(null));
         trace.setUserId(AiRequestContextHolder.getOptional().map(ctx -> ctx.getUser().getUserId()).orElse(null));
+        trace.setTraceType("snapshot");
+        trace.setStepKey("knowledge.hybrid_search");
         trace.setOriginalQuery(query);
         trace.setRewrittenQuery(rewrittenQuery);
         trace.setDenseHitsJson(JSON.toJSONString(denseSources));
         trace.setSparseHitsJson(JSON.toJSONString(sparseSources));
         trace.setFusedHitsJson(JSON.toJSONString(fusedSources));
         trace.setFinalHitsJson(JSON.toJSONString(finalSources));
+        trace.setMetadataJson(JSON.toJSONString(Map.of(
+                "topK", topK,
+                "enableRerank", enableRerank,
+                "queryVariants", rewriteResult.allQueries(),
+                "documentCount", documents.size()
+        )));
         workflowService.saveRetrievalTrace(trace);
 
         return RagSearchResultVo.builder()

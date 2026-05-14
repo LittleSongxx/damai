@@ -6,6 +6,8 @@ import org.javaup.ai.entity.AiAction;
 import org.javaup.ai.entity.AiRetrieval;
 import reactor.core.publisher.Flux;
 
+import java.util.List;
+
 @Data
 @Builder
 public class AssistantSkillResult {
@@ -23,4 +25,6 @@ public class AssistantSkillResult {
      * 而不是等完整 message 后再一次性切片发送。
      */
     private Flux<String> messageStream;
+
+    private List<String> evidenceChunks;
 }

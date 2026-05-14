@@ -38,6 +38,13 @@ spring:
       simple:
         acknowledge-mode: manual
         prefetch: 20
+  data:
+    redis:
+      host: ${DAMAI_REDIS_HOST:127.0.0.1}
+      port: ${DAMAI_REDIS_PORT:16379}
+      password: ${DAMAI_REDIS_PASSWORD:}
+      database: ${DAMAI_REDIS_DATABASE:0}
+      timeout: ${DAMAI_REDIS_TIMEOUT:3000ms}
   ai:
     chat:
       memory:
@@ -115,6 +122,9 @@ management:
       export:
         enabled: true
 damai:
+  pro:
+    internal-token: ${DAMAI_INTERNAL_ACCESS_TOKEN:}
+    allow-unsafe-no-verify-fallback: ${DAMAI_ALLOW_UNSAFE_NO_VERIFY_FALLBACK:false}
   ai:
     playground:
       enabled: ${DAMAI_AI_PLAYGROUND_ENABLED:false}
@@ -166,11 +176,29 @@ damai:
       max-num-chunks: ${DAMAI_AI_RAG_MAX_NUM_CHUNKS:10000}
       min-doc-length-for-token-split: ${DAMAI_AI_RAG_MIN_DOC_LENGTH_FOR_TOKEN_SPLIT:1000}
     memory:
+      structured:
+        enabled: ${DAMAI_AI_STRUCTURED_MEMORY_ENABLED:true}
+        stable-fact-limit: ${DAMAI_AI_STRUCTURED_MEMORY_STABLE_FACT_LIMIT:6}
+        pending-question-limit: ${DAMAI_AI_STRUCTURED_MEMORY_PENDING_LIMIT:4}
+        retrieval-hint-limit: ${DAMAI_AI_STRUCTURED_MEMORY_HINT_LIMIT:6}
       mq:
         exchange: ${DAMAI_AI_MEMORY_EXCHANGE:damai.ai.memory.topic}
         run-completed-queue: ${DAMAI_AI_MEMORY_RUN_COMPLETED_QUEUE:damai.ai.memory.run_completed.q}
         run-completed-routing-key: ${DAMAI_AI_MEMORY_RUN_COMPLETED_ROUTING_KEY:ai.run.completed}
         run-completed-dlq: ${DAMAI_AI_MEMORY_RUN_COMPLETED_DLQ:damai.ai.memory.run_completed.dlq}
+    runtime-lease:
+      enabled: ${DAMAI_AI_RUNTIME_LEASE_ENABLED:true}
+      fail-open: ${DAMAI_AI_RUNTIME_LEASE_FAIL_OPEN:true}
+      key-prefix: ${DAMAI_AI_RUNTIME_LEASE_PREFIX:damai:ai:runtime:lease:}
+      ttl-ms: ${DAMAI_AI_RUNTIME_LEASE_TTL_MS:45000}
+      acquire-timeout-ms: ${DAMAI_AI_RUNTIME_LEASE_ACQUIRE_TIMEOUT_MS:120000}
+      retry-interval-ms: ${DAMAI_AI_RUNTIME_LEASE_RETRY_INTERVAL_MS:1000}
+    knowledge-routing:
+      shadow-enabled: ${DAMAI_AI_KNOWLEDGE_ROUTE_SHADOW_ENABLED:true}
+      max-scopes: ${DAMAI_AI_KNOWLEDGE_ROUTE_MAX_SCOPES:3}
+      max-topics: ${DAMAI_AI_KNOWLEDGE_ROUTE_MAX_TOPICS:5}
+      max-documents: ${DAMAI_AI_KNOWLEDGE_ROUTE_MAX_DOCUMENTS:5}
+      min-score: ${DAMAI_AI_KNOWLEDGE_ROUTE_MIN_SCORE:1.0}
     tracing:
       enabled: ${DAMAI_AI_TRACING_ENABLED:true}
       otlp-endpoint: ${DAMAI_AI_OTLP_ENDPOINT:http://127.0.0.1:4317}
@@ -182,6 +210,9 @@ damai:
       hallucination-enabled: ${DAMAI_AI_GUARDRAILS_HALLUCINATION_ENABLED:true}
       toxicity-enabled: ${DAMAI_AI_GUARDRAILS_TOXICITY_ENABLED:true}
       block-on-pii: ${DAMAI_AI_GUARDRAILS_BLOCK_ON_PII:true}
+      prompt-injection-enabled: ${DAMAI_AI_GUARDRAILS_PROMPT_INJECTION_ENABLED:true}
+      block-on-prompt-injection: ${DAMAI_AI_GUARDRAILS_BLOCK_ON_PROMPT_INJECTION:true}
+      buffer-high-risk-streaming: ${DAMAI_AI_GUARDRAILS_BUFFER_HIGH_RISK_STREAMING:true}
     agent-loop:
       enabled: ${DAMAI_AI_AGENT_LOOP_ENABLED:true}
       max-steps: ${DAMAI_AI_AGENT_LOOP_MAX_STEPS:5}

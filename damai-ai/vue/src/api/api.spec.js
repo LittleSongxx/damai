@@ -25,6 +25,7 @@ describe('api sse helpers', () => {
   it('parses structured SSE chunks', () => {
     const event = parseSseChunk('event: retrieval.sources\ndata: {"traceId":"trace-1","rewrittenQuery":"退票 退款"}')
     expect(event).toEqual({
+      id: '',
       event: 'retrieval.sources',
       data: {
         traceId: 'trace-1',
@@ -47,6 +48,7 @@ describe('api sse helpers', () => {
 
     expect(events).toHaveLength(2)
     expect(events[0]).toEqual({
+      id: '',
       event: 'message.delta',
       data: {
         delta: '你好'
@@ -54,6 +56,17 @@ describe('api sse helpers', () => {
     })
     expect(events[1].event).toBe('workflow.step')
     expect(events[1].data.steps[0].stepKey).toBe('ANSWER')
+  })
+
+  it('ignores comment-only SSE chunks and parses ids', () => {
+    expect(parseSseChunk(': ping')).toBeNull()
+    expect(parseSseChunk('id: evt-1\nevent: run.started\ndata: {"runId":"run-1"}')).toEqual({
+      id: 'evt-1',
+      event: 'run.started',
+      data: {
+        runId: 'run-1'
+      }
+    })
   })
 
   it('normalizes relative API URLs against the current origin', () => {

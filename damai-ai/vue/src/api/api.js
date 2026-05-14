@@ -135,13 +135,21 @@ export function parseSseChunk(chunk) {
   }
   const lines = chunk.split('\n')
   let event = 'message'
+  let id = ''
   const dataLines = []
   for (const line of lines) {
-    if (line.startsWith('event:')) {
+    if (line.startsWith(':')) {
+      continue
+    } else if (line.startsWith('id:')) {
+      id = line.slice(3).trim()
+    } else if (line.startsWith('event:')) {
       event = line.slice(6).trim()
     } else if (line.startsWith('data:')) {
       dataLines.push(line.slice(5).trim())
     }
+  }
+  if (!id && dataLines.length === 0 && event === 'message') {
+    return null
   }
   const rawData = dataLines.join('\n')
   let data = rawData
@@ -150,7 +158,7 @@ export function parseSseChunk(chunk) {
   } catch (error) {
     data = rawData
   }
-  return { event, data }
+  return { id, event, data }
 }
 
 async function streamRequest(path, params = {}) {

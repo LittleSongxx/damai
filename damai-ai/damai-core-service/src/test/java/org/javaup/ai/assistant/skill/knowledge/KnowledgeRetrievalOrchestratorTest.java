@@ -1,6 +1,7 @@
 package org.javaup.ai.assistant.skill.knowledge;
 
 import org.javaup.ai.service.AdvancedQueryService;
+import org.javaup.ai.assistant.runtime.AssistantStageTraceService;
 import org.javaup.ai.service.HybridSearchService;
 import org.javaup.ai.vo.RagSearchResultVo;
 import org.junit.jupiter.api.Test;
@@ -25,6 +26,10 @@ class KnowledgeRetrievalOrchestratorTest {
         KnowledgeRetrievalPlanner planner = new KnowledgeRetrievalPlanner();
         KnowledgeRetrievalEvaluator evaluator = mock(KnowledgeRetrievalEvaluator.class);
         AdvancedQueryService advancedQueryService = mock(AdvancedQueryService.class);
+        KnowledgeRetrievalTraceService retrievalTraceService = mock(KnowledgeRetrievalTraceService.class);
+        AssistantStageTraceService stageTraceService = mock(AssistantStageTraceService.class);
+        when(stageTraceService.startStage(anyString(), anyString(), anyString(), any(), any()))
+                .thenReturn(AssistantStageTraceService.StageSpan.builder().traceId("trace_1").stageKey("TEST").startedAt(System.currentTimeMillis()).build());
 
         KnowledgeRetrievalPlan plan = planner.plan("看看这个规则");
         RagSearchResultVo firstPass = RagSearchResultVo.builder()
@@ -56,7 +61,7 @@ class KnowledgeRetrievalOrchestratorTest {
                     return new KnowledgeRetrievalAssessment(0.6D, "MEDIUM", action, List.of());
                 });
         KnowledgeRetrievalOrchestrator orchestrator = new KnowledgeRetrievalOrchestrator(
-                hybridSearchService, structuredRuleSupportService, planner, evaluator, advancedQueryService);
+                hybridSearchService, structuredRuleSupportService, planner, evaluator, advancedQueryService, retrievalTraceService, stageTraceService);
 
         KnowledgeRetrievalContext context = orchestrator.retrieve(plan);
 
