@@ -1,11 +1,13 @@
 package org.javaup.ai.assistant.skill.ops.nl2sql;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.javaup.ai.metrics.BusinessMetrics;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import javax.sql.DataSource;
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
@@ -17,13 +19,15 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Properties;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class Nl2SqlExecutionService {
 
     private final Nl2SqlProperties properties;
+    private final DataSource nl2sqlDataSource;
+    private final BusinessMetrics businessMetrics;
 
     public boolean isConfigured() {
         return StringUtils.hasText(properties.getDatasource().getUrl());
@@ -44,18 +48,19 @@ public class Nl2SqlExecutionService {
         }
         long start = System.currentTimeMillis();
         try {
-            loadDriver();
-            try (Connection connection = DriverManager.getConnection(properties.getDatasource().getUrl(), connectionProperties());
+            try (Connection connection = nl2sqlDataSource.getConnection();
                  Statement statement = connection.createStatement()) {
                 connection.setReadOnly(true);
                 statement.setQueryTimeout(Math.max(1, (int) Math.ceil(properties.getQueryTimeoutMs() / 1000.0D)));
                 statement.setMaxRows(Math.max(1, properties.getMaxRows()) + 1);
                 try (ResultSet resultSet = statement.executeQuery(sql)) {
                     Nl2SqlExecutionResult result = readResult(sql, resultSet, start);
+                    businessMetrics.recordNl2sql(true);
                     return result;
                 }
             }
         } catch (SQLException ex) {
+            businessMetrics.recordNl2sql(false);
             throw new Nl2SqlException("SQL 执行失败: " + ex.getMessage(), ex);
         }
     }
@@ -91,29 +96,6 @@ public class Nl2SqlExecutionService {
                 .skipped(false)
                 .durationMs(System.currentTimeMillis() - start)
                 .build();
-    }
-
-    private Properties connectionProperties() {
-        Properties props = new Properties();
-        if (StringUtils.hasText(properties.getDatasource().getUsername())) {
-            props.setProperty("user", properties.getDatasource().getUsername());
-        }
-        if (StringUtils.hasText(properties.getDatasource().getPassword())) {
-            props.setProperty("password", properties.getDatasource().getPassword());
-        }
-        props.setProperty("readOnly", "true");
-        return props;
-    }
-
-    private void loadDriver() {
-        if (!StringUtils.hasText(properties.getDatasource().getDriverClassName())) {
-            return;
-        }
-        try {
-            Class.forName(properties.getDatasource().getDriverClassName());
-        } catch (ClassNotFoundException ex) {
-            throw new Nl2SqlException("NL2SQL JDBC Driver 不存在: " + properties.getDatasource().getDriverClassName(), ex);
-        }
     }
 
     private Object normalizeValue(Object value) {

@@ -36,8 +36,20 @@ cp ../damai-ai/vue/.env.example ../damai-ai/vue/.env
 编辑 `damai-ai/.env`，至少填写：
 - `DAMAI_AI_ALIBABA_API_KEY`
 - `DAMAI_AI_DEEPSEEK_API_KEY`
+- `DAMAI_INTERNAL_ACCESS_TOKEN`（与 `damai-pro/.env` 保持一致）
 
 > 仅用 Ollama 时可留空上述 Key，确保 `DAMAI_AI_OLLAMA_BASE_URL` 可访问即可。
+
+为关闭旧的 `no_verify` 网关绕过，请同时设置：
+
+```env
+# damai-pro/.env
+DAMAI_INTERNAL_ACCESS_TOKEN=__CHANGE_ME_SHARED_INTERNAL_TOKEN__
+
+# damai-ai/.env
+DAMAI_INTERNAL_ACCESS_TOKEN=__CHANGE_ME_SHARED_INTERNAL_TOKEN__
+DAMAI_ALLOW_UNSAFE_NO_VERIFY_FALLBACK=false
+```
 
 ## 2) 启动 Docker 依赖
 
@@ -104,4 +116,3 @@ cd damai-ai/vue && npm install && npm run dev -- --port 15174 --strictPort
 | 指标查询为空 | `docker compose --profile ai ps` 中 prometheus 状态 |
 | ES 查询失败 | `DAMAI_ES_ADDR` / 账号密码与 `damai-pro/.env` 一致性 |
 | MCP 连接超时 | 8085/8086 服务是否启动、SSE 地址配置 |
-

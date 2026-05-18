@@ -1,13 +1,19 @@
 package org.javaup.ai.assistant.skill.general;
 
+import com.alibaba.fastjson.JSON;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.javaup.ai.cache.CacheManager;
 import org.javaup.ai.config.WebSearchProperties;
+import org.javaup.ai.resilience.CircuitBreakerService;
+import org.javaup.ai.resilience.DegradationService;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class WebSearchService {
@@ -15,6 +21,9 @@ public class WebSearchService {
     private final WebSearchProperties properties;
     private final TavilyWebSearchClient tavilyWebSearchClient;
     private final BochaWebSearchClient bochaWebSearchClient;
+    private final CacheManager cacheManager;
+    private final CircuitBreakerService circuitBreakerService;
+    private final DegradationService degradationService;
 
     public WebSearchResult search(String query) {
         return search(WebSearchRequest.builder()
@@ -30,6 +39,27 @@ public class WebSearchService {
         if (request == null || !StringUtils.hasText(request.getQuery())) {
             return WebSearchResult.empty("none", "搜索关键词为空");
         }
+
+        String cacheKey = request.getQuery();
+        String cached = cacheManager.getWebSearch(cacheKey);
+        if (cached != null) {
+            WebSearchResult cachedResult = JSON.parseObject(cached, WebSearchResult.class);
+            if (cachedResult != null) {
+                return cachedResult;
+            }
+        }
+
+        WebSearchResult result = circuitBreakerService.executeWebSearch(
+                () -> doSearch(request),
+                WebSearchResult.empty("circuit_open", "联网搜索暂不可用"));
+
+        if (result.hasDocuments()) {
+            cacheManager.putWebSearch(cacheKey, JSON.toJSONString(result));
+        }
+        return result;
+    }
+
+    private WebSearchResult doSearch(WebSearchRequest request) {
         List<String> errors = new ArrayList<>();
         boolean attempted = false;
         if (tavilyWebSearchClient.available()) {
@@ -61,6 +91,7 @@ public class WebSearchService {
             return result;
         } catch (RuntimeException ex) {
             errors.add(client.provider() + " 调用失败: " + ex.getMessage());
+            degradationService.begin("web_search").degradedTo(client.provider() + "_skipped");
             return null;
         }
     }

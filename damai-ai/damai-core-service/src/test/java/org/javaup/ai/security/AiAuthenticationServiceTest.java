@@ -1,7 +1,9 @@
 package org.javaup.ai.security;
 
 import org.javaup.ai.ai.function.call.UserCall;
+import org.javaup.ai.cache.CacheManager;
 import org.javaup.ai.context.AiUserContext;
+import org.javaup.ai.resilience.CircuitBreakerService;
 import org.javaup.ai.vo.UserDetailVo;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -12,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -22,6 +25,12 @@ class AiAuthenticationServiceTest {
 
     @Mock
     private AiPermissionService aiPermissionService;
+
+    @Mock
+    private CacheManager cacheManager;
+
+    @Mock
+    private CircuitBreakerService circuitBreakerService;
 
     @InjectMocks
     private AiAuthenticationService authenticationService;
@@ -40,6 +49,7 @@ class AiAuthenticationServiceTest {
         user.setEmail("demo@test.com");
         when(userCall.currentUser("token-2002")).thenReturn(user);
         when(aiPermissionService.isAdmin(2002L)).thenReturn(false);
+        when(circuitBreakerService.executeWebSearch(any(), any())).thenAnswer(inv -> inv.getArgument(0, java.util.function.Supplier.class).get());
 
         AiUserContext context = authenticationService.authenticate("token-2002");
 

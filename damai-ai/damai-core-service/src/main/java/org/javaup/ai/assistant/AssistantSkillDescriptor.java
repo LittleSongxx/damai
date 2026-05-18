@@ -58,6 +58,8 @@ public class AssistantSkillDescriptor {
 
     private Boolean primarySkill;
 
+    private Boolean requiresMemory;
+
     public static AssistantSkillDescriptor legacy(AssistantRouteType routeType, String skillName) {
         boolean ops = routeType == AssistantRouteType.OPS;
         return AssistantSkillDescriptor.builder()

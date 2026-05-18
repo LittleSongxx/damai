@@ -166,10 +166,12 @@ cp .env.example .env
 | `DAMAI_AI_QDRANT_URL` | Qdrant 向量库地址 |
 | `DAMAI_AI_MCP_LOG_URL` | 日志 MCP SSE 地址 |
 | `DAMAI_AI_MCP_METRICS_URL` | 指标 MCP SSE 地址 |
+| `DAMAI_INTERNAL_ACCESS_TOKEN` | 与 `damai-pro/.env` 中相同的内部调用令牌 |
+| `DAMAI_ALLOW_UNSAFE_NO_VERIFY_FALLBACK` | 是否允许退回旧 `no_verify` 鉴权，建议固定为 `false` |
 | `DAMAI_AI_*_URL` | 指向 `damai-pro` 网关的业务接口 |
 | `VITE_DAMAI_AI_PROXY_TARGET` | 前端代理目标 |
 
-> **安全提示**: API Key 仅写入本地 `.env` 或 IDE 运行配置，禁止硬编码或提交到仓库。
+> **安全提示**: API Key 和 `DAMAI_INTERNAL_ACCESS_TOKEN` 仅写入本地 `.env` 或 IDE 运行配置，禁止硬编码或提交到仓库。
 
 ## 快速启动
 

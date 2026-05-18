@@ -6,6 +6,7 @@ import org.javaup.ai.assistant.AssistantExecutionPlan;
 import org.javaup.ai.context.AiUserContext;
 import org.javaup.ai.dto.AssistantRunCreateRequest;
 import org.javaup.ai.entity.AiRun;
+import org.javaup.ai.tracing.ConversationTraceRecorder;
 
 @Data
 @Builder
@@ -18,4 +19,6 @@ public class AssistantExecutionContext {
     private AssistantExecutionPlan plan;
 
     private AiUserContext user;
+
+    private ConversationTraceRecorder traceRecorder;
 }

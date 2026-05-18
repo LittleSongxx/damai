@@ -133,7 +133,10 @@ public class SkillExecutor implements AssistantExecutor {
         runService.bindSkill(run, descriptor);
         long skillStartTime = System.currentTimeMillis();
         runService.appendEvent(run.getRunId(), AssistantEventTypes.SKILL_STARTED, skillEventPayload(run, decision, skill, descriptor, skillDecision, null));
-        AssistantMemoryContext memoryContext = memoryService.load(run.getConversationId(), run.getUserId());
+        boolean requiresMemory = descriptor == null || !Boolean.FALSE.equals(descriptor.getRequiresMemory());
+        AssistantMemoryContext memoryContext = requiresMemory
+                ? memoryService.load(run.getConversationId(), run.getUserId())
+                : AssistantMemoryContext.empty();
         AssistantUserProfileContext userProfileContext = userProfileService.load(run.getUserId());
         AssistantSkillContext skillContext = AssistantSkillContext.of(run, context.getUser(), context.getRequest(), memoryContext, userProfileContext, descriptor, resources);
         if (schemaValidator != null) {

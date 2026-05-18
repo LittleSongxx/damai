@@ -1,11 +1,13 @@
 package org.javaup.ai.assistant.skill.ops.nl2sql;
 
+import org.javaup.ai.cache.CacheManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 class Nl2SqlSafetyValidatorTest {
 
@@ -14,7 +16,7 @@ class Nl2SqlSafetyValidatorTest {
     @BeforeEach
     void setUp() {
         Nl2SqlProperties properties = new Nl2SqlProperties();
-        validator = new Nl2SqlSafetyValidator(properties, new Nl2SqlSchemaService(properties));
+        validator = new Nl2SqlSafetyValidator(properties, new Nl2SqlSchemaService(properties, mock(CacheManager.class)));
     }
 
     @Test

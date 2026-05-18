@@ -20,6 +20,8 @@ public class GatewayConstant {
     public static final String TOKEN = "token";
     
     public static final String NO_VERIFY = "no_verify";
+
+    public static final String INTERNAL_ACCESS_TOKEN = "X-Internal-Token";
     
     public static final String VERIFY_VALUE = "true";
     

@@ -140,7 +140,7 @@ damai-pro/
 | Seata | `127.0.0.1:8091` |
 | Sentinel | `127.0.0.1:8082` |
 | Prometheus | `127.0.0.1:9090` |
-| Qdrant | `127.0.0.1:16333` |
+| Qdrant | HTTP `127.0.0.1:16333` · gRPC `127.0.0.1:16334` |
 | Ollama | `127.0.0.1:11434` |
 
 端口冲突时修改 `.env` 后重新启动即可。
@@ -150,17 +150,16 @@ damai-pro/
 ### 一键启动（推荐）
 
 ```bash
-bash scripts/damai-stack.sh start
+docker compose --env-file .env --profile ai up -d
 ```
 
 常用选项：
 
 ```bash
-bash scripts/damai-stack.sh status
-bash scripts/damai-stack.sh stop
-bash scripts/damai-stack.sh start --skip-build
-bash scripts/damai-stack.sh start --skip-db-init
-bash scripts/damai-stack.sh start --skip-frontend
+docker compose --env-file .env --profile ai ps
+docker compose --env-file .env up -d rabbitmq
+docker compose --env-file .env --profile ai up -d --remove-orphans
+docker compose --env-file .env down
 ```
 
 ### 手动启动
@@ -220,7 +219,7 @@ cd vue3 && npm install && npm run dev -- --host 127.0.0.1 --port 15173 --strictP
 | 前端接口 404 | Vite 代理前缀、网关路由、`/damai/**` 路径 |
 | 网关裸请求失败 | 网关有签名过滤器，通过前端或验证脚本发请求 |
 | 订单未创建 | 检查 RabbitMQ 队列、消费者、座位锁 |
-| AI 无法下单 | 确认用户端已登录 + AI 环境变量指向网关 |
+| AI 无法下单 | 确认用户端已登录、AI 环境变量指向网关、`DAMAI_INTERNAL_ACCESS_TOKEN` 在 `damai-pro/.env` 与 `damai-ai/.env` 中一致 |
 
 ## 相关文档
 

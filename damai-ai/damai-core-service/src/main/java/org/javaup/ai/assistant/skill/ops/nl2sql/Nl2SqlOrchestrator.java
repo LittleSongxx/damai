@@ -19,6 +19,7 @@ public class Nl2SqlOrchestrator {
     private final Nl2SqlJsonParser jsonParser;
     private final Nl2SqlSafetyValidator safetyValidator;
     private final Nl2SqlExecutionService executionService;
+    private final Nl2SqlErrorClassifier errorClassifier;
     private final AssistantToolInvoker toolInvoker;
 
     public Nl2SqlOrchestrator(@Qualifier("unifiedOpsChatClient") ChatClient chatClient,
@@ -27,6 +28,7 @@ public class Nl2SqlOrchestrator {
                               Nl2SqlJsonParser jsonParser,
                               Nl2SqlSafetyValidator safetyValidator,
                               Nl2SqlExecutionService executionService,
+                              Nl2SqlErrorClassifier errorClassifier,
                               AssistantToolInvoker toolInvoker) {
         this.chatClient = chatClient;
         this.properties = properties;
@@ -34,6 +36,7 @@ public class Nl2SqlOrchestrator {
         this.jsonParser = jsonParser;
         this.safetyValidator = safetyValidator;
         this.executionService = executionService;
+        this.errorClassifier = errorClassifier;
         this.toolInvoker = toolInvoker;
     }
 
@@ -116,7 +119,9 @@ public class Nl2SqlOrchestrator {
                                                String conversationKey,
                                                String previousSql,
                                                String previousError) {
-        String prompt = buildGenerationPrompt(question, schemaContext, previousSql, previousError);
+        Nl2SqlErrorClassifier.ErrorCategory errorCategory = errorClassifier.classify(previousError);
+        String repairGuidance = errorClassifier.buildRepairGuidance(errorCategory);
+        String prompt = buildGenerationPrompt(question, schemaContext, previousSql, previousError, repairGuidance);
         ChatClient.ChatClientRequestSpec request = chatClient.prompt().user(prompt);
         if (StringUtils.hasText(conversationKey)) {
             request.advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationKey));
@@ -128,7 +133,8 @@ public class Nl2SqlOrchestrator {
     private String buildGenerationPrompt(String question,
                                          Nl2SqlSchemaContext schemaContext,
                                          String previousSql,
-                                         String previousError) {
+                                         String previousError,
+                                         String repairGuidance) {
         StringBuilder terms = new StringBuilder();
         schemaContext.terms().forEach(term -> terms.append("- ")
                 .append(term.getName())
@@ -150,12 +156,16 @@ public class Nl2SqlOrchestrator {
 
                     上一次错误：
                     %s
-                    """.formatted(previousSql, previousError);
+
+                    修复指导：
+                    %s
+                    """.formatted(previousSql, previousError, repairGuidance);
         }
         return """
                 你是大麦运维问数助手，负责把自然语言问题转换成安全的 MySQL SELECT 查询。
                 只能使用给定 Schema 中的表和字段；如果信息不足以安全生成 SQL，needSql=false。
                 禁止查询敏感字段，禁止 DDL/DML/DCL，禁止多语句，禁止 select *。
+                如果 confidence < 0.5，设置 needSql=false 并给出 explanation 说明不确定原因。
                 必须返回纯 JSON，不要 Markdown，不要解释性前后缀。
 
                 JSON 结构：

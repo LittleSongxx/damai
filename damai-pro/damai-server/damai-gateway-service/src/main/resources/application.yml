@@ -78,6 +78,9 @@ damai:
 api:
   limit:
     paths: /**/customize/test/test   
+internal:
+  access:
+    token: ${DAMAI_INTERNAL_ACCESS_TOKEN:}
 feign:
   sentinel:
     enabled: false

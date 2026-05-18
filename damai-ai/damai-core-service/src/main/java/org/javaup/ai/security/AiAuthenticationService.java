@@ -1,6 +1,9 @@
 package org.javaup.ai.security;
 
+import lombok.extern.slf4j.Slf4j;
+import org.javaup.ai.cache.CacheManager;
 import org.javaup.ai.context.AiUserContext;
+import org.javaup.ai.resilience.CircuitBreakerService;
 import org.javaup.ai.vo.UserDetailVo;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -11,6 +14,7 @@ import org.javaup.ai.ai.function.call.UserCall;
 /**
  * 通过 damai-pro 的用户服务解析登录态。
  */
+@Slf4j
 @Service
 public class AiAuthenticationService {
 
@@ -20,12 +24,27 @@ public class AiAuthenticationService {
     @Resource
     private AiPermissionService aiPermissionService;
 
+    @Resource
+    private CacheManager cacheManager;
+
+    @Resource
+    private CircuitBreakerService circuitBreakerService;
+
     public AiUserContext authenticate(String token) {
         if (!StringUtils.hasText(token)) {
             throw new AiAuthenticationException("登录态缺失");
         }
-        UserDetailVo user = userCall.currentUser(token);
-        return AiUserContext.builder()
+        AiUserContext cached = cacheManager.getUserContext(token);
+        if (cached != null) {
+            return cached;
+        }
+        UserDetailVo user = circuitBreakerService.executeWebSearch(
+                () -> userCall.currentUser(token),
+                null);
+        if (user == null) {
+            throw new AiAuthenticationException("用户认证服务暂不可用，请稍后重试");
+        }
+        AiUserContext context = AiUserContext.builder()
                 .userId(user.getId())
                 .token(token)
                 .mobile(user.getMobile())
@@ -33,5 +52,7 @@ public class AiAuthenticationService {
                 .email(user.getEmail())
                 .admin(aiPermissionService.isAdmin(user.getId()))
                 .build();
+        cacheManager.putUserContext(token, context);
+        return context;
     }
 }

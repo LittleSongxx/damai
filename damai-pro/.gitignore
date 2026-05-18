@@ -5,6 +5,8 @@ target/
 !**/src/test/**/target/
 logs/
 local-config/
+.env
+!.env.example
 
 ### Agent ###
 cookasyncagent/

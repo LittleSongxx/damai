@@ -25,6 +25,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import com.alibaba.fastjson.JSON;
+import org.javaup.ai.cache.CacheManager;
+import org.javaup.ai.metrics.BusinessMetrics;
+import org.javaup.ai.resilience.CircuitBreakerService;
+import org.javaup.ai.resilience.DegradationService;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -48,6 +54,10 @@ public class HybridSearchService {
     private final AdvancedQueryService advancedQueryService;
     private final ContextualCompressionService contextualCompressionService;
     private final QdrantClient qdrantClient;
+    private final CacheManager cacheManager;
+    private final CircuitBreakerService circuitBreakerService;
+    private final DegradationService degradationService;
+    private final BusinessMetrics businessMetrics;
 
     @Value("${damai.ai.qdrant.collection:damai_ai_faq}")
     private String qdrantCollection;
@@ -75,7 +85,11 @@ public class HybridSearchService {
                                AiWorkflowService workflowService,
                                AdvancedQueryService advancedQueryService,
                                ContextualCompressionService contextualCompressionService,
-                               QdrantClient qdrantClient) {
+                               QdrantClient qdrantClient,
+                               CacheManager cacheManager,
+                               CircuitBreakerService circuitBreakerService,
+                               DegradationService degradationService,
+                               BusinessMetrics businessMetrics) {
         this.embeddingModel = embeddingModel;
         this.rerankService = rerankService;
         this.markdownLoader = markdownLoader;
@@ -83,6 +97,10 @@ public class HybridSearchService {
         this.advancedQueryService = advancedQueryService;
         this.contextualCompressionService = contextualCompressionService;
         this.qdrantClient = qdrantClient;
+        this.cacheManager = cacheManager;
+        this.circuitBreakerService = circuitBreakerService;
+        this.degradationService = degradationService;
+        this.businessMetrics = businessMetrics;
     }
 
     public void cacheDocuments(List<Document> documents) {
@@ -119,12 +137,40 @@ public class HybridSearchService {
 
     public RagSearchResultVo hybridSearchWithTrace(String query, int topK, boolean enableRerank) {
         ensureDocumentsLoaded();
+
+        String cacheKey = query + "#" + topK + "#" + enableRerank;
+        String cached = cacheManager.getFaqSearch(cacheKey);
+        if (cached != null) {
+            return JSON.parseObject(cached, RagSearchResultVo.class);
+        }
+
         AdvancedQueryService.QueryRewriteResult rewriteResult = advancedQueryService.rewriteQuery(query);
         String rewrittenQuery = rewriteResult.primaryQuery();
 
-        List<RagSourceVo> denseSources = multiQueryDenseSearch(rewriteResult.allQueries(), topK * 2);
-        List<RagSourceVo> sparseSources = sparseSearch(rewrittenQuery, topK * 2);
-        List<RagSourceVo> fusedSources = mergeWithRrf(denseSources, sparseSources, topK * 2);
+        List<RagSourceVo> denseSources = circuitBreakerService.executeQdrant(
+                () -> multiQueryDenseSearch(rewriteResult.allQueries(), topK * 2),
+                List.of());
+        if (denseSources.isEmpty()) {
+            degradationService.begin("dense_search").degradedTo("sparse_only");
+        }
+
+        List<RagSourceVo> sparseSources = circuitBreakerService.executeEs(
+                () -> sparseSearch(rewrittenQuery, topK * 2),
+                List.of());
+        if (sparseSources.isEmpty()) {
+            degradationService.begin("sparse_search").degradedTo("dense_only");
+        }
+
+        if (denseSources.isEmpty() && sparseSources.isEmpty()) {
+            log.warn("Both dense and sparse search returned empty results for query: {}", query);
+            return RagSearchResultVo.builder()
+                    .originalQuery(query).normalizedQuery(query).rewrittenQuery(rewrittenQuery)
+                    .documents(List.of()).sources(List.of()).build();
+        }
+
+        List<RagSourceVo> fusedSources = denseSources.isEmpty() ? sparseSources
+                : sparseSources.isEmpty() ? shrink(denseSources, topK * 2)
+                : mergeWithRrf(denseSources, sparseSources, topK * 2);
         List<RagSourceVo> finalSources = enableRerank ? rerankSources(rewrittenQuery, fusedSources, topK) : shrink(fusedSources, topK);
         List<Document> documents = finalSources.stream()
                 .map(source -> documentCache.get(source.getChunkId()))
@@ -152,7 +198,7 @@ public class HybridSearchService {
         )));
         workflowService.saveRetrievalTrace(trace);
 
-        return RagSearchResultVo.builder()
+        RagSearchResultVo result = RagSearchResultVo.builder()
                 .originalQuery(query)
                 .normalizedQuery(query)
                 .rewrittenQuery(rewrittenQuery)
@@ -163,6 +209,10 @@ public class HybridSearchService {
                 .fusedSources(fusedSources)
                 .sources(finalSources)
                 .build();
+
+        cacheManager.putFaqSearch(cacheKey, JSON.toJSONString(result));
+
+        return result;
     }
 
     public List<Document> hybridSearch(String query, int topK, boolean enableRerank) {
@@ -263,7 +313,11 @@ public class HybridSearchService {
 
     private List<RagSourceVo> denseSearch(String query, int topK) {
         try {
-            float[] vector = embeddingModel.embed(query);
+            float[] vector = cacheManager.getEmbedding(query);
+            if (vector == null) {
+                vector = embeddingModel.embed(query);
+                cacheManager.putEmbedding(query, vector);
+            }
             List<Float> vectorList = new ArrayList<>(vector.length);
             for (float v : vector) {
                 vectorList.add(v);

@@ -35,36 +35,39 @@ public class AiObservabilityAdvisor implements BaseChatMemoryAdvisor {
 
     private final String requestType;
     
-    private static final String CTX_START_TIME = "observability_start_time";
-    private static final String CTX_TRACE_ID = "observability_trace_id";
-    private static final String CTX_USER_INPUT = "observability_user_input";
-    private static final String CTX_RUN_ID = "observability_run_id";
-    
-    private AiObservabilityAdvisor(int order, AiObservabilityService observabilityService, 
+    private static final String CTX_START_TIME = "gen_ai.operation.start_time";
+    private static final String CTX_TRACE_ID = "gen_ai.trace_id";
+    private static final String CTX_USER_INPUT = "gen_ai.prompt.content_truncated";
+    private static final String CTX_RUN_ID = "gen_ai.run_id";
+
+    private AiObservabilityAdvisor(int order, AiObservabilityService observabilityService,
                                     String modelName, String requestType) {
         this.order = order;
         this.observabilityService = observabilityService;
         this.modelName = modelName;
         this.requestType = requestType;
     }
-    
+
 
     @Override
     public ChatClientRequest before(ChatClientRequest request, AdvisorChain chain) {
 
         String userMessage = request.prompt().getUserMessage().getText();
         String traceId = observabilityService.generateTraceId();
-        
+
         log.debug("AI调用开始 - traceId: {}, input: {}", traceId, userMessage);
-        
+
         Map<String, Object> newContext = new HashMap<>(request.context());
         newContext.put(CTX_START_TIME, System.currentTimeMillis());
         newContext.put(CTX_TRACE_ID, traceId);
         newContext.put(CTX_USER_INPUT, truncate(userMessage, 500));
+        newContext.put("gen_ai.system", "dashscope");
+        newContext.put("gen_ai.request.model", modelName);
+        newContext.put("gen_ai.operation.name", "chat");
         AiRequestContextHolder.getOptional()
                 .map(AiRequestContext::getRunId)
                 .ifPresent(runId -> newContext.put(CTX_RUN_ID, runId));
-        
+
         return ChatClientRequest.builder()
                 .prompt(request.prompt())
                 .context(newContext)
@@ -107,22 +110,32 @@ public class AiObservabilityAdvisor implements BaseChatMemoryAdvisor {
                 }
             });
             
-            if (chatResponse != null && chatResponse.getMetadata() != null && 
+            if (chatResponse != null && chatResponse.getMetadata() != null &&
                     chatResponse.getMetadata().getUsage() != null) {
                 Usage usage = chatResponse.getMetadata().getUsage();
                 int promptTokens = usage.getPromptTokens() != null ? usage.getPromptTokens() : 0;
                 int completionTokens = usage.getCompletionTokens() != null ? usage.getCompletionTokens() : 0;
-                
+
                 trace.setPromptTokens(promptTokens);
                 trace.setCompletionTokens(completionTokens);
                 trace.setTotalTokens(promptTokens + completionTokens);
-                
+
                 BigDecimal cost = observabilityService.calculateCost(modelName, promptTokens, completionTokens);
                 trace.setEstimatedCost(cost);
-                
-                log.info("AI调用完成 - traceId: {}, latency: {}ms, tokens: {}/{}/{}, cost: ¥{}", 
-                        traceId, latencyMs, promptTokens, completionTokens, 
-                        promptTokens + completionTokens, cost);
+
+                Map<String, Object> genAiMetadata = new HashMap<>();
+                genAiMetadata.put("gen_ai.usage.input_tokens", promptTokens);
+                genAiMetadata.put("gen_ai.usage.output_tokens", completionTokens);
+                genAiMetadata.put("gen_ai.usage.total_tokens", promptTokens + completionTokens);
+                genAiMetadata.put("gen_ai.response.model", modelName);
+                genAiMetadata.put("gen_ai.operation.latency_ms", latencyMs);
+                if (cost != null) {
+                    genAiMetadata.put("gen_ai.usage.cost_rmb", cost);
+                }
+                trace.setMetadata(com.alibaba.fastjson.JSON.toJSONString(genAiMetadata));
+
+                log.info("AI调用完成 | gen_ai traceId={} model={} latency={}ms input_tokens={} output_tokens={} cost=¥{}",
+                        traceId, modelName, latencyMs, promptTokens, completionTokens, cost);
             }
             
             if (chatResponse != null && chatResponse.getResult() != null && 

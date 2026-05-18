@@ -1,16 +1,18 @@
 package org.javaup.ai.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.entity.AiPromptVersion;
 import org.javaup.ai.mapper.AiPromptVersionMapper;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.util.Date;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Service
@@ -18,10 +20,15 @@ import java.util.concurrent.ConcurrentHashMap;
 public class PromptVersionService {
 
     private final AiPromptVersionMapper promptVersionMapper;
-    private final Map<String, String> cache = new ConcurrentHashMap<>();
+    private final RedisTemplate<String, Object> redisTemplate;
+
+    private final Cache<String, String> cache = Caffeine.newBuilder()
+            .maximumSize(500)
+            .expireAfterAccess(Duration.ofHours(2))
+            .build();
 
     public String resolve(String promptKey, String defaultTemplate) {
-        String cached = cache.get(promptKey);
+        String cached = cache.getIfPresent(promptKey);
         if (cached != null) {
             return cached;
         }
@@ -40,11 +47,21 @@ public class PromptVersionService {
     }
 
     public void invalidateCache(String promptKey) {
-        cache.remove(promptKey);
+        cache.invalidate(promptKey);
+        broadcastInvalidation(promptKey);
     }
 
     public void invalidateAll() {
-        cache.clear();
+        cache.invalidateAll();
+        broadcastInvalidation("ALL");
+    }
+
+    private void broadcastInvalidation(String promptKey) {
+        try {
+            redisTemplate.convertAndSend("damai:cache:invalidation", "prompt:" + promptKey);
+        } catch (Exception e) {
+            log.warn("Failed to broadcast prompt cache invalidation: {}", e.getMessage());
+        }
     }
 
     public List<AiPromptVersion> list(String promptKey) {

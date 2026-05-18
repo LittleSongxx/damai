@@ -1,6 +1,8 @@
 package org.javaup.ai.assistant.skill.ops.nl2sql;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.javaup.ai.cache.CacheManager;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -9,13 +11,27 @@ import java.util.List;
 import java.util.Locale;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class Nl2SqlSchemaService {
 
     private final Nl2SqlProperties properties;
+    private final CacheManager cacheManager;
 
     public Nl2SqlSchemaContext retrieve(String question) {
+        String dsKey = properties.getDatasource().getUrl() != null
+                ? properties.getDatasource().getUrl() : "default";
+        Nl2SqlSchemaContext cached = cacheManager.getNl2sqlSchema(dsKey);
+        if (cached != null) {
+            return cached;
+        }
+        Nl2SqlSchemaContext context = doRetrieve(question);
+        cacheManager.putNl2sqlSchema(dsKey, context);
+        return context;
+    }
+
+    private Nl2SqlSchemaContext doRetrieve(String question) {
         List<Nl2SqlProperties.Table> candidates = properties.getTables().stream()
                 .filter(Nl2SqlProperties.Table::isAllowed)
                 .map(table -> new ScoredTable(table, score(table, question)))

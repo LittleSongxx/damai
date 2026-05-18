@@ -7,6 +7,8 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import org.javaup.ai.entity.base.BaseTableData;
 
+import java.util.Date;
+
 @Data
 @EqualsAndHashCode(callSuper = true)
 @TableName("d_ai_conversation_memory_summary")
@@ -28,4 +30,8 @@ public class AiConversationMemorySummary extends BaseTableData {
     private Integer summaryVersion;
 
     private Integer compressionCount;
+
+    private String sourceProvenance;
+
+    private Date expiresAt;
 }

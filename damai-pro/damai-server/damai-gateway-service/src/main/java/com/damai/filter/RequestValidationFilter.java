@@ -57,6 +57,7 @@ import static com.damai.constant.Constant.TRACE_ID;
 import static com.damai.constant.GatewayConstant.BUSINESS_BODY;
 import static com.damai.constant.GatewayConstant.CODE;
 import static com.damai.constant.GatewayConstant.ENCRYPT;
+import static com.damai.constant.GatewayConstant.INTERNAL_ACCESS_TOKEN;
 import static com.damai.constant.GatewayConstant.NO_VERIFY;
 import static com.damai.constant.GatewayConstant.REQUEST_BODY;
 import static com.damai.constant.GatewayConstant.TOKEN;
@@ -193,11 +194,16 @@ public class RequestValidationFilter implements GlobalFilter, Ordered {
         String userId = null;
         String url = request.getPath().value();
         String noVerify = request.getHeaders().getFirst(NO_VERIFY);
+        String internalAccessToken = request.getHeaders().getFirst(INTERNAL_ACCESS_TOKEN);
+        boolean internalAccess = isInternalAccess(internalAccessToken);
         boolean allowNormalAccess = gatewayProperty.isAllowNormalAccess();
-        if ((!allowNormalAccess) && (VERIFY_VALUE.equals(noVerify))) {
+        if (StringUtil.isNotEmpty(internalAccessToken) && !internalAccess) {
             throw new DaMaiFrameException(BaseCode.ONLY_SIGNATURE_ACCESS_IS_ALLOWED);
         }
-        if (checkParameter(originalBody,noVerify) && !skipCheckParameter(url)) {
+        if ((!allowNormalAccess) && (VERIFY_VALUE.equals(noVerify)) && !internalAccess) {
+            throw new DaMaiFrameException(BaseCode.ONLY_SIGNATURE_ACCESS_IS_ALLOWED);
+        }
+        if (!internalAccess && checkParameter(originalBody,noVerify) && !skipCheckParameter(url)) {
 
             String encrypt = request.getHeaders().getFirst(ENCRYPT);
             //应用渠道
@@ -322,5 +328,11 @@ public class RequestValidationFilter implements GlobalFilter, Ordered {
             }
         }
         return false;
+    }
+
+    private boolean isInternalAccess(String internalAccessToken) {
+        return StringUtil.isNotEmpty(internalAccessToken)
+                && StringUtil.isNotEmpty(gatewayProperty.getInternalAccessToken())
+                && Objects.equals(internalAccessToken, gatewayProperty.getInternalAccessToken());
     }
 }

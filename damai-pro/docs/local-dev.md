@@ -20,6 +20,7 @@
 | Nacos | `18848 → 8848` |
 | RabbitMQ | `5672` / 管理端 `15672` |
 | Elasticsearch | `19200 → 9200` |
+| Qdrant | `16333 → 6333` / gRPC `16334 → 6334` |
 | Seata | `8091` |
 | Sentinel | `8082` |
 
@@ -28,9 +29,15 @@
 ### 启动依赖
 
 ```bash
-docker compose up -d
+docker compose --env-file .env up -d
 # 包含 AI 相关组件 (Prometheus, Qdrant, Ollama):
-docker compose --profile ai up -d
+docker compose --env-file .env --profile ai up -d
+```
+
+如果本机残留旧版 Kafka 容器，使用当前 compose 清理孤儿容器：
+
+```bash
+docker compose --env-file .env --profile ai up -d --remove-orphans
 ```
 
 ### 环境变量
@@ -44,6 +51,18 @@ docker compose --profile ai up -d
 - `DAMAI_ES_ADDR` / `DAMAI_ES_USERNAME` / `DAMAI_ES_PASSWORD`
 - `DAMAI_SEATA_SERVER`
 - `DAMAI_SENTINEL_DASHBOARD`
+- `DAMAI_INTERNAL_ACCESS_TOKEN`：供 `damai-ai` 调用网关时使用的共享内部访问令牌
+
+### damai-ai 内部调用令牌
+
+为避免继续依赖 `no_verify` 绕过签名校验，本地联调时请在 `damai-pro/.env` 和 `damai-ai/.env` 中设置同一个 `DAMAI_INTERNAL_ACCESS_TOKEN`。建议同时在 `damai-ai/.env` 中显式设置：
+
+```env
+DAMAI_INTERNAL_ACCESS_TOKEN=__CHANGE_ME_SHARED_INTERNAL_TOKEN__
+DAMAI_ALLOW_UNSAFE_NO_VERIFY_FALLBACK=false
+```
+
+这样 `damai-ai` 会优先通过 `X-Internal-Token` 访问网关，且不再回退到旧的 `no_verify` 旁路。
 
 ### 分库分表配置生成
 

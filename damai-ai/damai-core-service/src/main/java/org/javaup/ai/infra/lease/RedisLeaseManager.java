@@ -1,0 +1,78 @@
+package org.javaup.ai.infra.lease;
+
+import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RScript;
+import org.redisson.api.RedissonClient;
+import org.redisson.client.codec.StringCodec;
+import org.springframework.util.Assert;
+
+import java.time.Duration;
+import java.util.List;
+
+@Slf4j
+public class RedisLeaseManager {
+
+    private static final String ACQUIRE_SCRIPT =
+            "if redis.call('exists', KEYS[1]) == 0 then "
+                    + "redis.call('psetex', KEYS[1], ARGV[2], ARGV[1]); "
+                    + "return 1; "
+                    + "end; "
+                    + "return 0;";
+
+    private static final String RENEW_SCRIPT =
+            "if redis.call('get', KEYS[1]) == ARGV[1] then "
+                    + "redis.call('pexpire', KEYS[1], ARGV[2]); "
+                    + "return 1; "
+                    + "end; "
+                    + "return 0;";
+
+    private static final String RELEASE_SCRIPT =
+            "if redis.call('get', KEYS[1]) == ARGV[1] then "
+                    + "return redis.call('del', KEYS[1]); "
+                    + "end; "
+                    + "return 0;";
+
+    private final RedissonClient redissonClient;
+
+    public RedisLeaseManager(RedissonClient redissonClient) {
+        this.redissonClient = redissonClient;
+    }
+
+    public boolean acquire(String key, String ownerToken, Duration ttl) {
+        return executeInteger(ACQUIRE_SCRIPT, key, ownerToken, ttl) == 1L;
+    }
+
+    public boolean renew(String key, String ownerToken, Duration ttl) {
+        return executeInteger(RENEW_SCRIPT, key, ownerToken, ttl) == 1L;
+    }
+
+    public boolean release(String key, String ownerToken) {
+        Assert.hasText(key, "key must not be empty");
+        Assert.hasText(ownerToken, "ownerToken must not be empty");
+        Long result = redissonClient.getScript(StringCodec.INSTANCE).eval(
+                RScript.Mode.READ_WRITE,
+                RELEASE_SCRIPT,
+                RScript.ReturnType.INTEGER,
+                List.of(key),
+                ownerToken
+        );
+        return result != null && result == 1L;
+    }
+
+    private long executeInteger(String script, String key, String ownerToken, Duration ttl) {
+        Assert.hasText(key, "key must not be empty");
+        Assert.hasText(ownerToken, "ownerToken must not be empty");
+        Assert.notNull(ttl, "ttl must not be null");
+        Assert.isTrue(!ttl.isNegative() && !ttl.isZero(), "ttl must be positive");
+
+        Long result = redissonClient.getScript(StringCodec.INSTANCE).eval(
+                RScript.Mode.READ_WRITE,
+                script,
+                RScript.ReturnType.INTEGER,
+                List.of(key),
+                ownerToken,
+                String.valueOf(ttl.toMillis())
+        );
+        return result != null ? result : 0L;
+    }
+}

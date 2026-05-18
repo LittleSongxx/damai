@@ -19,9 +19,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.Comparator;
+import java.util.Date;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -32,7 +34,9 @@ public class AssistantMemoryService {
     private static final int COMPRESSION_TRIGGER_RUNS = 6;
     private static final int RECENT_RUN_LIMIT = 8;
     private static final int SUMMARY_CHAR_LIMIT = 1200;
-    private static final int STRUCTURED_MEMORY_VERSION = 2;
+    private static final int STRUCTURED_MEMORY_VERSION = 3;
+    private static final long MEMORY_TTL_DAYS = 90;
+    private static final double DECAY_HALF_LIFE_DAYS = 70.0;
 
     private final AiConversationMemorySummaryMapper memorySummaryMapper;
     private final AiRunMapper runMapper;
@@ -60,10 +64,11 @@ public class AssistantMemoryService {
     }
 
     public AssistantMemoryContext load(String conversationId, Long userId) {
-        AiConversationMemorySummary summary = latestSummary(conversationId, userId);
+        AiConversationMemorySummary summary = latestNonExpiredSummary(conversationId, userId);
         if (summary == null || !StringUtils.hasText(summary.getSummary())) {
             return AssistantMemoryContext.empty();
         }
+        double decayWeight = computeDecayWeight(summary);
         return new AssistantMemoryContext(summary.getSummary(), true, parseStructuredMemory(summary));
     }
 
@@ -85,6 +90,8 @@ public class AssistantMemoryService {
         if (!StringUtils.hasText(summaryText)) {
             return;
         }
+        Date expiresAt = new Date(System.currentTimeMillis() + TimeUnit.DAYS.toMillis(MEMORY_TTL_DAYS));
+        String provenance = "AGENT_INFERENCE:" + run.getRunId();
         AiConversationMemorySummary summary = new AiConversationMemorySummary();
         summary.setConversationId(run.getConversationId());
         summary.setUserId(run.getUserId());
@@ -93,8 +100,50 @@ public class AssistantMemoryService {
         summary.setMemoryJson(structuredMemory == null ? null : JSON.toJSONString(structuredMemory));
         summary.setSummaryVersion(STRUCTURED_MEMORY_VERSION);
         summary.setCompressionCount(latest == null ? 1 : latest.getCompressionCount() + 1);
+        summary.setSourceProvenance(provenance);
+        summary.setExpiresAt(expiresAt);
         summary.setStatus(1);
         memorySummaryMapper.insert(summary);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public int purgeExpiredMemories() {
+        Date now = new Date();
+        List<AiConversationMemorySummary> expired = memorySummaryMapper.selectList(
+                Wrappers.lambdaQuery(AiConversationMemorySummary.class)
+                        .eq(AiConversationMemorySummary::getStatus, 1)
+                        .isNotNull(AiConversationMemorySummary::getExpiresAt)
+                        .lt(AiConversationMemorySummary::getExpiresAt, now));
+        if (expired.isEmpty()) {
+            return 0;
+        }
+        for (AiConversationMemorySummary item : expired) {
+            item.setStatus(0);
+            memorySummaryMapper.updateById(item);
+        }
+        log.info("purged {} expired memory summaries", expired.size());
+        return expired.size();
+    }
+
+    private AiConversationMemorySummary latestNonExpiredSummary(String conversationId, Long userId) {
+        AiConversationMemorySummary summary = latestSummary(conversationId, userId);
+        if (summary == null) {
+            return null;
+        }
+        if (summary.getExpiresAt() != null && summary.getExpiresAt().before(new Date())) {
+            log.debug("memory summary expired, returning empty context conversationId={}", conversationId);
+            return null;
+        }
+        return summary;
+    }
+
+    private double computeDecayWeight(AiConversationMemorySummary summary) {
+        if (summary.getCreateTime() == null) {
+            return 1.0;
+        }
+        long ageMs = System.currentTimeMillis() - summary.getCreateTime().getTime();
+        double ageDays = (double) ageMs / TimeUnit.DAYS.toMillis(1);
+        return Math.pow(0.5, ageDays / DECAY_HALF_LIFE_DAYS);
     }
 
     private AiConversationMemorySummary latestSummary(String conversationId, Long userId) {

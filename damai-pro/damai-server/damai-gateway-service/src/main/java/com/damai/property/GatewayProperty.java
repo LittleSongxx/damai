@@ -29,6 +29,9 @@ public class GatewayProperty {
     
     @Value("${allow.normal.access:true}")
     private boolean allowNormalAccess;
+
+    @Value("${internal.access.token:}")
+    private String internalAccessToken;
     
     @Value("${userId.paths:/**/program/detail,/**/program/detail/v1,/**/program/detail/v2}")
     private String[] userIdPaths;

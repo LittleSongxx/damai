@@ -45,6 +45,14 @@ spring:
       password: ${DAMAI_REDIS_PASSWORD:}
       database: ${DAMAI_REDIS_DATABASE:0}
       timeout: ${DAMAI_REDIS_TIMEOUT:3000ms}
+      redisson:
+        config: |
+          singleServerConfig:
+            address: redis://${DAMAI_REDIS_HOST:127.0.0.1}:${DAMAI_REDIS_PORT:16379}
+            password: ${DAMAI_REDIS_PASSWORD:}
+            database: ${DAMAI_REDIS_DATABASE:0}
+            connectTimeout: 3000
+            timeout: 3000
   ai:
     chat:
       memory:
@@ -228,6 +236,77 @@ damai:
       enabled: ${DAMAI_AI_DRIFT_DETECTION_ENABLED:false}
       sample-rate: ${DAMAI_AI_DRIFT_SAMPLE_RATE:0.05}
       cron: ${DAMAI_AI_DRIFT_CRON:0 0 3 * * ?}
+    cache:
+      embedding:
+        enabled: true
+        max-size: 5000
+        ttl-minutes: 30
+      faq-search:
+        enabled: true
+        ttl-minutes: 15
+      web-search:
+        enabled: true
+        ttl-minutes: 5
+      user-context:
+        enabled: true
+        ttl-minutes: 10
+      nl2sql-schema:
+        enabled: true
+        max-size: 100
+        ttl-minutes: 60
+    rate-limit:
+      enabled: true
+      endpoints:
+        "assistant.runs.create":
+          limit: 20
+          window-seconds: 60
+          key-type: user
+        "assistant.runs.stream":
+          limit: 10
+          window-seconds: 0
+          key-type: user
+        "simple.chat":
+          limit: 10
+          window-seconds: 1
+          key-type: ip
+        admin:
+          limit: 50
+          window-seconds: 60
+          key-type: user
+    resilience:
+      llm:
+        enabled: true
+        failure-rate-threshold: 50
+        sliding-window-size: 10
+        wait-duration-seconds: 30
+        permitted-calls-in-half-open: 3
+        timeout-ms: 15000
+      qdrant:
+        enabled: true
+        failure-rate-threshold: 50
+        sliding-window-size: 5
+        wait-duration-seconds: 15
+      es:
+        enabled: true
+        failure-rate-threshold: 50
+        sliding-window-size: 5
+        wait-duration-seconds: 15
+      web-search:
+        enabled: true
+        failure-rate-threshold: 50
+        sliding-window-size: 5
+        wait-duration-seconds: 30
+    thread-pool:
+      assistant:
+        core-pool-size: 4
+        max-pool-size: 16
+        queue-capacity: 100
+        keep-alive-seconds: 60
+      nl2sql:
+        max-pool-size: 5
+        connection-timeout-ms: 3000
+        idle-timeout-ms: 600000
+        max-lifetime-ms: 1800000
 # AI可观测性配置 - 模型价格（单位：元/1K tokens）
 # 参考价格，请以各厂商官网为准
 ai:

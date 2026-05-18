@@ -186,6 +186,7 @@ services:
       - ai
     ports:
       - "${DAMAI_QDRANT_PORT:-16333}:6333"
+      - "${DAMAI_QDRANT_GRPC_PORT:-16334}:6334"
     volumes:
       - damai-qdrant-data:/qdrant/storage
     healthcheck:

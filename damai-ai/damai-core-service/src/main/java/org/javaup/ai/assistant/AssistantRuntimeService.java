@@ -2,6 +2,7 @@ package org.javaup.ai.assistant;
 
 import com.alibaba.fastjson.JSON;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.context.AiRequestContextHolder;
 import org.javaup.ai.context.AiRequestContext;
 import org.javaup.ai.context.AiUserContext;
@@ -17,7 +18,11 @@ import org.javaup.ai.entity.AiRunEvent;
 import org.javaup.ai.guardrails.GuardrailAuditService;
 import org.javaup.ai.guardrails.GuardrailResult;
 import org.javaup.ai.guardrails.InputGuardrailService;
+import org.javaup.ai.mapper.AiRetrievalTraceMapper;
+import org.javaup.ai.metrics.BusinessMetrics;
 import org.javaup.ai.security.AiPermissionService;
+import org.javaup.ai.tracing.ConversationTraceRecorder;
+import org.javaup.ai.tracing.model.ConversationTraceStageCode;
 import org.javaup.ai.vo.AiUserCapabilitiesVo;
 import org.javaup.ai.vo.AssistantActionResultVo;
 import org.javaup.ai.vo.AssistantRunCreatedVo;
@@ -26,12 +31,13 @@ import org.javaup.ai.vo.ChatHistoryMessageVO;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ThreadPoolExecutor;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AssistantRuntimeService {
@@ -49,6 +55,9 @@ public class AssistantRuntimeService {
     private final GuardrailAuditService guardrailAuditService;
     private final AssistantRuntimeLeaseService runtimeLeaseService;
     private final AssistantStageTraceService stageTraceService;
+    private final AiRetrievalTraceMapper retrievalTraceMapper;
+    private final ThreadPoolExecutor assistantRunExecutor;
+    private final BusinessMetrics businessMetrics;
 
     public AssistantRunCreatedVo createRun(AssistantRunCreateRequest request) {
         return runService.createRun(request);
@@ -130,12 +139,18 @@ public class AssistantRuntimeService {
             request.setClientContext(JSON.parseObject(run.getClientContextJson()));
         }
         AiUserContext user = AiRequestContextHolder.getRequiredUser();
+
+        String traceId = UUID.randomUUID().toString().replace("-", "");
+        ConversationTraceRecorder traceRecorder = new ConversationTraceRecorder(
+                stageTraceService, retrievalTraceMapper,
+                run.getConversationId(), run.getRunId(), traceId);
+
         GuardrailResult inputGuardrail = inputGuardrailService.check(request.getMessage());
         if (inputGuardrail.getAction() != GuardrailResult.Action.PASS) {
             guardrailAuditService.publish(run.getRunId(), "input", inputGuardrail, request.getMessage());
             if (inputGuardrail.isBlocked()) {
                 String blockedMessage = inputGuardrail.getSanitizedContent() == null
-                        ? "抱歉，这个请求触发了输入安全策略，无法继续处理。"
+                        ? "this request triggered input safety policy and cannot be processed."
                         : inputGuardrail.getSanitizedContent();
                 messageEmitter.emitMessage(run.getRunId(), run.getConversationId(), blockedMessage);
                 runService.appendEvent(run.getRunId(), AssistantEventTypes.MESSAGE_COMPLETED, Map.of(
@@ -150,26 +165,30 @@ public class AssistantRuntimeService {
                 return;
             }
         }
-        AssistantStageTraceService.StageSpan planningSpan = stageTraceService.startStage(
-                "PLANNING",
+
+        ConversationTraceRecorder.StageHandle planningSpan = traceRecorder.startStage(
+                ConversationTraceStageCode.PLANNING,
                 "AssistantPlanning",
                 request.getMessage(),
-                null,
                 Map.of("conversationId", run.getConversationId()));
         AssistantExecutionPlan plan;
         try {
             plan = executionPlanner.plan(run, user, request);
-            stageTraceService.complete(planningSpan, plan.getReason(), null, null, null, null, Map.of(
-                    "routeType", plan.getRouteDecision() == null || plan.getRouteDecision().getRouteType() == null ? "" : plan.getRouteDecision().getRouteType().getCode(),
+            traceRecorder.completeStage(planningSpan, plan.getReason(), Map.of(
+                    "routeType", plan.getRouteDecision() == null || plan.getRouteDecision().getRouteType() == null
+                            ? "" : plan.getRouteDecision().getRouteType().getCode(),
                     "executionMode", plan.getExecutionMode() == null ? "" : plan.getExecutionMode().name()
             ));
         } catch (Exception ex) {
-            stageTraceService.fail(planningSpan, ex, Map.of());
+            traceRecorder.failStage(planningSpan, "planning failed", ex.getMessage(), Map.of());
             throw ex;
         }
+
         AssistantRouteDecision decision = plan.getRouteDecision();
-        AiRequestContextHolder.enrich(run.getConversationId(), run.getRunId(), decision.getRouteType().getLegacyChatType().getCode(), decision.getRouteType().getCode());
-        runService.startRun(run, decision.getRouteType(), plan.getExecutionMode() == AssistantExecutionMode.CLARIFICATION ? "CLARIFYING" : "ROUTED");
+        AiRequestContextHolder.enrich(run.getConversationId(), run.getRunId(),
+                decision.getRouteType().getLegacyChatType().getCode(), decision.getRouteType().getCode());
+        runService.startRun(run, decision.getRouteType(),
+                plan.getExecutionMode() == AssistantExecutionMode.CLARIFICATION ? "CLARIFYING" : "ROUTED");
         runService.appendEvent(run.getRunId(), AssistantEventTypes.RUN_STARTED, Map.of(
                 "runId", run.getRunId(),
                 "chatId", run.getConversationId()
@@ -183,37 +202,45 @@ public class AssistantRuntimeService {
                     .request(request)
                     .plan(plan)
                     .user(user)
+                    .traceRecorder(traceRecorder)
                     .build());
         } catch (Exception ex) {
+            ConversationTraceRecorder.StageHandle finalizeSpan = traceRecorder.startStage(
+                    ConversationTraceStageCode.FINALIZE, "FAILED",
+                    "finalizing failed run", Map.of());
             runService.markFailed(run, "FAILED", ex.getMessage());
             runService.appendEvent(run.getRunId(), AssistantEventTypes.RUN_FAILED, Map.of(
                     "runId", run.getRunId(),
                     "message", ex.getMessage()
             ));
+            traceRecorder.completeStage(finalizeSpan, "run finalized with failure", Map.of(
+                    "status", "FAILED",
+                    "error", ex.getMessage()
+            ));
         }
     }
 
     private void launchProcess(String runId, AiRequestContext context) {
-        Mono.fromRunnable(() -> {
-                    try {
-                        if (context != null) {
-                            AiRequestContextHolder.set(context);
-                        }
-                        AiRun run = runService.getRunInternal(runId);
-                        if (run != null) {
-                            runService.updateStage(runId, "WAITING_LEASE");
-                        }
-                        try (AssistantRuntimeLeaseService.LeaseHandle ignored = run == null
-                                ? AssistantRuntimeLeaseService.LeaseHandle.noop()
-                                : runtimeLeaseService.acquireConversationLease(run.getConversationId(), runId)) {
-                            processRun(runId);
-                        }
-                    } finally {
-                        AiRequestContextHolder.clear();
-                    }
-                })
-                .subscribeOn(Schedulers.boundedElastic())
-                .subscribe();
+        var sample = businessMetrics.startAssistantRun();
+        assistantRunExecutor.execute(() -> {
+            try {
+                if (context != null) {
+                    AiRequestContextHolder.set(context);
+                }
+                AiRun run = runService.getRunInternal(runId);
+                if (run != null) {
+                    runService.updateStage(runId, "WAITING_LEASE");
+                }
+                try (AssistantRuntimeLeaseService.LeaseHandle ignored = run == null
+                        ? AssistantRuntimeLeaseService.LeaseHandle.noop()
+                        : runtimeLeaseService.acquireConversationLease(run.getConversationId(), runId)) {
+                    processRun(runId);
+                }
+            } finally {
+                businessMetrics.stopAssistantRun(sample);
+                AiRequestContextHolder.clear();
+            }
+        });
     }
 
     private ServerSentEvent<String> toEvent(AiRunEvent event) {

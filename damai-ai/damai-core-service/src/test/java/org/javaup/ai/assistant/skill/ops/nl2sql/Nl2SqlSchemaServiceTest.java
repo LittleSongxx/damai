@@ -1,15 +1,19 @@
 package org.javaup.ai.assistant.skill.ops.nl2sql;
 
+import org.javaup.ai.cache.CacheManager;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 class Nl2SqlSchemaServiceTest {
 
+    private final CacheManager cacheManager = mock(CacheManager.class);
+
     @Test
     void shouldRetrieveRelevantOrderSchema() {
-        Nl2SqlSchemaService schemaService = new Nl2SqlSchemaService(new Nl2SqlProperties());
+        Nl2SqlSchemaService schemaService = new Nl2SqlSchemaService(new Nl2SqlProperties(), cacheManager);
 
         Nl2SqlSchemaContext context = schemaService.retrieve("今天订单量和支付成功率怎么样");
 
@@ -20,7 +24,7 @@ class Nl2SqlSchemaServiceTest {
 
     @Test
     void shouldExposeAllowedTableNames() {
-        Nl2SqlSchemaService schemaService = new Nl2SqlSchemaService(new Nl2SqlProperties());
+        Nl2SqlSchemaService schemaService = new Nl2SqlSchemaService(new Nl2SqlProperties(), cacheManager);
 
         assertTrue(schemaService.allowedTableNames().contains("v_api_call_stats"));
     }
