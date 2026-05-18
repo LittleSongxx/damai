@@ -4,6 +4,7 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import jakarta.annotation.PostConstruct;
+import org.javaup.ai.utils.CommonUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -51,8 +52,8 @@ public class MetricsGateway {
         Double gcTime = querySingleMetric(String.format("sum(jvm_gc_pause_seconds_sum{application=\"%s\"})", serviceName));
 
         Map<String, Object> memory = new LinkedHashMap<>();
-        memory.put("used", heapUsed == null ? "N/A" : formatBytes(heapUsed));
-        memory.put("max", heapMax == null || heapMax <= 0 ? "UNBOUNDED" : formatBytes(heapMax));
+        memory.put("used", heapUsed == null ? "N/A" : CommonUtils.formatBytes(heapUsed));
+        memory.put("max", heapMax == null || heapMax <= 0 ? "UNBOUNDED" : CommonUtils.formatBytes(heapMax));
         memory.put("usageRate", heapUsed != null && heapMax != null && heapMax > 0
                 ? String.format("%.2f%%", heapUsed / heapMax * 100)
                 : "N/A");
@@ -78,9 +79,9 @@ public class MetricsGateway {
         for (String pool : used.keySet()) {
             pools.add(Map.of(
                     "pool", pool,
-                    "used", formatBytes(used.get(pool)),
-                    "committed", formatBytes(committed.getOrDefault(pool, 0D)),
-                    "max", max.getOrDefault(pool, -1D) > 0 ? formatBytes(max.get(pool)) : "UNBOUNDED"
+                    "used", CommonUtils.formatBytes(used.get(pool)),
+                    "committed", CommonUtils.formatBytes(committed.getOrDefault(pool, 0D)),
+                    "max", max.getOrDefault(pool, -1D) > 0 ? CommonUtils.formatBytes(max.get(pool)) : "UNBOUNDED"
             ));
         }
         return Map.of("serviceName", serviceName, "pools", pools);
@@ -169,16 +170,4 @@ public class MetricsGateway {
         return result;
     }
 
-    private String formatBytes(double bytes) {
-        if (bytes < 1024) {
-            return String.format("%.0f B", bytes);
-        }
-        if (bytes < 1024 * 1024) {
-            return String.format("%.2f KB", bytes / 1024);
-        }
-        if (bytes < 1024 * 1024 * 1024) {
-            return String.format("%.2f MB", bytes / (1024 * 1024));
-        }
-        return String.format("%.2f GB", bytes / (1024 * 1024 * 1024));
-    }
 }

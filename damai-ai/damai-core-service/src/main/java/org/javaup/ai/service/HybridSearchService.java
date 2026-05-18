@@ -27,6 +27,7 @@ import org.springframework.util.StringUtils;
 
 import com.alibaba.fastjson.JSON;
 import org.javaup.ai.cache.CacheManager;
+import org.javaup.ai.mapper.AiRetrievalTraceMapper;
 import org.javaup.ai.metrics.BusinessMetrics;
 import org.javaup.ai.resilience.CircuitBreakerService;
 import org.javaup.ai.resilience.DegradationService;
@@ -50,7 +51,7 @@ public class HybridSearchService {
     private final OpenAiEmbeddingModel embeddingModel;
     private final RerankService rerankService;
     private final MarkdownLoader markdownLoader;
-    private final AiWorkflowService workflowService;
+    private final AiRetrievalTraceMapper retrievalTraceMapper;
     private final AdvancedQueryService advancedQueryService;
     private final ContextualCompressionService contextualCompressionService;
     private final QdrantClient qdrantClient;
@@ -82,7 +83,7 @@ public class HybridSearchService {
     public HybridSearchService(OpenAiEmbeddingModel embeddingModel,
                                RerankService rerankService,
                                MarkdownLoader markdownLoader,
-                               AiWorkflowService workflowService,
+                               AiRetrievalTraceMapper retrievalTraceMapper,
                                AdvancedQueryService advancedQueryService,
                                ContextualCompressionService contextualCompressionService,
                                QdrantClient qdrantClient,
@@ -93,7 +94,7 @@ public class HybridSearchService {
         this.embeddingModel = embeddingModel;
         this.rerankService = rerankService;
         this.markdownLoader = markdownLoader;
-        this.workflowService = workflowService;
+        this.retrievalTraceMapper = retrievalTraceMapper;
         this.advancedQueryService = advancedQueryService;
         this.contextualCompressionService = contextualCompressionService;
         this.qdrantClient = qdrantClient;
@@ -196,7 +197,13 @@ public class HybridSearchService {
                 "queryVariants", rewriteResult.allQueries(),
                 "documentCount", documents.size()
         )));
-        workflowService.saveRetrievalTrace(trace);
+        trace.setCreateTime(new java.util.Date());
+        trace.setEditTime(new java.util.Date());
+        trace.setStatus(1);
+        if (trace.getTraceId() == null) {
+            trace.setTraceId("retrieval_" + java.util.UUID.randomUUID().toString().replace("-", ""));
+        }
+        retrievalTraceMapper.insert(trace);
 
         RagSearchResultVo result = RagSearchResultVo.builder()
                 .originalQuery(query)

@@ -1,49 +1,33 @@
 package org.javaup.ai.config;
 
-
-import org.javaup.ai.advisor.ChatTypeHistoryAdvisor;
-import org.javaup.ai.advisor.ChatTypeTitleAdvisor;
-import org.javaup.ai.assistant.skill.business.BusinessToolService;
-import org.javaup.ai.constants.DaMaiConstant;
-import org.javaup.ai.enums.ChatType;
-import org.javaup.ai.advisor.AiObservabilityAdvisor;
-import org.javaup.ai.service.AiObservabilityService;
-import org.javaup.ai.service.ChatTypeHistoryService;
+import org.javaup.ai.ai.rag.MarkdownLoader;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.ChatMemoryRepository;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
-import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.vectorstore.SimpleVectorStore;
 import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.io.support.ResourcePatternResolver;
 
-import static org.javaup.ai.constants.DaMaiConstant.CHAT_TITLE_ADVISOR_ORDER;
-import static org.javaup.ai.constants.DaMaiConstant.CHAT_TYPE_HISTORY_ADVISOR_ORDER;
-import static org.javaup.ai.constants.DaMaiConstant.MESSAGE_CHAT_MEMORY_ADVISOR_ORDER;
-import static org.javaup.ai.constants.DaMaiConstant.OBSERVABILITY_ADVISOR_ORDER;
-
-/**
- * @program: 大麦-ai智能服务项目。 添加 阿星不是程序员 微信，添加时备注 ai 来获取项目的完整资料 
- * @description: 自动装配类
- * @author: 阿星不是程序员
- **/
 public class DaMaiAiAutoConfiguration {
-
 
     @Bean
     public ChatClient chatClient(OpenAiChatModel model) {
-        return ChatClient
-                .builder(model)
+        return ChatClient.builder(model)
                 .defaultSystem("你是一位智能助手，你的特点是温柔、善良，你的名字叫智能小艾，要结合你的特点积极的回答用户的问题。")
-                .defaultAdvisors(
-                        new SimpleLoggerAdvisor()
-                )
+                .defaultAdvisors(new SimpleLoggerAdvisor())
+                .build();
+    }
+
+    @Bean
+    public ChatClient titleChatClient(OpenAiChatModel model) {
+        return ChatClient.builder(model)
+                .defaultAdvisors(new SimpleLoggerAdvisor())
                 .build();
     }
 
@@ -56,71 +40,19 @@ public class DaMaiAiAutoConfiguration {
     }
 
     @Bean
-    public ChatClient assistantChatClient(OpenAiChatModel model, ChatMemory chatMemory, BusinessToolService businessToolService,
-                                          ChatTypeHistoryService chatTypeHistoryService,
-                                          @Qualifier("titleChatClient")ChatClient titleChatClient,
-                                          AiObservabilityService observabilityService) {
-        return ChatClient
-                .builder(model)
-                .defaultSystem(DaMaiConstant.DA_MAI_SYSTEM_PROMPT)
-                .defaultAdvisors(
-                        new SimpleLoggerAdvisor(),
-                        ChatTypeHistoryAdvisor.builder(chatTypeHistoryService).type(ChatType.ASSISTANT.getCode())
-                                .order(CHAT_TYPE_HISTORY_ADVISOR_ORDER).build(),
-                        ChatTypeTitleAdvisor.builder(chatTypeHistoryService).type(ChatType.ASSISTANT.getCode())
-                                .chatClient(titleChatClient).chatMemory(chatMemory).order(CHAT_TITLE_ADVISOR_ORDER).build(),
-                        MessageChatMemoryAdvisor.builder(chatMemory).order(MESSAGE_CHAT_MEMORY_ADVISOR_ORDER).build(),
-                        // AI增强: Observability可观测性 - Token统计、延迟监控
-                        AiObservabilityAdvisor.builder(observabilityService)
-                                .order(OBSERVABILITY_ADVISOR_ORDER)
-                                .modelName("qwen3.6-plus")
-                                .requestType(ChatType.ASSISTANT.getMsg())
-                                .build()
-                )
-                .defaultTools(businessToolService)
-                .build();
-    }
-    
-    @Bean
-    public ChatClient analysisChatClient(OpenAiChatModel model, ChatMemory chatMemory,
-                                          ChatTypeHistoryService chatTypeHistoryService,
-                                          @Qualifier("titleChatClient")ChatClient titleChatClient,
-                                          @Qualifier("mcpToolCallbackProvider") ToolCallbackProvider mcpToolCallbackProvider,
-                                          AiObservabilityService observabilityService) {
-        return ChatClient
-                .builder(model)
-                .defaultSystem(DaMaiConstant.DA_MAI_ANALYSIS_PROMPT)
-                .defaultAdvisors(
-                        new SimpleLoggerAdvisor(),
-                        ChatTypeHistoryAdvisor.builder(chatTypeHistoryService).type(ChatType.ANALYSIS.getCode())
-                                .order(CHAT_TYPE_HISTORY_ADVISOR_ORDER).build(),
-                        ChatTypeTitleAdvisor.builder(chatTypeHistoryService).type(ChatType.ANALYSIS.getCode())
-                                .chatClient(titleChatClient).chatMemory(chatMemory).order(CHAT_TITLE_ADVISOR_ORDER).build(),
-                        MessageChatMemoryAdvisor.builder(chatMemory).order(MESSAGE_CHAT_MEMORY_ADVISOR_ORDER).build(),
-                        // AI增强: Observability可观测性 - Token统计、延迟监控
-                        AiObservabilityAdvisor.builder(observabilityService)
-                                .order(OBSERVABILITY_ADVISOR_ORDER)
-                                .modelName("qwen3.6-plus")
-                                .requestType(ChatType.ANALYSIS.getMsg())
-                                .build()
-                )
-                // 使用 MCP 工具（日志查询等）
-                .defaultToolCallbacks(mcpToolCallbackProvider)
-                .build();
-    }
-    
-    @Bean
-    public ChatClient titleChatClient(OpenAiChatModel model) {
-        return ChatClient
-                .builder(model)
-                .defaultAdvisors(
-                        new SimpleLoggerAdvisor()
-                )
-                .build();
-    }
-    
-    @Bean
     public VectorStore vectorStore(OpenAiEmbeddingModel embeddingModel) {
         return SimpleVectorStore.builder(embeddingModel).build();
+    }
+
+    @Bean
+    public MarkdownLoader markdownLoader(ResourcePatternResolver resourcePatternResolver,
+                                         @Value("${damai.ai.rag.document-pattern:classpath:datum/*.md}") String documentPattern,
+                                         @Value("${damai.ai.rag.chunk-size:400}") int chunkSize,
+                                         @Value("${damai.ai.rag.min-chunk-size-chars:50}") int minChunkSizeChars,
+                                         @Value("${damai.ai.rag.min-chunk-length-to-embed:5}") int minChunkLengthToEmbed,
+                                         @Value("${damai.ai.rag.max-num-chunks:10000}") int maxNumChunks,
+                                         @Value("${damai.ai.rag.min-doc-length-for-token-split:1000}") int minDocLengthForTokenSplit) {
+        return new MarkdownLoader(resourcePatternResolver, documentPattern, chunkSize,
+                minChunkSizeChars, minChunkLengthToEmbed, maxNumChunks, minDocLengthForTokenSplit);
     }
 }

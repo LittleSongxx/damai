@@ -1,14 +1,14 @@
-package org.javaup.ai.cotroller;
+package org.javaup.ai.controller;
 
 import lombok.RequiredArgsConstructor;
-import org.javaup.ai.assistant.AssistantRouteType;
 import org.javaup.ai.assistant.AssistantConversationService;
+import org.javaup.ai.assistant.AssistantRouteType;
 import org.javaup.ai.common.ApiResponse;
 import org.javaup.ai.entity.ChatTypeHistory;
 import org.javaup.ai.enums.ChatType;
 import org.javaup.ai.service.ChatTypeHistoryService;
-import org.javaup.ai.vo.ChatHistoryMessageVO;
 import org.javaup.ai.vo.AssistantConversationVo;
+import org.javaup.ai.vo.ChatHistoryMessageVO;
 import org.javaup.ai.vo.ChatTypeHistoryVo;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.Message;
@@ -20,11 +20,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * @program: 大麦-ai智能服务项目。 添加 阿星不是程序员 微信，添加时备注 ai 来获取项目的完整资料 
- * @description: 聊天记录控制器
- * @author: 阿星不是程序员
- **/
 @RequiredArgsConstructor
 @RestController
 @RequestMapping("/chat")
@@ -34,10 +29,8 @@ public class ChatTypeHistoryController {
 
     private final AssistantConversationService assistantConversationService;
 
-    private final org.javaup.ai.assistant.compat.LegacyAssistantCompatibilityService legacyAssistantCompatibilityService;
-
     private final ChatMemory chatMemory;
-    
+
     @RequestMapping("/type/history/list")
     public List<ChatTypeHistoryVo> getChatTypeHistoryList(@RequestParam("type") Integer type) {
         List<ChatTypeHistoryVo> legacyHistory = chatHistoryService.getChatTypeHistoryList(type);
@@ -59,7 +52,7 @@ public class ChatTypeHistoryController {
     }
 
     @RequestMapping("/history/message/list")
-    public List<ChatHistoryMessageVO> getChatHistory(@RequestParam("chatId") String chatId,@RequestParam("type") Integer type) {
+    public List<ChatHistoryMessageVO> getChatHistory(@RequestParam("chatId") String chatId, @RequestParam("type") Integer type) {
         ChatTypeHistory session = chatHistoryService.getChatTypeHistory(type, chatId);
         if (session == null && assistantConversationService.getConversation(chatId) == null) {
             return List.of();
@@ -67,9 +60,9 @@ public class ChatTypeHistoryController {
         List<Message> messages = chatMemory.get(chatId);
         return messages.stream().map(ChatHistoryMessageVO::new).toList();
     }
-    
+
     @RequestMapping(value = "/delete")
-    public ApiResponse<Void> delete(@RequestParam("type") Integer type, @RequestParam("chatId") String chatId){
+    public ApiResponse<Void> delete(@RequestParam("type") Integer type, @RequestParam("chatId") String chatId) {
         chatHistoryService.delete(type, chatId);
         if (routeTypeOf(type) != null) {
             assistantConversationService.deleteConversation(chatId);
@@ -96,7 +89,7 @@ public class ChatTypeHistoryController {
         historyVo.setChatId(conversation.getChatId());
         historyVo.setTitle(conversation.getTitle());
         historyVo.setLatestRunId(conversation.getLatestRunId());
-        historyVo.setWorkflowStatus(legacyAssistantCompatibilityService.toLegacyWorkflowStatus(conversation.getLatestStatus()));
+        historyVo.setWorkflowStatus(conversation.getLatestStatus());
         return historyVo;
     }
 }

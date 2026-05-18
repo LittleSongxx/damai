@@ -1,4 +1,4 @@
-package org.javaup.ai.cotroller;
+package org.javaup.ai.controller;
 
 import lombok.RequiredArgsConstructor;
 import org.javaup.ai.entity.AiFeedback;

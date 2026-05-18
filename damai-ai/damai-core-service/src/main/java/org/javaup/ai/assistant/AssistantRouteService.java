@@ -2,6 +2,7 @@ package org.javaup.ai.assistant;
 
 import org.javaup.ai.structured.IntentRecognition;
 import org.javaup.ai.structured.StructuredOutputService;
+import org.javaup.ai.utils.CommonUtils;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
@@ -150,17 +151,8 @@ public class AssistantRouteService {
         return score;
     }
 
-    private boolean containsAny(String value, String... keywords) {
-        for (String keyword : keywords) {
-            if (value.contains(keyword)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     private boolean looksLikeOpsDataQuestion(String normalized) {
-        if (!containsAny(normalized,
+        if (!CommonUtils.containsAny(normalized,
                 "nl2sql", "text2sql", "sql", "查库", "数据库", "问数", "取数", "报表",
                 "统计", "趋势", "同比", "环比", "排名", "top",
                 "订单量", "支付成功率", "退款率", "退款金额", "gmv", "成交额",
@@ -169,6 +161,6 @@ public class AssistantRouteService {
                 "token", "成本")) {
             return false;
         }
-        return !containsAny(normalized, "购票", "买票", "下单", "推荐");
+        return !CommonUtils.containsAny(normalized, "购票", "买票", "下单", "推荐");
     }
 }

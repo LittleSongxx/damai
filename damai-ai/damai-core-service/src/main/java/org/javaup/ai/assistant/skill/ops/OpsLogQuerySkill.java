@@ -11,15 +11,14 @@ import org.javaup.ai.assistant.gateway.LogGateway;
 import org.javaup.ai.assistant.gateway.TraceGateway;
 import org.javaup.ai.assistant.memory.AssistantMemoryKeyService;
 import org.javaup.ai.assistant.tool.AssistantToolInvoker;
+import org.javaup.ai.utils.CommonUtils;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Component
@@ -79,7 +78,7 @@ public class OpsLogQuerySkill implements AssistantSkill {
                 .executorType("java")
                 .frontendSelectable(true)
                 .modelSelectable(true)
-                .primarySkill(false)
+                .primarySkill(true)
                 .build();
     }
 
@@ -87,17 +86,17 @@ public class OpsLogQuerySkill implements AssistantSkill {
     public AssistantSkillResult execute(AssistantSkillContext context) {
         String runId = context.getRun().getRunId();
         String prompt = context.getMessage();
-        String serviceName = extract(prompt, SERVICE_PATTERN);
+        String serviceName = CommonUtils.extract(prompt, SERVICE_PATTERN);
         Map<String, Object> evidence;
 
         if (prompt.toLowerCase().contains("trace")) {
-            String traceId = extract(prompt, TRACE_PATTERN);
+            String traceId = CommonUtils.extract(prompt, TRACE_PATTERN);
             evidence = toolInvoker.invoke(runId, "traceGateway", "ops",
-                    mapOf("traceId", traceId),
+                    CommonUtils.mapOf("traceId", traceId),
                     () -> traceGateway.getTrace(traceId));
         } else {
             evidence = toolInvoker.invoke(runId, "logGateway", "ops",
-                    mapOf("keyword", prompt, "serviceName", serviceName == null ? "" : serviceName),
+                    CommonUtils.mapOf("keyword", prompt, "serviceName", serviceName == null ? "" : serviceName),
                     () -> logGateway.searchLogsByKeyword(prompt, serviceName, "ERROR", 20));
         }
 
@@ -139,20 +138,5 @@ public class OpsLogQuerySkill implements AssistantSkill {
             return "无";
         }
         return context.getMemoryContext().summary();
-    }
-
-    private String extract(String prompt, Pattern pattern) {
-        Matcher matcher = pattern.matcher(prompt);
-        return matcher.find() ? matcher.group(1) : null;
-    }
-
-    private Map<String, Object> mapOf(Object... values) {
-        LinkedHashMap<String, Object> map = new LinkedHashMap<>();
-        for (int index = 0; index < values.length; index += 2) {
-            if (values[index + 1] != null) {
-                map.put(String.valueOf(values[index]), values[index + 1]);
-            }
-        }
-        return map;
     }
 }

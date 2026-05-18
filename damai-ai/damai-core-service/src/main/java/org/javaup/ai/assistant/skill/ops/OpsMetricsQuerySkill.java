@@ -10,6 +10,7 @@ import org.javaup.ai.assistant.AssistantSkillRiskLevel;
 import org.javaup.ai.assistant.gateway.MetricsGateway;
 import org.javaup.ai.assistant.memory.AssistantMemoryKeyService;
 import org.javaup.ai.assistant.tool.AssistantToolInvoker;
+import org.javaup.ai.utils.CommonUtils;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -83,7 +84,7 @@ public class OpsMetricsQuerySkill implements AssistantSkill {
         String prompt = context.getMessage();
         Map<String, Object> evidence;
 
-        if (containsAny(prompt.toLowerCase(), "有哪些服务", "服务列表")) {
+        if (CommonUtils.containsAny(prompt.toLowerCase(), "有哪些服务", "服务列表")) {
             evidence = toolInvoker.invoke(runId, "metricsGateway", "ops",
                     Map.of("query", "service-list"),
                     metricsGateway::getServiceList);
@@ -135,12 +136,4 @@ public class OpsMetricsQuerySkill implements AssistantSkill {
         return context.getMemoryContext().summary();
     }
 
-    private boolean containsAny(String value, String... keywords) {
-        for (String keyword : keywords) {
-            if (value.contains(keyword)) {
-                return true;
-            }
-        }
-        return false;
-    }
 }

@@ -1,4 +1,4 @@
-package org.javaup.ai.cotroller;
+package org.javaup.ai.controller;
 
 import jakarta.annotation.Resource;
 import org.javaup.ai.common.ApiResponse;
