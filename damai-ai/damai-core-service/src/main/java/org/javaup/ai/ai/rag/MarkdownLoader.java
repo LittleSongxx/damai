@@ -17,15 +17,19 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
 /**
- * @program: 大麦-ai智能服务项目。 添加 阿星不是程序员 微信，添加时备注 ai 来获取项目的完整资料 
- * @description: markdown文档读取 dto
- * @author: 阿星不是程序员
- **/
+ * Enhanced Markdown document loader with:
+ * - YAML front matter parsing
+ * - Hierarchical chunking (parent-child)
+ * - Contextual prefix enrichment
+ * - Structured metadata extraction
+ */
 @Slf4j
 public class MarkdownLoader {
 
@@ -36,6 +40,10 @@ public class MarkdownLoader {
     private static final int DEFAULT_MAX_NUM_CHUNKS = 10000;
     private static final int DEFAULT_MIN_DOC_LENGTH_FOR_TOKEN_SPLIT = 1000;
 
+    // Hierarchical chunking: parent blocks for context window
+    private static final int PARENT_CHUNK_SIZE = 1024;
+    private static final int PARENT_OVERLAP = 128;
+
     private final ResourcePatternResolver resourcePatternResolver;
     private final String documentPattern;
     private final int chunkSize;
@@ -44,7 +52,8 @@ public class MarkdownLoader {
     private final int maxNumChunks;
     private final int minDocLengthForTokenSplit;
     private static final String INDEX_VERSION_PREFIX = "v";
-    private volatile LoadStats lastLoadStats = new LoadStats(0, 0, 0, 0);
+
+    private volatile LoadStats lastLoadStats = new LoadStats(0, 0, 0, 0, 0);
     private volatile String currentIndexVersion = INDEX_VERSION_PREFIX + Instant.now().getEpochSecond();
 
     public MarkdownLoader(ResourcePatternResolver resourcePatternResolver) {
@@ -73,45 +82,131 @@ public class MarkdownLoader {
         this.minDocLengthForTokenSplit = positiveOrDefault(minDocLengthForTokenSplit, DEFAULT_MIN_DOC_LENGTH_FOR_TOKEN_SPLIT);
     }
 
-    public List<Document> loadMarkdowns() {
-        List<Document> documents = new ArrayList<>();
+    /**
+     * Load all markdown documents with hierarchical chunking.
+     * Returns a structured result containing documents, front matter metadata, and the chunk hierarchy.
+     */
+    public LoadResult loadMarkdownsWithMetadata() {
+        List<Document> flatDocuments = new ArrayList<>();
+        List<DocumentMetadata> documentMetadatas = new ArrayList<>();
         int faqCount = 0;
         int skippedCount = 0;
         Resource[] resources = new Resource[0];
+
         try {
             resources = resourcePatternResolver.getResources(documentPattern);
-            Arrays.sort(resources, Comparator.comparing(resource -> resource.getFilename() == null ? "" : resource.getFilename()));
-            log.info("找到 {} 个Markdown文件", resources.length);
+            Arrays.sort(resources, Comparator.comparing(resource ->
+                    resource.getFilename() == null ? "" : resource.getFilename()));
+            log.info("Found {} Markdown files", resources.length);
+
             for (Resource resource : resources) {
                 String fileName = safeFileName(resource);
                 try {
-                    String markdown;
+                    String rawMarkdown;
                     try (InputStream inputStream = resource.getInputStream()) {
-                        markdown = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+                        rawMarkdown = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
                     }
-                    List<FaqSection> sections = parseFaqSections(fileName, markdown);
+
+                    ParsedMarkdown parsed = parseMarkdownWithFrontMatter(fileName, rawMarkdown);
+                    List<FaqSection> sections = parseFaqSections(fileName, parsed.body());
+
+                    DocumentMetadata docMeta = new DocumentMetadata(
+                            DigestUtil.md5Hex(rawMarkdown),
+                            fileName,
+                            parsed.frontMatter()
+                    );
+                    documentMetadatas.add(docMeta);
                     faqCount += sections.size();
+
                     for (FaqSection section : sections) {
-                        documents.addAll(toDocuments(fileName, section));
+                        flatDocuments.addAll(toDocumentsWithHierarchy(fileName, section, docMeta));
                     }
-                    log.info("文件 {} 解析出 {} 个FAQ条目", fileName, sections.size());
+                    log.info("File {} parsed {} FAQ entries", fileName, sections.size());
                 } catch (IOException ex) {
                     skippedCount++;
-                    log.error("Markdown 文档加载失败: {}", fileName, ex);
+                    log.error("Markdown document load failed: {}", fileName, ex);
                 }
             }
         } catch (IOException e) {
-           log.error("Markdown 文档加载失败", e);
+            log.error("Markdown document scan failed", e);
         }
-        attachSequenceMetadata(documents);
+
+        attachSequenceMetadata(flatDocuments);
+        setParentBlockIds(flatDocuments);
         currentIndexVersion = INDEX_VERSION_PREFIX + Instant.now().getEpochSecond();
-        lastLoadStats = new LoadStats(resources.length, faqCount, documents.size(), skippedCount);
-        log.info("总共加载 {} 个FAQ条目，生成 {} 个文档片段，跳过 {} 个文件或片段", faqCount, documents.size(), skippedCount);
-        return documents;
+        lastLoadStats = new LoadStats(resources.length, faqCount, flatDocuments.size(), skippedCount,
+                documentMetadatas.size());
+        log.info("Loaded {} FAQ entries, generated {} chunks ({} documents), skipped {} files",
+                faqCount, flatDocuments.size(), documentMetadatas.size(), skippedCount);
+
+        return new LoadResult(flatDocuments, documentMetadatas);
     }
 
-    public LoadStats getLastLoadStats() {
-        return lastLoadStats;
+    /**
+     * Backward-compatible: returns flat document list only.
+     */
+    public List<Document> loadMarkdownsFlat() {
+        return loadMarkdownsWithMetadata().documents();
+    }
+
+    /**
+     * @deprecated use loadMarkdownsFlat() instead
+     */
+    @Deprecated
+    public List<Document> loadMarkdowns() {
+        return loadMarkdownsFlat();
+    }
+
+    /**
+     * Parse YAML front matter from markdown.
+     * Front matter is delimited by --- at the start and end.
+     */
+    static ParsedMarkdown parseMarkdownWithFrontMatter(String fileName, String markdown) {
+        Map<String, Object> frontMatter = new LinkedHashMap<>();
+        String body = markdown;
+
+        if (markdown.startsWith("---")) {
+            int endIdx = markdown.indexOf("---", 3);
+            if (endIdx > 0) {
+                String yamlBlock = markdown.substring(3, endIdx).trim();
+                body = markdown.substring(endIdx + 3).trim();
+                frontMatter = parseYamlBlock(yamlBlock);
+            }
+        }
+
+        // Default front matter from filename conventions
+        frontMatter.putIfAbsent("source", "official_faq");
+        frontMatter.putIfAbsent("sourceFile", fileName);
+        String label = extractLabel(fileName);
+        if (!frontMatter.containsKey("category") && StringUtil.isNotEmpty(label)) {
+            frontMatter.putIfAbsent("category", label);
+        }
+
+        return new ParsedMarkdown(frontMatter, body);
+    }
+
+    private static Map<String, Object> parseYamlBlock(String yaml) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (String line : yaml.split("\\R")) {
+            int colonIdx = line.indexOf(':');
+            if (colonIdx <= 0) continue;
+            String key = line.substring(0, colonIdx).trim();
+            String value = line.substring(colonIdx + 1).trim();
+            if (value.startsWith("\"") && value.endsWith("\"")) {
+                value = value.substring(1, value.length() - 1);
+            }
+            if (value.startsWith("'") && value.endsWith("'")) {
+                value = value.substring(1, value.length() - 1);
+            }
+            // Parse list: [a, b, c]
+            if (value.startsWith("[") && value.endsWith("]")) {
+                value = value.substring(1, value.length() - 1).trim();
+                result.put(key, Arrays.stream(value.split(",")).map(String::trim).toList());
+            } else {
+                result.put(key, value);
+            }
+        }
+        return result;
     }
 
     private List<FaqSection> parseFaqSections(String fileName, String markdown) {
@@ -120,6 +215,7 @@ public class MarkdownLoader {
         String docTitle = extractLabel(fileName);
         String question = null;
         StringBuilder answer = new StringBuilder();
+
         for (String line : lines) {
             if (isHeading(line, 1)) {
                 String title = stripHeading(line);
@@ -145,43 +241,156 @@ public class MarkdownLoader {
         return sections;
     }
 
-    private List<Document> toDocuments(String fileName, FaqSection section) {
-        String text = "问题：" + section.question() + "\n\n答案：" + section.answer().trim();
-        Map<String, Object> metadata = baseMetadata(fileName, section, text);
-        if (text.length() <= minDocLengthForTokenSplit) {
-            metadata.put("chunkType", "faq");
-            metadata.put("partIndex", 0);
-            metadata.put("partCount", 1);
-            metadata.put("chunkId", chunkId(metadata, text, 0));
-            return List.of(new Document(text, metadata));
+    /**
+     * Hierarchical chunking with contextual prefix enrichment.
+     *
+     * For short documents (text <= minDocLengthForTokenSplit):
+     *   - Single "faq" chunk with contextual prefix
+     *   - Parent chunk = same (self-referencing)
+     *
+     * For long documents:
+     *   - Parent chunks: 1024-token blocks with 128-token overlap (for LLM context)
+     *   - Child chunks: 400-token blocks for precise vector retrieval
+     *   - Each child chunk carries a contextual prefix: "【{docTitle}】{question}\n\n{chunkText}"
+     */
+    private List<Document> toDocumentsWithHierarchy(String fileName, FaqSection section, DocumentMetadata docMeta) {
+        String rawText = section.question() + "\n\n" + section.answer().trim();
+        String contextPrefix = "【" + section.docTitle() + "】" + section.question();
+        String contextText = contextPrefix + "\n\n" + rawText;
+        Map<String, Object> baseMeta = baseMetadata(fileName, section, rawText, docMeta);
+
+        if (rawText.length() <= minDocLengthForTokenSplit) {
+            // Short document: single chunk with contextual prefix
+            Map<String, Object> meta = new HashMap<>(baseMeta);
+            meta.put("chunkType", "faq");
+            meta.put("partIndex", 0);
+            meta.put("partCount", 1);
+            meta.put("chunkId", chunkId(meta, contextText, 0));
+            meta.put("parentBlockId", meta.get("chunkId"));
+            meta.put("contextText", contextText);
+
+            Document doc = new Document(contextText, meta);
+            return List.of(doc);
         }
-        TokenTextSplitter splitter = new TokenTextSplitter(chunkSize, minChunkSizeChars, minChunkLengthToEmbed, maxNumChunks, true);
-        List<Document> splits = splitter.split(List.of(new Document(text, metadata)));
+
+        // Long document: hierarchical chunking
+        // Parent chunks: larger blocks for final context window
+        TokenTextSplitter parentSplitter = new TokenTextSplitter(
+                PARENT_CHUNK_SIZE, minChunkSizeChars, minChunkLengthToEmbed, maxNumChunks, true);
+        List<Document> parentBlocks = parentSplitter.split(List.of(new Document(rawText, new HashMap<>())));
+
+        // Child chunks: smaller blocks for embedding/retrieval
+        TokenTextSplitter childSplitter = new TokenTextSplitter(
+                chunkSize, minChunkSizeChars, minChunkLengthToEmbed, maxNumChunks, true);
+        List<Document> childBlocks = childSplitter.split(List.of(new Document(rawText, new HashMap<>())));
+
+        // If splitting produced no parent blocks, fall back to single chunk
+        if (parentBlocks.isEmpty()) {
+            Map<String, Object> meta = new HashMap<>(baseMeta);
+            meta.put("chunkType", "faq");
+            meta.put("partIndex", 0);
+            meta.put("partCount", 1);
+            meta.put("chunkId", chunkId(meta, contextText, 0));
+            meta.put("parentBlockId", meta.get("chunkId"));
+            meta.put("contextText", contextText);
+            return List.of(new Document(contextText, meta));
+        }
+
         List<Document> documents = new ArrayList<>();
-        for (int index = 0; index < splits.size(); index++) {
-            Document split = splits.get(index);
-            Map<String, Object> splitMetadata = new HashMap<>(metadata);
-            splitMetadata.put("chunkType", "faq_part");
-            splitMetadata.put("partIndex", index);
-            splitMetadata.put("partCount", splits.size());
-            splitMetadata.put("contentHash", DigestUtil.md5Hex(split.getText() == null ? "" : split.getText()));
-            splitMetadata.put("searchText", buildSearchText(section, String.valueOf(splitMetadata.get("keywords")), split.getText()));
-            splitMetadata.put("chunkId", chunkId(splitMetadata, split.getText(), index));
-            documents.add(new Document(split.getText(), splitMetadata));
+
+        // Create parent documents (for context window in retrieval)
+        for (int i = 0; i < parentBlocks.size(); i++) {
+            Document parent = parentBlocks.get(i);
+            String parentText = contextPrefix + "\n\n" + parent.getText();
+            Map<String, Object> parentMeta = new HashMap<>(baseMeta);
+            parentMeta.put("chunkType", "parent");
+            parentMeta.put("partIndex", i);
+            parentMeta.put("partCount", parentBlocks.size());
+            parentMeta.put("contentHash", DigestUtil.md5Hex(parentText));
+            String parentCid = chunkId(parentMeta, parentText, i);
+            parentMeta.put("chunkId", parentCid);
+            parentMeta.put("parentBlockId", parentCid);
+            parentMeta.put("contextText", parentText);
+            parentMeta.put("searchText", buildSearchText(section,
+                    String.valueOf(parentMeta.get("keywords")), parentText));
+            documents.add(new Document(parentText, parentMeta));
         }
+
+        // Create child documents (for precise vector search)
+        // If child splitting yields empty, fall back: children = parents
+        List<Document> effectiveChildBlocks = childBlocks.isEmpty() ? parentBlocks : childBlocks;
+        for (int i = 0; i < effectiveChildBlocks.size(); i++) {
+            Document child = effectiveChildBlocks.get(i);
+            String childText = contextPrefix + "\n\n" + child.getText();
+            int parentIdx = parentBlocks.size() > 1
+                    ? Math.min(i * parentBlocks.size() / effectiveChildBlocks.size(), parentBlocks.size() - 1)
+                    : 0;
+
+            Map<String, Object> childMeta = new HashMap<>(baseMeta);
+            childMeta.put("chunkType", "faq_part");
+            childMeta.put("partIndex", i);
+            childMeta.put("partCount", effectiveChildBlocks.size());
+            childMeta.put("contentHash", DigestUtil.md5Hex(childText));
+            String childCid = chunkId(childMeta, childText, i);
+
+            String parentCid = documents.size() > parentIdx
+                    ? String.valueOf(documents.get(parentIdx).getMetadata().get("chunkId"))
+                    : childCid;
+            childMeta.put("chunkId", childCid);
+            childMeta.put("parentBlockId", parentCid);
+            childMeta.put("contextText", childText);
+            childMeta.put("searchText", buildSearchText(section,
+                    String.valueOf(childMeta.get("keywords")), childText));
+            documents.add(new Document(childText, childMeta));
+        }
+
         return documents;
     }
 
-    private Map<String, Object> baseMetadata(String fileName, FaqSection section, String text) {
-        String label = extractLabel(fileName);
+    /**
+     * Set parent_block_id for sibling chain navigation: prev/next for each parent block.
+     */
+    private void setParentBlockIds(List<Document> documents) {
+        // Group parent blocks and set prev/next links
+        Map<String, List<Integer>> parentGroups = new LinkedHashMap<>();
+        for (int i = 0; i < documents.size(); i++) {
+            Document doc = documents.get(i);
+            String chunkType = String.valueOf(doc.getMetadata().getOrDefault("chunkType", ""));
+            if ("parent".equals(chunkType)) {
+                String sourceFile = String.valueOf(doc.getMetadata().getOrDefault("sourceFile", ""));
+                parentGroups.computeIfAbsent(sourceFile, k -> new ArrayList<>()).add(i);
+            }
+        }
+        for (List<Integer> indices : parentGroups.values()) {
+            for (int j = 0; j < indices.size(); j++) {
+                Document doc = documents.get(indices.get(j));
+                if (j > 0) {
+                    Document prev = documents.get(indices.get(j - 1));
+                    doc.getMetadata().put("prevBlockId",
+                            prev.getMetadata().get("chunkId"));
+                }
+                if (j < indices.size() - 1) {
+                    Document next = documents.get(indices.get(j + 1));
+                    doc.getMetadata().put("nextBlockId",
+                            next.getMetadata().get("chunkId"));
+                }
+            }
+        }
+    }
+
+    private Map<String, Object> baseMetadata(String fileName, FaqSection section, String text,
+                                              DocumentMetadata docMeta) {
+        String label = String.valueOf(docMeta.frontMatter().getOrDefault("category",
+                extractLabel(fileName)));
         String keywords = extractKeywords(fileName, section.docTitle(), section.question(), section.answer());
         String headingPath = section.docTitle() + " > " + section.question();
+
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("name", fileName);
         metadata.put("title", section.question());
         metadata.put("label", label);
         metadata.put("keywords", keywords);
-        metadata.put("source", "official_faq");
+        metadata.put("source", docMeta.frontMatter().getOrDefault("source", "official_faq"));
         metadata.put("sourceFile", fileName);
         metadata.put("docTitle", section.docTitle());
         metadata.put("question", section.question());
@@ -192,6 +401,13 @@ public class MarkdownLoader {
         metadata.put("loadTime", LocalDateTime.now().toString());
         metadata.put("indexVersion", currentIndexVersion);
         metadata.put("docVersion", DigestUtil.md5Hex(section.docTitle() + ":" + section.question() + ":" + section.answer()));
+
+        // Carry forward front matter into chunk metadata
+        docMeta.frontMatter().forEach((k, v) -> {
+            if (!metadata.containsKey(k)) {
+                metadata.put("fm_" + k, v);
+            }
+        });
         return metadata;
     }
 
@@ -234,9 +450,7 @@ public class MarkdownLoader {
                 Map.entry("展览", "展览,体育赛事,直播,线上演出")
         );
         for (String value : values) {
-            if (StringUtil.isEmpty(value)) {
-                continue;
-            }
+            if (StringUtil.isEmpty(value)) continue;
             keywords.add(normalizeFileToken(value));
             for (Map.Entry<String, String> entry : keywordMap.entrySet()) {
                 if (value.contains(entry.getKey())) {
@@ -248,12 +462,10 @@ public class MarkdownLoader {
         return String.join(",", keywords);
     }
 
-    private String extractLabel(String fileName) {
-        if (StringUtil.isEmpty(fileName)) {
-            return "";
-        }
+    private static String extractLabel(String fileName) {
+        if (StringUtil.isEmpty(fileName)) return "";
         String normalized = normalizeFileToken(fileName);
-        final String[] parts = normalized.split("-");
+        String[] parts = normalized.split("-");
         if (parts.length > 0 && StringUtil.isNotEmpty(parts[0])) {
             return parts[0];
         }
@@ -262,8 +474,8 @@ public class MarkdownLoader {
 
     private void attachSequenceMetadata(List<Document> documents) {
         int index = 0;
-        for (Document document : documents) {
-            document.getMetadata().put("sequence", index++);
+        for (Document doc : documents) {
+            doc.getMetadata().put("sequence", index++);
         }
     }
 
@@ -276,17 +488,17 @@ public class MarkdownLoader {
     }
 
     private String chunkId(Map<String, Object> metadata, String text, int partIndex) {
-        return DigestUtil.md5Hex(metadata.get("sourceFile") + ":" + metadata.get("headingPath") + ":" + DigestUtil.md5Hex(text == null ? "" : text) + ":" + partIndex);
+        return DigestUtil.md5Hex(
+                metadata.get("sourceFile") + ":" +
+                metadata.get("headingPath") + ":" +
+                DigestUtil.md5Hex(text == null ? "" : text) + ":" +
+                partIndex);
     }
 
     private void addSection(List<FaqSection> sections, String docTitle, String question, String answer) {
-        if (StringUtil.isEmpty(question)) {
-            return;
-        }
+        if (StringUtil.isEmpty(question)) return;
         String normalizedAnswer = answer == null ? "" : answer.trim();
-        if (StringUtil.isEmpty(normalizedAnswer)) {
-            return;
-        }
+        if (StringUtil.isEmpty(normalizedAnswer)) return;
         sections.add(new FaqSection(docTitle, question.trim(), normalizedAnswer));
     }
 
@@ -296,9 +508,7 @@ public class MarkdownLoader {
     }
 
     private String stripHeading(String line) {
-        if (line == null) {
-            return "";
-        }
+        if (line == null) return "";
         return line.replaceFirst("^#+\\s*", "").trim();
     }
 
@@ -307,10 +517,8 @@ public class MarkdownLoader {
         return StringUtil.isEmpty(fileName) ? "faq.md" : fileName;
     }
 
-    private String normalizeFileToken(String value) {
-        if (StringUtil.isEmpty(value)) {
-            return "";
-        }
+    private static String normalizeFileToken(String value) {
+        if (StringUtil.isEmpty(value)) return "";
         return value.replace(".md", "").trim();
     }
 
@@ -318,13 +526,28 @@ public class MarkdownLoader {
         return value > 0 ? value : defaultValue;
     }
 
+    public LoadStats getLastLoadStats() {
+        return lastLoadStats;
+    }
+
     public String getCurrentIndexVersion() {
         return currentIndexVersion;
     }
 
-    public record LoadStats(int fileCount, int faqCount, int chunkCount, int skippedCount) {
+    // --- records ---
+
+    public record LoadStats(int fileCount, int faqCount, int chunkCount, int skippedCount, int documentCount) {
     }
 
-    private record FaqSection(String docTitle, String question, String answer) {
+    public record FaqSection(String docTitle, String question, String answer) {
+    }
+
+    public record ParsedMarkdown(Map<String, Object> frontMatter, String body) {
+    }
+
+    public record DocumentMetadata(String contentHash, String sourceFile, Map<String, Object> frontMatter) {
+    }
+
+    public record LoadResult(List<Document> documents, List<DocumentMetadata> documentMetadatas) {
     }
 }

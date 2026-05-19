@@ -2,7 +2,10 @@ package org.javaup.ai.controller;
 
 import org.javaup.ai.assistant.AssistantRuntimeService;
 import org.javaup.ai.common.ApiResponse;
+import org.javaup.ai.service.DocumentIngestionService;
+import org.javaup.ai.service.DocumentLifecycleService;
 import org.javaup.ai.service.HybridSearchService;
+import org.javaup.ai.service.IngestionQualityService;
 import org.javaup.ai.vo.AssistantActionResultVo;
 import org.javaup.ai.vo.AssistantRunDetailVo;
 import org.javaup.ai.vo.CreateOrderVo;
@@ -10,6 +13,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
@@ -22,11 +26,20 @@ public class AiWorkflowController {
 
     private final AssistantRuntimeService assistantRuntimeService;
     private final HybridSearchService hybridSearchService;
+    private final DocumentIngestionService documentIngestionService;
+    private final DocumentLifecycleService documentLifecycleService;
+    private final IngestionQualityService ingestionQualityService;
 
     public AiWorkflowController(AssistantRuntimeService assistantRuntimeService,
-                                HybridSearchService hybridSearchService) {
+                                 HybridSearchService hybridSearchService,
+                                 DocumentIngestionService documentIngestionService,
+                                 DocumentLifecycleService documentLifecycleService,
+                                 IngestionQualityService ingestionQualityService) {
         this.assistantRuntimeService = assistantRuntimeService;
         this.hybridSearchService = hybridSearchService;
+        this.documentIngestionService = documentIngestionService;
+        this.documentLifecycleService = documentLifecycleService;
+        this.ingestionQualityService = ingestionQualityService;
     }
 
     @GetMapping("/workflows/{runId}")
@@ -44,7 +57,8 @@ public class AiWorkflowController {
         if (detail == null || detail.getRun() == null || detail.getPendingAction() == null) {
             return ApiResponse.error("没有待审批的操作");
         }
-        AssistantActionResultVo resultVo = assistantRuntimeService.approveAction(runId, detail.getPendingAction().getActionId());
+        AssistantActionResultVo resultVo = assistantRuntimeService.approveAction(runId,
+                detail.getPendingAction().getActionId());
         CreateOrderVo result = new CreateOrderVo();
         result.setOrderNumber(resultVo.getOrderNumber());
         result.setOrderListAddress(ORDER_LIST_ADDRESS);
@@ -61,8 +75,64 @@ public class AiWorkflowController {
         return ApiResponse.ok();
     }
 
+    // ======================== RAG Ingestion Endpoints ========================
+
+    /** Full reindex — synchronous */
     @PostMapping("/rag/reindex")
     public ApiResponse<Map<String, Object>> reindexFaq() {
         return ApiResponse.ok(hybridSearchService.reindexAll());
+    }
+
+    /** Full reindex — async via MQ */
+    @PostMapping("/rag/reindex/async")
+    public ApiResponse<Map<String, String>> reindexFaqAsync() {
+        String taskId = "ingest_" + java.util.UUID.randomUUID().toString().replace("-", "");
+        org.javaup.ai.assistant.mq.RagIngestionMessage msg =
+                org.javaup.ai.assistant.mq.RagIngestionMessage.builder()
+                        .taskId(taskId)
+                        .taskType("full")
+                        .build();
+        // Publisher injected later — for now, call sync and return
+        Map<String, Object> result = documentIngestionService.reindexAll();
+        return ApiResponse.ok(Map.of("taskId", taskId, "status", "completed",
+                "summary", result.toString()));
+    }
+
+    /** Incremental reindex */
+    @PostMapping("/rag/reindex/incremental")
+    public ApiResponse<Map<String, Object>> incrementalReindex() {
+        return ApiResponse.ok(hybridSearchService.incrementalReindex());
+    }
+
+    /** Get ingestion task status */
+    @GetMapping("/rag/ingestion/tasks")
+    public ApiResponse<?> getIngestionTasks() {
+        return ApiResponse.ok(documentLifecycleService.getRecentTasks());
+    }
+
+    /** Run quality report */
+    @PostMapping("/rag/quality-report")
+    public ApiResponse<Map<String, Object>> runQualityReport() {
+        return ApiResponse.ok(ingestionQualityService.runQualityReport());
+    }
+
+    /** Get document statistics */
+    @GetMapping("/rag/stats")
+    public ApiResponse<Map<String, Object>> getRagStats() {
+        return ApiResponse.ok(documentLifecycleService.getDocumentStats());
+    }
+
+    /** Publish a document */
+    @PostMapping("/rag/documents/{docId}/publish")
+    public ApiResponse<?> publishDocument(@PathVariable Long docId) {
+        var doc = documentLifecycleService.publishDocument(docId);
+        return doc != null ? ApiResponse.ok(doc) : ApiResponse.error("文档不存在");
+    }
+
+    /** Archive a document */
+    @PostMapping("/rag/documents/{docId}/archive")
+    public ApiResponse<?> archiveDocument(@PathVariable Long docId) {
+        var doc = documentLifecycleService.archiveDocument(docId);
+        return doc != null ? ApiResponse.ok(doc) : ApiResponse.error("文档不存在");
     }
 }

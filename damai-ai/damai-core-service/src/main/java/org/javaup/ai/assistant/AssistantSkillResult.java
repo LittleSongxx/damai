@@ -6,6 +6,8 @@ import org.javaup.ai.entity.AiAction;
 import org.javaup.ai.entity.AiRetrieval;
 import reactor.core.publisher.Flux;
 
+import org.javaup.ai.assistant.skill.knowledge.SourceRef;
+
 import java.util.List;
 
 @Data
@@ -27,4 +29,7 @@ public class AssistantSkillResult {
     private Flux<String> messageStream;
 
     private List<String> evidenceChunks;
+
+    /** Source attribution references keyed by citation ID (e.g. "[1]", "[2]"). */
+    private List<SourceRef> sourceRefs;
 }

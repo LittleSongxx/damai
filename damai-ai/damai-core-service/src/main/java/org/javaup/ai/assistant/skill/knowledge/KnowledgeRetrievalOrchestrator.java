@@ -107,7 +107,10 @@ public class KnowledgeRetrievalOrchestrator {
         // CRAG three-way corrective routing
         switch (assessment.confidenceLevel()) {
             case "CORRECT":
-                log.info("CRAG: CORRECT confidence, using first-pass results");
+                log.info("CRAG: CORRECT confidence, applying lightweight refinement");
+                firstPass = refineEvidence(firstPass, plan.evidenceSourceLimit(), plan.evidenceContextCharBudget());
+                assessment = retrievalEvaluator.assess(
+                        firstPass, supportBundle.sources(), "crag_correct_refined", plan);
                 break;
             case "AMBIGUOUS": {
                 log.info("CRAG: AMBIGUOUS confidence, expanding retrieval");
@@ -216,6 +219,7 @@ public class KnowledgeRetrievalOrchestrator {
             try {
                 List<String> subQuestions = advancedQueryService.decomposeSubQuestions(reformulatedQuery);
                 for (String subQ : subQuestions) {
+                    if (subQ.equals(reformulatedQuery)) continue;
                     RagSearchResultVo subResult = hybridSearchService.hybridSearchWithHyde(
                             subQ, Math.max(4, plan.topK()), plan.enableRerank());
                     mergeSources(allSources, subResult.getSources());
@@ -242,6 +246,93 @@ public class KnowledgeRetrievalOrchestrator {
                 .sources(dedup(allSources))
                 .documents(dedupDocuments(allDocuments))
                 .build(), "crag_incorrect");
+    }
+
+    /**
+     * Lightweight evidence refinement: deduplicate near-identical chunks, sort by score,
+     * trim to evidence budget. Called on CORRECT path to reduce noise before answer generation.
+     */
+    private RagSearchResultVo refineEvidence(RagSearchResultVo result, int sourceLimit, int charBudget) {
+        List<RagSourceVo> sources = result.getSources();
+        if (sources == null || sources.size() <= 1) return result;
+
+        // Sort by score descending
+        List<RagSourceVo> sorted = new ArrayList<>(sources);
+        sorted.sort((a, b) -> Double.compare(
+                b.getScore() != null ? b.getScore() : 0D,
+                a.getScore() != null ? a.getScore() : 0D));
+
+        // Deduplicate by content overlap: if chunk A's text is >75% contained in chunk B, drop A
+        List<RagSourceVo> refined = new ArrayList<>();
+        for (RagSourceVo candidate : sorted) {
+            if (refined.size() >= sourceLimit) break;
+            boolean isDup = false;
+            String cSnippet = candidate.getSnippet();
+            if (cSnippet != null && cSnippet.length() > 50) {
+                for (RagSourceVo kept : refined) {
+                    String kSnippet = kept.getSnippet();
+                    if (kSnippet != null && kSnippet.length() > 50
+                            && textOverlapRatio(cSnippet, kSnippet) > 0.75) {
+                        isDup = true;
+                        break;
+                    }
+                }
+            }
+            if (!isDup) refined.add(candidate);
+        }
+
+        // Trim snippets to char budget
+        int budgetLeft = charBudget;
+        List<RagSourceVo> trimmed = new ArrayList<>();
+        for (RagSourceVo source : refined) {
+            if (budgetLeft <= 0) break;
+            String snippet = source.getSnippet();
+            if (snippet != null && snippet.length() > budgetLeft) {
+                source = RagSourceVo.builder()
+                        .chunkId(source.getChunkId())
+                        .title(source.getTitle())
+                        .source(source.getSource())
+                        .section(source.getSection())
+                        .snippet(snippet.substring(0, budgetLeft))
+                        .score(source.getScore())
+                        .parentBlockId(source.getParentBlockId())
+                        .build();
+                budgetLeft = 0;
+            } else {
+                budgetLeft -= snippet != null ? snippet.length() : 0;
+            }
+            trimmed.add(source);
+        }
+
+        log.info("CRAG CORRECT refinement: {} -> {} sources (budget={} chars)",
+                sources.size(), trimmed.size(), charBudget);
+        return RagSearchResultVo.builder()
+                .originalQuery(result.getOriginalQuery())
+                .normalizedQuery(result.getNormalizedQuery())
+                .rewrittenQuery(result.getRewrittenQuery())
+                .retrievalTraceId(result.getRetrievalTraceId())
+                .denseSources(result.getDenseSources())
+                .sparseSources(result.getSparseSources())
+                .fusedSources(result.getFusedSources())
+                .sources(trimmed)
+                .documents(result.getDocuments())
+                .build();
+    }
+
+    /** Jaccard-like character trigram overlap ratio for near-duplicate detection. */
+    private double textOverlapRatio(String a, String b) {
+        if (a == null || b == null) return 0;
+        String shorter = a.length() <= b.length() ? a : b;
+        String longer = a.length() <= b.length() ? b : a;
+        if (shorter.length() < 20) return 0;
+
+        int matchChars = 0;
+        int step = 20;
+        for (int i = 0; i + step <= shorter.length(); i += step) {
+            String segment = shorter.substring(i, i + step);
+            if (longer.contains(segment)) matchChars += step;
+        }
+        return (double) matchChars / shorter.length();
     }
 
     private void mergeSources(List<RagSourceVo> target, List<RagSourceVo> sources) {

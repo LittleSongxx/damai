@@ -183,6 +183,13 @@ damai:
       min-chunk-length-to-embed: ${DAMAI_AI_RAG_MIN_CHUNK_LENGTH_TO_EMBED:5}
       max-num-chunks: ${DAMAI_AI_RAG_MAX_NUM_CHUNKS:10000}
       min-doc-length-for-token-split: ${DAMAI_AI_RAG_MIN_DOC_LENGTH_FOR_TOKEN_SPLIT:1000}
+      expiration-cron: ${DAMAI_AI_RAG_EXPIRATION_CRON:0 0 3 * * ?}
+      ingestion:
+        mq:
+          exchange: ${DAMAI_AI_RAG_INGESTION_EXCHANGE:damai.ai.rag.topic}
+          queue: ${DAMAI_AI_RAG_INGESTION_QUEUE:damai.ai.rag.ingestion.q}
+          routing-key: ${DAMAI_AI_RAG_INGESTION_ROUTING_KEY:rag.ingestion.request}
+          dlq: ${DAMAI_AI_RAG_INGESTION_DLQ:damai.ai.rag.ingestion.dlq}
     retrieval:
       min-vector-similarity: ${DAMAI_AI_RETRIEVAL_MIN_VECTOR_SIMILARITY:0.45}
       keyword-relative-score-floor: ${DAMAI_AI_RETRIEVAL_KEYWORD_RELATIVE_SCORE_FLOOR:0.35}
@@ -256,6 +263,8 @@ damai:
         enabled: true
         max-size: 5000
         ttl-minutes: 30
+        redis-persistence-enabled: ${DAMAI_AI_EMBEDDING_REDIS_PERSIST:false}
+        redis-key-prefix: ${DAMAI_AI_EMBEDDING_REDIS_PREFIX:damai:cache:embed:}
       faq-search:
         enabled: true
         ttl-minutes: 15

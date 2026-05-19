@@ -8,6 +8,10 @@ import org.springframework.ai.document.Document;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
+import com.alibaba.fastjson2.JSONObject;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -100,24 +104,76 @@ public class KnowledgeRetrievalEvaluator {
 
     private String assessSemanticRelevance(String query, List<RagSourceVo> sources) {
         if (sources.isEmpty()) return "LOW";
-        var sample = sources.size() <= 3 ? sources : sampleRandom(sources, 3);
-        int relevantCount = 0;
+        var sample = sources.size() <= 5 ? sources : sampleRandom(sources, 5);
+        int relevantCount = batchRelevanceCheck(query, sample);
+        if (relevantCount < 0) relevantCount = perDocumentRelevanceFallback(query, sample);
+        int threshold = Math.max(1, sample.size() / 2);
+        if (relevantCount >= threshold + 1) return "HIGH";
+        if (relevantCount >= threshold) return "MEDIUM";
+        return "LOW";
+    }
+
+    /**
+     * Batch-grade up to 5 documents in a single LLM call.
+     * Returns the count of relevant documents, or -1 on failure (triggers fallback).
+     */
+    private int batchRelevanceCheck(String query, List<RagSourceVo> sample) {
+        try {
+            StringBuilder docsBlock = new StringBuilder();
+            for (int i = 0; i < sample.size(); i++) {
+                docsBlock.append(String.format("[文档%d] %s\n\n", i, limit(sample.get(i).getSnippet(), 400)));
+            }
+            String prompt = String.format("""
+                    判断以下%d个文档块是否与查询相关。对每个文档输出一个JSON对象，包含id和relevant字段。
+                    只输出一个JSON数组，不要任何其他内容。
+
+                    查询：%s
+
+                    %s
+                    输出（JSON数组）：
+                    """, sample.size(), query, docsBlock.toString());
+
+            String raw = chatClient.prompt().user(prompt).call().content();
+            if (raw == null || raw.isBlank()) return -1;
+
+            String jsonStr = raw.trim();
+            int arrayStart = jsonStr.indexOf('[');
+            if (arrayStart >= 0) jsonStr = jsonStr.substring(arrayStart);
+            int arrayEnd = jsonStr.lastIndexOf(']');
+            if (arrayEnd >= 0) jsonStr = jsonStr.substring(0, arrayEnd + 1);
+
+            JSONArray arr = JSON.parseArray(jsonStr);
+            if (arr == null || arr.isEmpty()) return -1;
+
+            int count = 0;
+            for (int i = 0; i < arr.size(); i++) {
+                JSONObject obj = arr.getJSONObject(i);
+                String rel = obj.getString("relevant");
+                if ("YES".equalsIgnoreCase(rel) || "true".equalsIgnoreCase(rel) || "是".equals(rel)) {
+                    count++;
+                }
+            }
+            return count;
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    /** Fallback: individual YES/NO calls when batch grading fails. */
+    private int perDocumentRelevanceFallback(String query, List<RagSourceVo> sample) {
+        int count = 0;
         for (var source : sample) {
             try {
                 String prompt = String.format(
                         "判断以下文本块是否与查询相关。只回答YES或NO。\n查询：%s\n文本：%s",
-                        query, source.getSnippet());
+                        query, limit(source.getSnippet(), 400));
                 String answer = chatClient.prompt().user(prompt).call().content();
-                if (answer != null && answer.trim().toUpperCase().startsWith("YES")) {
-                    relevantCount++;
-                }
+                if (answer != null && answer.trim().toUpperCase().startsWith("YES")) count++;
             } catch (Exception e) {
                 // Treat LLM call failures conservatively
             }
         }
-        if (relevantCount >= 2) return "HIGH";
-        if (relevantCount == 1) return "MEDIUM";
-        return "LOW";
+        return count;
     }
 
     private String assessCoverage(String query, List<Document> documents) {

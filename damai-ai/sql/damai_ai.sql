@@ -735,3 +735,91 @@ WHERE `event_seq` IS NULL;
 UPDATE `d_ai_action`
 SET `version` = 0
 WHERE `version` IS NULL;
+
+-- ============================================================
+-- RAG 文档管理相关表
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS `d_ai_rag_document` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `doc_uid` varchar(128) NOT NULL COMMENT '文档全局唯一ID',
+  `title` varchar(500) DEFAULT NULL COMMENT '文档标题',
+  `source` varchar(100) DEFAULT 'manual' COMMENT '来源: manual/upload/api/crawl',
+  `source_file` varchar(500) DEFAULT NULL COMMENT '源文件名',
+  `category` varchar(100) DEFAULT NULL COMMENT '分类: refund/entry/payment/delivery/venue',
+  `tags` varchar(1000) DEFAULT NULL COMMENT '标签(逗号分隔)',
+  `doc_status` varchar(32) DEFAULT 'draft' COMMENT '状态: draft/published/expired/archived',
+  `file_type` varchar(20) DEFAULT 'md' COMMENT '文件类型',
+  `content_hash` varchar(64) DEFAULT NULL COMMENT '文档内容MD5',
+  `metadata_json` text DEFAULT NULL COMMENT '扩展元数据JSON',
+  `chunk_count` int DEFAULT 0 COMMENT '切片数量',
+  `version` int DEFAULT 1 COMMENT '版本号',
+  `valid_from` datetime DEFAULT NULL COMMENT '生效时间',
+  `valid_until` datetime DEFAULT NULL COMMENT '失效时间',
+  `region` varchar(500) DEFAULT NULL COMMENT '适用地区',
+  `audience` varchar(200) DEFAULT 'all' COMMENT '目标受众',
+  `priority` int DEFAULT 0 COMMENT '优先级(0-100)',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_doc_uid` (`doc_uid`),
+  KEY `idx_rag_doc_source_file` (`source_file`),
+  KEY `idx_rag_doc_status` (`doc_status`),
+  KEY `idx_rag_doc_category` (`category`),
+  KEY `idx_rag_doc_valid` (`valid_from`,`valid_until`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='RAG文档主表';
+
+CREATE TABLE IF NOT EXISTS `d_ai_rag_chunk` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `chunk_uid` varchar(128) NOT NULL COMMENT 'Chunk全局唯一ID(MD5)',
+  `doc_id` bigint DEFAULT NULL COMMENT '所属文档ID',
+  `parent_chunk_id` bigint DEFAULT NULL COMMENT '父块ID(子块→父块)',
+  `chunk_type` varchar(32) DEFAULT 'faq' COMMENT '类型: faq/faq_part/summary/table',
+  `chunk_index` int DEFAULT 0 COMMENT '块序号',
+  `total_chunks` int DEFAULT 1 COMMENT '文档总块数',
+  `heading_path` varchar(1000) DEFAULT NULL COMMENT '标题路径',
+  `question` varchar(1000) DEFAULT NULL COMMENT 'FAQ问题',
+  `text` mediumtext COMMENT '原始文本',
+  `context_text` mediumtext COMMENT '附加上下文的文本(用于embedding)',
+  `content_hash` varchar(64) DEFAULT NULL COMMENT '文本内容MD5',
+  `metadata_json` text DEFAULT NULL COMMENT '扩展元数据JSON',
+  `qdrant_point_id` bigint DEFAULT NULL COMMENT 'Qdrant Point ID',
+  `es_doc_id` varchar(128) DEFAULT NULL COMMENT 'ES文档ID',
+  `prev_chunk_id` bigint DEFAULT NULL COMMENT '前一块ID',
+  `next_chunk_id` bigint DEFAULT NULL COMMENT '后一块ID',
+  `embedding_cached` tinyint(1) DEFAULT 0 COMMENT '是否已缓存Embedding',
+  `hypothetical_questions_json` text DEFAULT NULL COMMENT 'LLM生成的假设性问题JSON数组',
+  `summary_text` varchar(2000) DEFAULT NULL COMMENT 'LLM生成的摘要',
+  `entities_json` text DEFAULT NULL COMMENT 'LLM提取的实体JSON',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_chunk_uid` (`chunk_uid`),
+  KEY `idx_rag_chunk_doc` (`doc_id`),
+  KEY `idx_rag_chunk_parent` (`parent_chunk_id`),
+  KEY `idx_rag_chunk_type` (`chunk_type`),
+  KEY `idx_rag_chunk_qdrant` (`qdrant_point_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='RAG文档Chunk表';
+
+CREATE TABLE IF NOT EXISTS `d_ai_rag_ingestion_task` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `task_id` varchar(128) NOT NULL COMMENT '任务ID',
+  `task_type` varchar(32) DEFAULT 'full' COMMENT '任务类型: full/incremental/single',
+  `task_status` varchar(32) DEFAULT 'pending' COMMENT '状态: pending/parsing/chunking/embedding/indexing/completed/failed',
+  `source_file` varchar(500) DEFAULT NULL COMMENT '源文件(单文件任务)',
+  `content_hash` varchar(64) DEFAULT NULL COMMENT '源文件Hash',
+  `total_chunks` int DEFAULT 0 COMMENT '总块数',
+  `completed_chunks` int DEFAULT 0 COMMENT '已完成块数',
+  `error_message` text DEFAULT NULL COMMENT '错误信息',
+  `result_json` text DEFAULT NULL COMMENT '结果JSON',
+  `started_at` varchar(30) DEFAULT NULL COMMENT '开始时间',
+  `finished_at` varchar(30) DEFAULT NULL COMMENT '完成时间',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_task_id` (`task_id`),
+  KEY `idx_rag_task_status` (`task_status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='RAG入库任务表';

@@ -20,6 +20,10 @@ public class CacheProperties {
         private boolean enabled = true;
         private int maxSize = 5000;
         private int ttlMinutes = 30;
+        /** Whether to persist embeddings to Redis for cross-restart durability */
+        private boolean redisPersistenceEnabled = false;
+        /** Redis key prefix for persisted embeddings */
+        private String redisKeyPrefix = "damai:cache:embed:";
     }
 
     @Data

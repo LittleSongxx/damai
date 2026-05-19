@@ -10,10 +10,12 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -52,18 +54,68 @@ public class CacheManager {
                 .build();
     }
 
-    // --- embedding cache ---
+    // --- embedding cache (Caffeine + optional Redis persistence) ---
 
     public float[] getEmbedding(String text) {
         if (!properties.getEmbedding().isEnabled()) return null;
         float[] result = embeddingCache.getIfPresent(text);
-        metrics.recordEmbedding(result != null);
-        return result;
+        if (result != null) {
+            metrics.recordEmbedding(true);
+            return result;
+        }
+        // Try Redis-persisted embedding
+        if (properties.getEmbedding().isRedisPersistenceEnabled()) {
+            result = getEmbeddingFromRedis(text);
+            if (result != null) {
+                embeddingCache.put(text, result);
+                metrics.recordEmbedding(true);
+                return result;
+            }
+        }
+        metrics.recordEmbedding(false);
+        return null;
     }
 
     public void putEmbedding(String text, float[] vector) {
         if (properties.getEmbedding().isEnabled() && text != null && vector != null) {
             embeddingCache.put(text, vector);
+            if (properties.getEmbedding().isRedisPersistenceEnabled()) {
+                putEmbeddingToRedis(text, vector);
+            }
+        }
+    }
+
+    private float[] getEmbeddingFromRedis(String text) {
+        try {
+            String key = properties.getEmbedding().getRedisKeyPrefix() + sha256(text);
+            Object value = redisTemplate.opsForValue().get(key);
+            if (value instanceof String base64) {
+                byte[] bytes = Base64.getDecoder().decode(base64);
+                ByteBuffer buf = ByteBuffer.wrap(bytes);
+                float[] vector = new float[bytes.length / Float.BYTES];
+                for (int i = 0; i < vector.length; i++) {
+                    vector[i] = buf.getFloat();
+                }
+                return vector;
+            }
+        } catch (Exception e) {
+            log.warn("Failed to load embedding from Redis: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    private void putEmbeddingToRedis(String text, float[] vector) {
+        try {
+            String key = properties.getEmbedding().getRedisKeyPrefix() + sha256(text);
+            ByteBuffer buf = ByteBuffer.allocate(vector.length * Float.BYTES);
+            for (float v : vector) {
+                buf.putFloat(v);
+            }
+            String base64 = Base64.getEncoder().encodeToString(buf.array());
+            redisTemplate.opsForValue().set(key, base64,
+                    Duration.ofMinutes(properties.getEmbedding().getTtlMinutes()));
+        } catch (Exception e) {
+            log.warn("Failed to persist embedding to Redis: {}", e.getMessage());
         }
     }
 

@@ -191,6 +191,7 @@ public class KnowledgeSkill implements AssistantSkill {
                     .message(answer)
                     .responseSummary(answer)
                     .retrieval(retrieval)
+                    .sourceRefs(List.of())
                     .build();
         }
 
@@ -211,6 +212,7 @@ public class KnowledgeSkill implements AssistantSkill {
                         .map(document -> document == null ? null : document.getText())
                         .filter(text -> text != null && !text.isBlank())
                         .collect(Collectors.toList()))
+                .sourceRefs(prompt.sourceRefList())
                 .build();
     }
 

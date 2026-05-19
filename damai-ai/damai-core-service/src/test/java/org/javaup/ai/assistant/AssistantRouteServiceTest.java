@@ -1,5 +1,6 @@
 package org.javaup.ai.assistant;
 
+import org.javaup.ai.rag.intent.IntentGuidanceService;
 import org.javaup.ai.structured.IntentRecognition;
 import org.javaup.ai.structured.StructuredOutputService;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,12 +17,14 @@ import static org.mockito.Mockito.when;
 class AssistantRouteServiceTest {
 
     private StructuredOutputService structuredOutputService;
+    private IntentGuidanceService intentGuidanceService;
     private AssistantRouteService assistantRouteService;
 
     @BeforeEach
     void setUp() {
         structuredOutputService = mock(StructuredOutputService.class);
-        assistantRouteService = new AssistantRouteService(structuredOutputService, mock(ChatClient.class));
+        intentGuidanceService = mock(IntentGuidanceService.class);
+        assistantRouteService = new AssistantRouteService(structuredOutputService, mock(ChatClient.class), intentGuidanceService);
     }
 
     @Test
