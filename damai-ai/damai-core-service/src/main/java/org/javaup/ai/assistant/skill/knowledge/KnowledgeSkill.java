@@ -1,6 +1,7 @@
 package org.javaup.ai.assistant.skill.knowledge;
 
-import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson2.JSON;
+import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.assistant.AssistantEventTypes;
 import org.javaup.ai.assistant.AssistantRouteType;
 import org.javaup.ai.assistant.AssistantRunService;
@@ -26,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Component
 public class KnowledgeSkill implements AssistantSkill {
 
@@ -178,8 +180,13 @@ public class KnowledgeSkill implements AssistantSkill {
         retrievalCompletedPayload.put("shadowRoute", shadowRoute);
         assistantRunService.appendEvent(context.getRun().getRunId(), AssistantEventTypes.RETRIEVAL_COMPLETED, retrievalCompletedPayload);
 
-        if ("LOW".equals(assessment.confidenceLevel())) {
-            String answer = "我已经检索了当前的闭域规则库，但这轮命中的证据不够扎实，暂时不能直接给出确定结论。请补充具体场景、节目或关键词，我再基于规则继续检索。";
+        // CRAG three-way + Self-RAG: refuse to answer if not answerable
+        if ("NOT_ANSWERABLE".equals(assessment.answerabilityLevel())
+                || "INCORRECT".equals(assessment.confidenceLevel())
+                || (assessment.hasContradictions() && assessment.sources().size() < 3)) {
+            String answer = "我已经检索了当前的闭域规则库，但这轮命中的证据不够扎实或存在冲突，暂时不能直接给出确定结论。请补充具体场景、节目或关键词，我再基于规则继续检索。";
+            log.warn("Self-RAG: refusing to answer due to {} evidence, hasContradictions={}, missingInfo={}",
+                    assessment.answerabilityLevel(), assessment.hasContradictions(), assessment.missingInfo());
             return AssistantSkillResult.builder()
                     .message(answer)
                     .responseSummary(answer)

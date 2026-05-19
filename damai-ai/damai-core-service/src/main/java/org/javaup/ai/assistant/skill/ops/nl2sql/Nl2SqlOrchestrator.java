@@ -1,6 +1,7 @@
 package org.javaup.ai.assistant.skill.ops.nl2sql;
 
 import org.javaup.ai.assistant.tool.AssistantToolInvoker;
+import org.javaup.ai.rag.prompt.PromptTemplateLoader;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -21,6 +22,7 @@ public class Nl2SqlOrchestrator {
     private final Nl2SqlExecutionService executionService;
     private final Nl2SqlErrorClassifier errorClassifier;
     private final AssistantToolInvoker toolInvoker;
+    private final PromptTemplateLoader templateLoader;
 
     public Nl2SqlOrchestrator(@Qualifier("unifiedOpsChatClient") ChatClient chatClient,
                               Nl2SqlProperties properties,
@@ -29,7 +31,8 @@ public class Nl2SqlOrchestrator {
                               Nl2SqlSafetyValidator safetyValidator,
                               Nl2SqlExecutionService executionService,
                               Nl2SqlErrorClassifier errorClassifier,
-                              AssistantToolInvoker toolInvoker) {
+                              AssistantToolInvoker toolInvoker,
+                              PromptTemplateLoader templateLoader) {
         this.chatClient = chatClient;
         this.properties = properties;
         this.schemaService = schemaService;
@@ -38,6 +41,7 @@ public class Nl2SqlOrchestrator {
         this.executionService = executionService;
         this.errorClassifier = errorClassifier;
         this.toolInvoker = toolInvoker;
+        this.templateLoader = templateLoader;
     }
 
     public Map<String, Object> answer(String runId, String question, String conversationKey) {
@@ -147,9 +151,9 @@ public class Nl2SqlOrchestrator {
                 .append("\n  SQL: ")
                 .append(example.getSql())
                 .append('\n'));
-        String repair = "";
+        String repairBlock = "";
         if (StringUtils.hasText(previousSql) || StringUtils.hasText(previousError)) {
-            repair = """
+            repairBlock = """
 
                     上一次 SQL：
                     %s
@@ -160,6 +164,15 @@ public class Nl2SqlOrchestrator {
                     修复指导：
                     %s
                     """.formatted(previousSql, previousError, repairGuidance);
+        }
+        if (templateLoader != null && templateLoader.hasTemplate("nl2sql-generate.st")) {
+            return templateLoader.render("nl2sql-generate.st", Map.of(
+                    "schema_block", schemaContext.formattedSchema(),
+                    "terms_block", terms.toString(),
+                    "examples_block", examples.toString(),
+                    "repair_block", repairBlock,
+                    "user_question", question
+            ));
         }
         return """
                 你是大麦运维问数助手，负责把自然语言问题转换成安全的 MySQL SELECT 查询。
@@ -190,6 +203,6 @@ public class Nl2SqlOrchestrator {
                 %s
                 用户问题：
                 %s
-                """.formatted(schemaContext.formattedSchema(), terms, examples, repair, question);
+                """.formatted(schemaContext.formattedSchema(), terms, examples, repairBlock, question);
     }
 }

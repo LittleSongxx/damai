@@ -1,8 +1,8 @@
 package org.javaup.ai.assistant.gateway;
 
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONArray;
-import com.alibaba.fastjson.JSONObject;
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
+import com.alibaba.fastjson2.JSONObject;
 import jakarta.annotation.PostConstruct;
 import org.javaup.ai.utils.CommonUtils;
 import org.springframework.beans.factory.annotation.Value;

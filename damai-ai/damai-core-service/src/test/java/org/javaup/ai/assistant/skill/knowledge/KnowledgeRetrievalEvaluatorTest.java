@@ -3,15 +3,18 @@ package org.javaup.ai.assistant.skill.knowledge;
 import org.javaup.ai.vo.RagSearchResultVo;
 import org.javaup.ai.vo.RagSourceVo;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.client.ChatClient;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 class KnowledgeRetrievalEvaluatorTest {
 
-    private final KnowledgeRetrievalEvaluator evaluator = new KnowledgeRetrievalEvaluator();
+    private final ChatClient chatClient = mock(ChatClient.class);
+    private final KnowledgeRetrievalEvaluator evaluator = new KnowledgeRetrievalEvaluator(chatClient);
 
     @Test
     void shouldCalculateHighConfidenceWhenDenseSparseOverlapAndEnoughEvidence() {
@@ -24,8 +27,10 @@ class KnowledgeRetrievalEvaluatorTest {
                 "none",
                 plan());
 
-        assertEquals("HIGH", assessment.confidenceLevel());
+        assertEquals("CORRECT", assessment.confidenceLevel());
         assertEquals(4, assessment.sources().size());
+        assertEquals("HIGH", assessment.relevanceLevel());
+        assertEquals("HIGH", assessment.coverageLevel());
     }
 
     @Test

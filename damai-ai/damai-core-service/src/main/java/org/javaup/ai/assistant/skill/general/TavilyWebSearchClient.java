@@ -1,8 +1,8 @@
 package org.javaup.ai.assistant.skill.general;
 
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONArray;
-import com.alibaba.fastjson.JSONObject;
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
+import com.alibaba.fastjson2.JSONObject;
 import lombok.RequiredArgsConstructor;
 import org.javaup.ai.config.WebSearchProperties;
 import org.springframework.stereotype.Component;

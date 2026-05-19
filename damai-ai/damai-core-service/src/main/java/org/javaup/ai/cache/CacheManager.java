@@ -5,6 +5,7 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.config.CacheProperties;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -30,6 +31,9 @@ public class CacheManager {
     private static final String FAQ_SEARCH_PREFIX = "damai:cache:faq:";
     private static final String WEB_SEARCH_PREFIX = "damai:cache:web:";
     private static final String USER_CTX_PREFIX = "damai:cache:user:";
+
+    @Value("${spring.ai.openai.chat.options.model:unknown}")
+    private String chatModel;
 
     public CacheManager(CacheProperties properties, CacheMetrics metrics,
                          @Qualifier("cacheRedisTemplate") RedisTemplate<String, Object> redisTemplate) {
@@ -67,7 +71,7 @@ public class CacheManager {
 
     public String getFaqSearch(String query) {
         if (!properties.getFaqSearch().isEnabled()) return null;
-        String key = FAQ_SEARCH_PREFIX + sha256(query);
+        String key = faqSearchKey(query);
         String result = (String) redisTemplate.opsForValue().get(key);
         metrics.recordFaqSearch(result != null);
         return result;
@@ -75,7 +79,7 @@ public class CacheManager {
 
     public void putFaqSearch(String query, String jsonResult) {
         if (properties.getFaqSearch().isEnabled() && StringUtils.hasText(query) && StringUtils.hasText(jsonResult)) {
-            String key = FAQ_SEARCH_PREFIX + sha256(query);
+            String key = faqSearchKey(query);
             redisTemplate.opsForValue().set(key, jsonResult, Duration.ofMinutes(properties.getFaqSearch().getTtlMinutes()));
         }
     }
@@ -89,7 +93,7 @@ public class CacheManager {
 
     public String getWebSearch(String query) {
         if (!properties.getWebSearch().isEnabled()) return null;
-        String key = WEB_SEARCH_PREFIX + sha256(query);
+        String key = webSearchKey(query);
         String result = (String) redisTemplate.opsForValue().get(key);
         metrics.recordWebSearch(result != null);
         return result;
@@ -97,7 +101,7 @@ public class CacheManager {
 
     public void putWebSearch(String query, String jsonResult) {
         if (properties.getWebSearch().isEnabled() && StringUtils.hasText(query) && StringUtils.hasText(jsonResult)) {
-            String key = WEB_SEARCH_PREFIX + sha256(query);
+            String key = webSearchKey(query);
             redisTemplate.opsForValue().set(key, jsonResult, Duration.ofMinutes(properties.getWebSearch().getTtlMinutes()));
         }
     }
@@ -128,7 +132,7 @@ public class CacheManager {
         metrics.recordNl2sqlSchema(cached != null);
         if (cached != null) {
             try {
-                return com.alibaba.fastjson.JSON.parseObject(cached,
+                return com.alibaba.fastjson2.JSON.parseObject(cached,
                         org.javaup.ai.assistant.skill.ops.nl2sql.Nl2SqlSchemaContext.class);
             } catch (Exception e) {
                 log.warn("Failed to deserialize cached NL2SQL schema", e);
@@ -139,7 +143,7 @@ public class CacheManager {
 
     public void putNl2sqlSchema(String datasourceKey, org.javaup.ai.assistant.skill.ops.nl2sql.Nl2SqlSchemaContext schema) {
         if (properties.getNl2sqlSchema().isEnabled() && StringUtils.hasText(datasourceKey) && schema != null) {
-            nl2sqlSchemaCache.put(datasourceKey, com.alibaba.fastjson.JSON.toJSONString(schema));
+            nl2sqlSchemaCache.put(datasourceKey, com.alibaba.fastjson2.JSON.toJSONString(schema));
         }
     }
 
@@ -164,13 +168,21 @@ public class CacheManager {
         return stats;
     }
 
+    private String faqSearchKey(String query) {
+        return FAQ_SEARCH_PREFIX + sha256(query + "|" + chatModel);
+    }
+
+    private String webSearchKey(String query) {
+        return WEB_SEARCH_PREFIX + sha256(query + "|" + chatModel);
+    }
+
     private static String sha256(String input) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest).substring(0, 16);
+            return HexFormat.of().formatHex(digest);
         } catch (NoSuchAlgorithmException e) {
-            return Integer.toHexString(input.hashCode());
+            throw new IllegalStateException("SHA-256 not available", e);
         }
     }
 }

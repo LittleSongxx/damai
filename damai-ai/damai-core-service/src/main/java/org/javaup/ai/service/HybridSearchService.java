@@ -4,9 +4,9 @@ import cn.hutool.core.codec.Base64;
 import cn.hutool.core.collection.CollectionUtil;
 import cn.hutool.http.ContentType;
 import cn.hutool.http.HttpRequest;
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONArray;
-import com.alibaba.fastjson.JSONObject;
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
+import com.alibaba.fastjson2.JSONObject;
 import io.qdrant.client.QdrantClient;
 import io.qdrant.client.grpc.Collections.Distance;
 import io.qdrant.client.grpc.Collections.VectorParams;
@@ -25,7 +25,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import com.alibaba.fastjson.JSON;
 import org.javaup.ai.cache.CacheManager;
 import org.javaup.ai.mapper.AiRetrievalTraceMapper;
 import org.javaup.ai.metrics.BusinessMetrics;
@@ -43,6 +42,11 @@ import java.util.stream.Collectors;
 
 /**
  * FAQ 混合检索服务：Qdrant dense + ES sparse + RRF + rerank。
+ *
+ * ES 依赖说明：所有 ES 交互通过 Hutool HttpRequest 走 HTTP REST API
+ * (/_search, /_bulk, /_aliases)，不依赖 elasticsearch-rest-high-level-client (HLRC)
+ * 或 elasticsearch-java API client。Easy-ES 3.0.0 仅支持 ES 7.x 客户端库，
+ * 升级 ES 服务端到 8.x 需同步迁移 Easy-ES 至 4.x。
  */
 @Slf4j
 @Service
@@ -77,6 +81,12 @@ public class HybridSearchService {
 
     @Value("${DAMAI_AI_OPENAI_EMBEDDING_DIMENSIONS:1024}")
     private Integer embeddingDimensions;
+
+    @Value("${damai.ai.retrieval.min-vector-similarity:0.45}")
+    private double minVectorSimilarity;
+
+    @Value("${damai.ai.retrieval.keyword-relative-score-floor:0.35}")
+    private double keywordRelativeScoreFloor;
 
     private final Map<String, Document> documentCache = new ConcurrentHashMap<>();
 
@@ -161,6 +171,10 @@ public class HybridSearchService {
         if (sparseSources.isEmpty()) {
             degradationService.begin("sparse_search").degradedTo("dense_only");
         }
+
+        // Evidence gating: filter low-quality results before RRF fusion
+        denseSources = gateDenseResults(denseSources);
+        sparseSources = gateSparseResults(sparseSources);
 
         if (denseSources.isEmpty() && sparseSources.isEmpty()) {
             log.warn("Both dense and sparse search returned empty results for query: {}", query);
@@ -250,6 +264,97 @@ public class HybridSearchService {
         }
     }
 
+    /** Resolve RagSourceVo references to full Document objects from the local cache. */
+    public List<org.springframework.ai.document.Document> resolveDocuments(List<RagSourceVo> sources) {
+        if (sources == null || sources.isEmpty()) return List.of();
+        ensureDocumentsLoaded();
+        return sources.stream()
+                .map(s -> documentCache.get(s.getChunkId()))
+                .filter(java.util.Objects::nonNull)
+                .toList();
+    }
+
+    /**
+     * 增强混合检索：并行运行标准 dense + HyDE dense + sparse，三路 RRF 融合。
+     * 将 HyDE 作为首轮检索的并行分支，而非纠正循环中的后备手段。
+     */
+    public RagSearchResultVo hybridSearchWithHyde(String query, int topK, boolean enableRerank) {
+        ensureDocumentsLoaded();
+
+        AdvancedQueryService.QueryRewriteResult rewriteResult = advancedQueryService.rewriteQuery(query);
+        String rewrittenQuery = rewriteResult.primaryQuery();
+
+        String cacheKey = rewrittenQuery + "#" + topK + "#" + enableRerank;
+        String cached = cacheManager.getFaqSearch(cacheKey);
+        if (cached != null) {
+            return JSON.parseObject(cached, RagSearchResultVo.class);
+        }
+
+        List<RagSourceVo> standardDenseSources = circuitBreakerService.executeQdrant(
+                () -> multiQueryDenseSearch(rewriteResult.allQueries(), topK * 2),
+                List.of());
+
+        List<RagSourceVo> hydeSources = List.of();
+        try {
+            hydeSources = hydeSearch(query, topK * 2);
+        } catch (Exception e) {
+            log.warn("HyDE in first pass failed, continuing without it: {}", e.getMessage());
+        }
+
+        List<RagSourceVo> sparseSources = circuitBreakerService.executeEs(
+                () -> sparseSearch(rewrittenQuery, topK * 2),
+                List.of());
+
+        if (standardDenseSources.isEmpty() && hydeSources.isEmpty() && sparseSources.isEmpty()) {
+            log.warn("All search paths returned empty for query: {}", query);
+            return RagSearchResultVo.builder()
+                    .originalQuery(query).normalizedQuery(query).rewrittenQuery(rewrittenQuery)
+                    .documents(List.of()).sources(List.of()).build();
+        }
+
+        java.util.Map<String, RagSourceVo> allDenseMap = new java.util.LinkedHashMap<>();
+        for (RagSourceVo s : standardDenseSources) allDenseMap.put(s.getChunkId(), s);
+        for (RagSourceVo s : hydeSources) allDenseMap.putIfAbsent(s.getChunkId(), s);
+        List<RagSourceVo> allDenseSources = new ArrayList<>(allDenseMap.values());
+
+        // Evidence gating: filter low-quality results before RRF fusion
+        int denseBefore = allDenseSources.size();
+        int sparseBefore = sparseSources.size();
+        allDenseSources = gateDenseResults(allDenseSources);
+        sparseSources = gateSparseResults(sparseSources);
+        if (denseBefore != allDenseSources.size() || sparseBefore != sparseSources.size()) {
+            log.debug("Evidence gating: dense {}→{}, sparse {}→{}",
+                    denseBefore, allDenseSources.size(), sparseBefore, sparseSources.size());
+        }
+
+        List<RagSourceVo> fusedSources = sparseSources.isEmpty()
+                ? shrink(allDenseSources, topK * 2)
+                : RagFusionSupport.reciprocalRankFusion(allDenseSources, sparseSources, topK * 2);
+        List<RagSourceVo> finalSources = enableRerank
+                ? rerankSources(rewrittenQuery, fusedSources, topK)
+                : shrink(fusedSources, topK);
+        List<Document> documents = finalSources.stream()
+                .map(source -> documentCache.get(source.getChunkId()))
+                .filter(Objects::nonNull)
+                .toList();
+        documents = contextualCompressionService.compress(query, new ArrayList<>(documents));
+
+        RagSearchResultVo result = RagSearchResultVo.builder()
+                .originalQuery(query)
+                .normalizedQuery(query)
+                .rewrittenQuery(rewrittenQuery)
+                .retrievalTraceId("retrieval_" + java.util.UUID.randomUUID().toString().replace("-", ""))
+                .documents(documents)
+                .denseSources(allDenseSources)
+                .sparseSources(sparseSources)
+                .fusedSources(fusedSources)
+                .sources(finalSources)
+                .build();
+
+        cacheManager.putFaqSearch(cacheKey, JSON.toJSONString(result));
+        return result;
+    }
+
     /**
      * 增量重索引：只更新 contentHash 发生变化的文档，跳过未变更的。
      */
@@ -290,7 +395,7 @@ public class HybridSearchService {
     /**
      * Multi-query dense search: 对多个查询变体分别做 dense search，合并去重。
      */
-    private List<RagSourceVo> multiQueryDenseSearch(List<String> queries, int topK) {
+    public List<RagSourceVo> multiQueryDenseSearch(List<String> queries, int topK) {
         if (queries.size() <= 1) {
             return denseSearch(queries.isEmpty() ? "" : queries.get(0), topK);
         }
@@ -318,7 +423,7 @@ public class HybridSearchService {
         }
     }
 
-    private List<RagSourceVo> denseSearch(String query, int topK) {
+    public List<RagSourceVo> denseSearch(String query, int topK) {
         try {
             float[] vector = cacheManager.getEmbedding(query);
             if (vector == null) {
@@ -349,7 +454,7 @@ public class HybridSearchService {
         }
     }
 
-    private List<RagSourceVo> sparseSearch(String query, int topK) {
+    public List<RagSourceVo> sparseSearch(String query, int topK) {
         try {
             JSONObject multiMatch = new JSONObject();
             multiMatch.put("query", query);
@@ -380,6 +485,38 @@ public class HybridSearchService {
 
     private List<RagSourceVo> mergeWithRrf(List<RagSourceVo> denseSources, List<RagSourceVo> sparseSources, int topK) {
         return RagFusionSupport.reciprocalRankFusion(denseSources, sparseSources, topK);
+    }
+
+    /**
+     * Evidence gating: filter dense results below the minimum cosine similarity threshold.
+     * Ensures only semantically relevant chunks enter RRF fusion.
+     */
+    private List<RagSourceVo> gateDenseResults(List<RagSourceVo> denseSources) {
+        if (denseSources == null || denseSources.isEmpty() || minVectorSimilarity <= 0) {
+            return denseSources != null ? denseSources : List.of();
+        }
+        return denseSources.stream()
+                .filter(s -> s.getScore() != null && s.getScore() >= minVectorSimilarity)
+                .toList();
+    }
+
+    /**
+     * Evidence gating: filter sparse (BM25) results whose score is below a relative
+     * percentage of the top result. Ensures only competitive keyword matches enter RRF.
+     */
+    private List<RagSourceVo> gateSparseResults(List<RagSourceVo> sparseSources) {
+        if (sparseSources == null || sparseSources.isEmpty() || keywordRelativeScoreFloor <= 0) {
+            return sparseSources != null ? sparseSources : List.of();
+        }
+        double topScore = sparseSources.stream()
+                .filter(s -> s.getScore() != null)
+                .mapToDouble(RagSourceVo::getScore)
+                .max().orElse(0D);
+        if (topScore <= 0) return sparseSources;
+        double floor = topScore * keywordRelativeScoreFloor;
+        return sparseSources.stream()
+                .filter(s -> s.getScore() != null && s.getScore() >= floor)
+                .toList();
     }
 
     private List<RagSourceVo> rerankSources(String query, List<RagSourceVo> fusedSources, int topK) {

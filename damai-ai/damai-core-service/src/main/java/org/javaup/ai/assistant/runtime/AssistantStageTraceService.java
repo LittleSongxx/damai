@@ -1,6 +1,6 @@
 package org.javaup.ai.assistant.runtime;
 
-import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import lombok.Builder;
 import lombok.RequiredArgsConstructor;

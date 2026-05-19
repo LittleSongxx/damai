@@ -1,5 +1,6 @@
 package org.javaup.ai.config;
 
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import org.javaup.ai.ai.rag.MarkdownLoader;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
@@ -54,5 +55,10 @@ public class DaMaiAiAutoConfiguration {
                                          @Value("${damai.ai.rag.min-doc-length-for-token-split:1000}") int minDocLengthForTokenSplit) {
         return new MarkdownLoader(resourcePatternResolver, documentPattern, chunkSize,
                 minChunkSizeChars, minChunkLengthToEmbed, maxNumChunks, minDocLengthForTokenSplit);
+    }
+
+    @Bean
+    public CircuitBreakerRegistry circuitBreakerRegistry() {
+        return CircuitBreakerRegistry.ofDefaults();
     }
 }

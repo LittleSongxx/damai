@@ -132,7 +132,7 @@ public class AiObservabilityAdvisor implements BaseChatMemoryAdvisor {
                 if (cost != null) {
                     genAiMetadata.put("gen_ai.usage.cost_rmb", cost);
                 }
-                trace.setMetadata(com.alibaba.fastjson.JSON.toJSONString(genAiMetadata));
+                trace.setMetadata(com.alibaba.fastjson2.JSON.toJSONString(genAiMetadata));
 
                 log.info("AI调用完成 | gen_ai traceId={} model={} latency={}ms input_tokens={} output_tokens={} cost=¥{}",
                         traceId, modelName, latencyMs, promptTokens, completionTokens, cost);

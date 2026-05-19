@@ -1,6 +1,6 @@
 package org.javaup.ai.assistant;
 
-import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson2.JSON;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.context.AiRequestContextHolder;
@@ -58,6 +58,8 @@ public class AssistantRuntimeService {
     private final AiRetrievalTraceMapper retrievalTraceMapper;
     private final ThreadPoolExecutor assistantRunExecutor;
     private final BusinessMetrics businessMetrics;
+    private final org.javaup.ai.config.ThreadPoolProperties threadPoolProperties;
+    private final org.javaup.ai.assistant.mq.AssistantRunRequestPublisher overflowPublisher;
 
     public AssistantRunCreatedVo createRun(AssistantRunCreateRequest request) {
         return runService.createRun(request);
@@ -222,6 +224,25 @@ public class AssistantRuntimeService {
 
     private void launchProcess(String runId, AiRequestContext context) {
         var sample = businessMetrics.startAssistantRun();
+        double queueRatio = (double) assistantRunExecutor.getQueue().size()
+                / Math.max(1, threadPoolProperties.getAssistant().getQueueCapacity());
+
+        if (queueRatio > threadPoolProperties.getAssistant().getOverflowThreshold()) {
+            log.warn("Thread pool queue at {}% capacity, overflowing runId={} to RabbitMQ",
+                    (int)(queueRatio * 100), runId);
+            AiRun run = runService.getRunInternal(runId);
+            var message = org.javaup.ai.assistant.mq.AssistantRunRequestMessage.builder()
+                    .runId(runId)
+                    .conversationId(run != null ? run.getConversationId() : null)
+                    .userId(run != null ? run.getUserId() : null)
+                    .userMessage(run != null ? run.getUserMessage() : null)
+                    .clientContextJson(run != null ? run.getClientContextJson() : null)
+                    .build();
+            overflowPublisher.publish(message);
+            businessMetrics.stopAssistantRun(sample);
+            return;
+        }
+
         assistantRunExecutor.execute(() -> {
             try {
                 if (context != null) {
@@ -241,6 +262,31 @@ public class AssistantRuntimeService {
                 AiRequestContextHolder.clear();
             }
         });
+    }
+
+    public void processOverflowRun(org.javaup.ai.assistant.mq.AssistantRunRequestMessage message) {
+        var sample = businessMetrics.startAssistantRun();
+        try {
+            AiRun run = runService.getRunInternal(message.getRunId());
+            if (run == null) {
+                log.warn("Overflow run not found: runId={}", message.getRunId());
+                return;
+            }
+            AiRequestContext ctx = AiRequestContext.builder()
+                    .conversationId(message.getConversationId())
+                    .runId(message.getRunId())
+                    .build();
+            AiRequestContextHolder.set(ctx);
+            runService.updateStage(message.getRunId(), "WAITING_LEASE");
+            try (AssistantRuntimeLeaseService.LeaseHandle ignored =
+                         runtimeLeaseService.acquireConversationLease(
+                                 message.getConversationId(), message.getRunId())) {
+                processRun(message.getRunId());
+            }
+        } finally {
+            businessMetrics.stopAssistantRun(sample);
+            AiRequestContextHolder.clear();
+        }
     }
 
     private ServerSentEvent<String> toEvent(AiRunEvent event) {

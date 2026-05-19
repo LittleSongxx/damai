@@ -2,7 +2,7 @@ package org.javaup.ai.ai.function.call;
 
 import cn.hutool.core.collection.CollectionUtil;
 import cn.hutool.http.HttpRequest;
-import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson2.JSON;
 import org.javaup.ai.dto.TicketCategoryListByProgramDto;
 import org.javaup.ai.enums.BaseCode;
 import org.javaup.ai.vo.TicketCategoryDetailVo;

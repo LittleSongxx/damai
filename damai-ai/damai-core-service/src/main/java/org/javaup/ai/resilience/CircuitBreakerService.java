@@ -3,7 +3,6 @@ package org.javaup.ai.resilience;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
-import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.config.ResilienceProperties;
 import org.springframework.stereotype.Service;
@@ -18,9 +17,9 @@ public class CircuitBreakerService {
     private final CircuitBreakerRegistry registry;
     private final ResilienceProperties properties;
 
-    public CircuitBreakerService(ResilienceProperties properties, MeterRegistry meterRegistry) {
+    public CircuitBreakerService(ResilienceProperties properties, CircuitBreakerRegistry registry) {
         this.properties = properties;
-        this.registry = CircuitBreakerRegistry.ofDefaults();
+        this.registry = registry;
     }
 
     // --- LLM ---

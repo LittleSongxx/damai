@@ -21,7 +21,8 @@ class KnowledgePromptAssemblyServiceTest {
                 plan,
                 RagSearchResultVo.builder().build(),
                 new StructuredRuleSupportService.SupportBundle(List.of(), List.of()),
-                new KnowledgeRetrievalAssessment(0.8D, "HIGH", "none", List.of()),
+                new KnowledgeRetrievalAssessment(0.8D, "CORRECT", "none", List.of(),
+                        "HIGH", "HIGH", false, "ANSWERABLE", ""),
                 List.of(document("1234567890abcdef"), document("duplicate"), document("duplicate"))
         );
 

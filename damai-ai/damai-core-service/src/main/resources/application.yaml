@@ -183,6 +183,10 @@ damai:
       min-chunk-length-to-embed: ${DAMAI_AI_RAG_MIN_CHUNK_LENGTH_TO_EMBED:5}
       max-num-chunks: ${DAMAI_AI_RAG_MAX_NUM_CHUNKS:10000}
       min-doc-length-for-token-split: ${DAMAI_AI_RAG_MIN_DOC_LENGTH_FOR_TOKEN_SPLIT:1000}
+    retrieval:
+      min-vector-similarity: ${DAMAI_AI_RETRIEVAL_MIN_VECTOR_SIMILARITY:0.45}
+      keyword-relative-score-floor: ${DAMAI_AI_RETRIEVAL_KEYWORD_RELATIVE_SCORE_FLOOR:0.35}
+      parent-elevation-enabled: ${DAMAI_AI_RETRIEVAL_PARENT_ELEVATION_ENABLED:false}
     memory:
       structured:
         enabled: ${DAMAI_AI_STRUCTURED_MEMORY_ENABLED:true}
@@ -194,6 +198,13 @@ damai:
         run-completed-queue: ${DAMAI_AI_MEMORY_RUN_COMPLETED_QUEUE:damai.ai.memory.run_completed.q}
         run-completed-routing-key: ${DAMAI_AI_MEMORY_RUN_COMPLETED_ROUTING_KEY:ai.run.completed}
         run-completed-dlq: ${DAMAI_AI_MEMORY_RUN_COMPLETED_DLQ:damai.ai.memory.run_completed.dlq}
+      overflow:
+        exchange: ${DAMAI_AI_OVERFLOW_EXCHANGE:damai.ai.overflow.topic}
+        queue: ${DAMAI_AI_OVERFLOW_QUEUE:damai.ai.overflow.run_request.q}
+        routing-key: ${DAMAI_AI_OVERFLOW_ROUTING_KEY:ai.run.request.overflow}
+        dlq: ${DAMAI_AI_OVERFLOW_DLQ:damai.ai.overflow.run_request.dlq}
+        message-ttl-ms: ${DAMAI_AI_OVERFLOW_TTL_MS:300000}
+        max-length: ${DAMAI_AI_OVERFLOW_MAX_LENGTH:10000}
     runtime-lease:
       enabled: ${DAMAI_AI_RUNTIME_LEASE_ENABLED:true}
       fail-open: ${DAMAI_AI_RUNTIME_LEASE_FAIL_OPEN:true}
@@ -207,6 +218,10 @@ damai:
       max-topics: ${DAMAI_AI_KNOWLEDGE_ROUTE_MAX_TOPICS:5}
       max-documents: ${DAMAI_AI_KNOWLEDGE_ROUTE_MAX_DOCUMENTS:5}
       min-score: ${DAMAI_AI_KNOWLEDGE_ROUTE_MIN_SCORE:1.0}
+    intent:
+      ambiguity-margin: ${DAMAI_AI_INTENT_AMBIGUITY_MARGIN:0.20}
+      min-score: ${DAMAI_AI_INTENT_MIN_SCORE:0.4}
+      max-count: ${DAMAI_AI_INTENT_MAX_COUNT:3}
     tracing:
       enabled: ${DAMAI_AI_TRACING_ENABLED:true}
       otlp-endpoint: ${DAMAI_AI_OTLP_ENDPOINT:http://127.0.0.1:4317}
@@ -277,31 +292,32 @@ damai:
       llm:
         enabled: true
         failure-rate-threshold: 50
-        sliding-window-size: 10
+        sliding-window-size: 20
         wait-duration-seconds: 30
         permitted-calls-in-half-open: 3
         timeout-ms: 15000
       qdrant:
         enabled: true
         failure-rate-threshold: 50
-        sliding-window-size: 5
+        sliding-window-size: 10
         wait-duration-seconds: 15
       es:
         enabled: true
         failure-rate-threshold: 50
-        sliding-window-size: 5
+        sliding-window-size: 10
         wait-duration-seconds: 15
       web-search:
         enabled: true
         failure-rate-threshold: 50
-        sliding-window-size: 5
+        sliding-window-size: 10
         wait-duration-seconds: 30
     thread-pool:
       assistant:
-        core-pool-size: 4
-        max-pool-size: 16
-        queue-capacity: 100
+        core-pool-size: 16
+        max-pool-size: 64
+        queue-capacity: 500
         keep-alive-seconds: 60
+        overflow-threshold: 0.8
       nl2sql:
         max-pool-size: 5
         connection-timeout-ms: 3000

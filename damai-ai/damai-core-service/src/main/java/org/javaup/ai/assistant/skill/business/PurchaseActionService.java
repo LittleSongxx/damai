@@ -1,6 +1,6 @@
 package org.javaup.ai.assistant.skill.business;
 
-import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson2.JSON;
 import lombok.RequiredArgsConstructor;
 import org.javaup.ai.ai.function.call.OrderCall;
 import org.javaup.ai.ai.function.call.UserCall;

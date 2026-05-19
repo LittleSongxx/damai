@@ -2,6 +2,7 @@ package org.javaup.ai.service;
 
 import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.assistant.runtime.AssistantObservedChatService;
+import org.javaup.ai.rag.prompt.PromptTemplateLoader;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -10,6 +11,7 @@ import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @program: 大麦-ai智能服务项目。 添加 阿星不是程序员 微信，添加时备注 ai 来获取项目的完整资料
@@ -22,16 +24,19 @@ public class AdvancedQueryService {
 
     private final ChatClient chatClient;
     private final AssistantObservedChatService observedChatService;
+    private final PromptTemplateLoader templateLoader;
 
     public AdvancedQueryService(ChatClient chatClient) {
-        this(chatClient, null);
+        this(chatClient, null, null);
     }
 
     @Autowired
     public AdvancedQueryService(@Qualifier("unifiedKnowledgeChatClient") ChatClient chatClient,
-                                AssistantObservedChatService observedChatService) {
+                                AssistantObservedChatService observedChatService,
+                                PromptTemplateLoader templateLoader) {
         this.chatClient = chatClient;
         this.observedChatService = observedChatService;
+        this.templateLoader = templateLoader;
     }
 
     /**
@@ -43,19 +48,24 @@ public class AdvancedQueryService {
             return new QueryRewriteResult(originalQuery, List.of(originalQuery));
         }
         try {
-            String prompt = """
+            String prompt;
+            if (templateLoader != null && templateLoader.hasTemplate("rewrite-query.st")) {
+                prompt = templateLoader.render("rewrite-query.st", Map.of("user_question", originalQuery));
+            } else {
+                prompt = """
                     你是大麦票务平台的搜索查询优化器。请将用户的口语化问题改写为更精准的检索查询。
-                    
+
                     规则：
                     1. 生成1个主查询（最精准的改写）和2个变体查询（从不同角度表达同一意图）
                     2. 保留核心语义，去除口语化表达
                     3. 补充可能的同义词和相关术语
                     4. 每个查询一行，共3行，不要编号不要标点
-                    
+
                     用户问题：%s
-                    
+
                     输出3行查询：
                     """.formatted(originalQuery);
+            }
 
             String result = callObserved("KNOWLEDGE_QUERY_REWRITE", "KnowledgeQueryRewrite", prompt);
 
@@ -76,23 +86,30 @@ public class AdvancedQueryService {
      * Sub-question Decomposition: 将复杂的多跳查询拆解为多个子问题。
      * 例如："鸟巢演唱会的VIP票能退吗，退票后停车券怎么办" -> ["鸟巢VIP票退票规则", "退票后停车券处理"]
      */
+    /**
+     * Sub-question Decomposition with conservative pre-check.
+     * Only invokes LLM decomposition when clear multi-question indicators exist.
+     */
     public List<String> decomposeSubQuestions(String query) {
         if (!StringUtils.hasText(query)) {
+            return List.of(query);
+        }
+        if (!isExplicitMultiQuestion(query)) {
             return List.of(query);
         }
         try {
             String prompt = """
                     你是大麦票务平台的问题分析器。判断用户问题是否包含多个独立子问题。
-                    
+
                     规则：
                     1. 如果问题是单一问题，只输出这一个问题本身（1行）
                     2. 如果问题包含2-4个独立子问题，分别输出每个子问题（每行一个）
                     3. 最多拆分为4个子问题
                     4. 每个子问题应该是自包含的、可独立检索的
                     5. 不要编号，每行一个子问题
-                    
+
                     用户问题：%s
-                    
+
                     子问题：
                     """.formatted(query);
 
@@ -108,6 +125,25 @@ public class AdvancedQueryService {
             log.warn("Sub-question Decomposition 失败，使用原始查询", e);
             return List.of(query);
         }
+    }
+
+    /**
+     * Conservative multi-question detection: only decompose when the query contains
+     * explicit indicators of multiple independent questions, preventing over-splitting.
+     */
+    private boolean isExplicitMultiQuestion(String query) {
+        // Multiple question marks
+        long questionMarkCount = query.chars().filter(c -> c == '?' || c == '？').count();
+        if (questionMarkCount >= 2) return true;
+        // Numbered list patterns
+        if (query.matches(".*[（(]?[1-9一二三四五六七八九十][）).、]\\s*.*[（(]?[1-9一二三四五六七八九十][）).、].*")) return true;
+        if (query.matches(".*第[一二三四五六七八九十].*第[一二三四五六七八九十].*")) return true;
+        // Explicit separation keywords
+        if (query.contains("分别") || query.contains("各自的") || query.contains("同时")) return true;
+        // Multiple clauses with separators
+        long separatorCount = query.chars().filter(c -> c == '；' || c == ';').count();
+        if (separatorCount >= 2 && query.length() > 30) return true;
+        return false;
     }
 
     /**

@@ -8,6 +8,11 @@ public record KnowledgeRetrievalAssessment(
         Double confidenceScore,
         String confidenceLevel,
         String correctiveAction,
-        List<RagSourceVo> sources
+        List<RagSourceVo> sources,
+        String relevanceLevel,
+        String coverageLevel,
+        boolean hasContradictions,
+        String answerabilityLevel,
+        String missingInfo
 ) {
 }

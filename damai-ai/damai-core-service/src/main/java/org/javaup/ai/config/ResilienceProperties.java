@@ -18,7 +18,7 @@ public class ResilienceProperties {
     public static class LlmCircuitBreaker {
         private boolean enabled = true;
         private int failureRateThreshold = 50;
-        private int slidingWindowSize = 10;
+        private int slidingWindowSize = 20;
         private int waitDurationSeconds = 30;
         private int permittedCallsInHalfOpen = 3;
         private long timeoutMs = 15000;
@@ -28,7 +28,7 @@ public class ResilienceProperties {
     public static class QdrantCircuitBreaker {
         private boolean enabled = true;
         private int failureRateThreshold = 50;
-        private int slidingWindowSize = 5;
+        private int slidingWindowSize = 10;
         private int waitDurationSeconds = 15;
     }
 
@@ -36,7 +36,7 @@ public class ResilienceProperties {
     public static class EsCircuitBreaker {
         private boolean enabled = true;
         private int failureRateThreshold = 50;
-        private int slidingWindowSize = 5;
+        private int slidingWindowSize = 10;
         private int waitDurationSeconds = 15;
     }
 
@@ -44,7 +44,7 @@ public class ResilienceProperties {
     public static class WebSearchCircuitBreaker {
         private boolean enabled = true;
         private int failureRateThreshold = 50;
-        private int slidingWindowSize = 5;
+        private int slidingWindowSize = 10;
         private int waitDurationSeconds = 30;
     }
 }

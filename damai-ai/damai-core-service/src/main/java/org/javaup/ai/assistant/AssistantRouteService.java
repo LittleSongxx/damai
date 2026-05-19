@@ -1,5 +1,6 @@
 package org.javaup.ai.assistant;
 
+import org.javaup.ai.rag.intent.IntentGuidanceService;
 import org.javaup.ai.structured.IntentRecognition;
 import org.javaup.ai.structured.StructuredOutputService;
 import org.javaup.ai.utils.CommonUtils;
@@ -41,11 +42,14 @@ public class AssistantRouteService {
 
     private final StructuredOutputService structuredOutputService;
     private final ChatClient chatClient;
-    
+    private final IntentGuidanceService intentGuidanceService;
+
     public AssistantRouteService(StructuredOutputService structuredOutputService,
-                                 @Qualifier("unifiedGeneralChatClient") ChatClient chatClient) {
+                                 @Qualifier("unifiedGeneralChatClient") ChatClient chatClient,
+                                 IntentGuidanceService intentGuidanceService) {
         this.structuredOutputService = structuredOutputService;
         this.chatClient = chatClient;
+        this.intentGuidanceService = intentGuidanceService;
     }
 
     public AssistantRouteDecision route(String message) {
@@ -66,12 +70,52 @@ public class AssistantRouteService {
         ).entrySet().stream().max(Comparator.comparingDouble(Map.Entry::getValue)).orElse(null);
 
         if (best != null && best.getValue() > 0) {
+            // Intent tree gray-zone check for keyword-matched routes
+            try {
+                var guidanceResult = intentGuidanceService.classify(message);
+                if (guidanceResult.needsClarification() && guidanceResult.clarificationPrompt() != null) {
+                    return AssistantRouteDecision.builder()
+                            .routeType(best.getKey())
+                            .reason("keyword_grayzone:" + best.getKey().getCode())
+                            .fromFallback(false)
+                            .clarificationRequired(true)
+                            .clarificationPrompt(guidanceResult.clarificationPrompt())
+                            .clarificationOptions(List.of("查询或购买演出票", "咨询购票/退票/入场规则", "联网搜索歌手、演出和娱乐资讯", "排查日志、Trace 或服务指标"))
+                            .build();
+                }
+            } catch (Exception ignored) {
+                // Intent guidance is best-effort; fall through to keyword result
+            }
             return AssistantRouteDecision.builder()
                     .routeType(best.getKey())
                     .reason("keyword:" + best.getKey().getCode())
                     .fromFallback(false)
                     .clarificationRequired(false)
                     .build();
+        }
+        // Intent tree classification as fallback before LLM structured output
+        try {
+            var guidanceResult = intentGuidanceService.classify(message);
+            if (guidanceResult.routeType() != null && !guidanceResult.needsClarification()) {
+                return AssistantRouteDecision.builder()
+                        .routeType(guidanceResult.routeType())
+                        .reason("intent_tree:" + guidanceResult.reason())
+                        .fromFallback(true)
+                        .clarificationRequired(false)
+                        .build();
+            }
+            if (guidanceResult.needsClarification() && guidanceResult.clarificationPrompt() != null) {
+                return AssistantRouteDecision.builder()
+                        .routeType(AssistantRouteType.GENERAL)
+                        .reason("intent_tree_ambiguity")
+                        .fromFallback(true)
+                        .clarificationRequired(true)
+                        .clarificationPrompt(guidanceResult.clarificationPrompt())
+                        .clarificationOptions(List.of("查询或购买演出票", "咨询购票/退票/入场规则", "联网搜索歌手、演出和娱乐资讯", "排查日志、Trace 或服务指标"))
+                        .build();
+            }
+        } catch (Exception ignored) {
+            // Fall through to structured output
         }
         try {
             IntentRecognition recognition = structuredOutputService.recognizeIntent(chatClient, message);

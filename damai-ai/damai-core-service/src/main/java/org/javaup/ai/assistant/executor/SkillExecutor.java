@@ -1,6 +1,6 @@
 package org.javaup.ai.assistant.executor;
 
-import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson2.JSON;
 import org.javaup.ai.assistant.AssistantEventTypes;
 import org.javaup.ai.assistant.AssistantExecutionMode;
 import org.javaup.ai.assistant.AssistantRouteDecision;

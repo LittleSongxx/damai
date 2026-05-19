@@ -14,10 +14,11 @@ public class ThreadPoolProperties {
 
     @Data
     public static class Assistant {
-        private int corePoolSize = 4;
-        private int maxPoolSize = 16;
-        private int queueCapacity = 100;
+        private int corePoolSize = 16;
+        private int maxPoolSize = 64;
+        private int queueCapacity = 500;
         private int keepAliveSeconds = 60;
+        private double overflowThreshold = 0.8;
     }
 
     @Data

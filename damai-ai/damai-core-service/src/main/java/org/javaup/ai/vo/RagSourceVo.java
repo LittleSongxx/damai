@@ -18,4 +18,15 @@ public class RagSourceVo {
     private String snippet;
 
     private Double score;
+
+    /**
+     * Optional parent block identifier for parent-child block elevation.
+     * When set, child chunks can be elevated to their parent block with aggregated scoring.
+     */
+    private String parentBlockId;
+
+    /**
+     * Name of the retrieval channel that produced this result (dense/sparse/hyde).
+     */
+    private String channelName;
 }
