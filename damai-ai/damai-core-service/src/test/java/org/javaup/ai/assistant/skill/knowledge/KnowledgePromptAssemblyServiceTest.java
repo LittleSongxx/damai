@@ -16,7 +16,7 @@ class KnowledgePromptAssemblyServiceTest {
 
     @Test
     void shouldAssembleGroundedPromptWithinContextBudget() {
-        KnowledgeRetrievalPlan plan = new KnowledgeRetrievalPlan("退票规则", "退票规则", 8, true, 6, 260, 12, List.of("退票规则"));
+        KnowledgeRetrievalPlan plan = new KnowledgeRetrievalPlan("退票规则", "退票规则", 8, true, 6, 260, 12, List.of("退票规则"), KnowledgeRetrievalPlan.Complexity.MEDIUM);
         KnowledgeRetrievalContext context = new KnowledgeRetrievalContext(
                 plan,
                 RagSearchResultVo.builder().build(),

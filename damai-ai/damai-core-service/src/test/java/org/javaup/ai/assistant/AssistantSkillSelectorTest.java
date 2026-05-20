@@ -3,7 +3,9 @@ package org.javaup.ai.assistant;
 import org.javaup.ai.context.AiUserContext;
 import org.javaup.ai.dto.AssistantRunCreateRequest;
 import org.javaup.ai.security.AiPermissionService;
+import org.javaup.ai.service.LlmSkillSelectorService;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 
 import java.util.List;
 import java.util.Map;
@@ -66,7 +68,14 @@ class AssistantSkillSelectorTest {
         AiPermissionService permissionService = mock(AiPermissionService.class);
         when(permissionService.canAccessSkill(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any())).thenReturn(allowed);
         when(permissionService.canAccessSkill(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(descriptor))).thenReturn(allowed);
-        return new AssistantSkillSelector(registry, permissionService);
+        ObjectProvider<AssistantSkillDefinitionService> stubDefProvider = stubProvider();
+        ObjectProvider<LlmSkillSelectorService> stubLlmProvider = stubProvider();
+        return new AssistantSkillSelector(registry, permissionService, stubDefProvider, stubLlmProvider);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> ObjectProvider<T> stubProvider() {
+        return mock(ObjectProvider.class);
     }
 
     private AssistantRunCreateRequest request(String message, Map<String, Object> clientContext) {

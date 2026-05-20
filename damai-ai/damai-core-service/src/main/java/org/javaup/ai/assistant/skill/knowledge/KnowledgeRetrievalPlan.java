@@ -10,6 +10,8 @@ public record KnowledgeRetrievalPlan(
         int evidenceSourceLimit,
         int evidenceSnippetLimit,
         int evidenceContextCharBudget,
-        List<String> subQuestions
+        List<String> subQuestions,
+        Complexity complexity
 ) {
+    public enum Complexity { SIMPLE, MEDIUM, COMPLEX }
 }

@@ -14,6 +14,7 @@ public class CacheProperties {
     private WebSearch webSearch = new WebSearch();
     private UserContext userContext = new UserContext();
     private Nl2sqlSchema nl2sqlSchema = new Nl2sqlSchema();
+    private Nl2sqlResult nl2sqlResult = new Nl2sqlResult();
 
     @Data
     public static class Embedding {
@@ -49,5 +50,11 @@ public class CacheProperties {
         private boolean enabled = true;
         private int maxSize = 100;
         private int ttlMinutes = 60;
+    }
+
+    @Data
+    public static class Nl2sqlResult {
+        private boolean enabled = true;
+        private int ttlMinutes = 3;
     }
 }

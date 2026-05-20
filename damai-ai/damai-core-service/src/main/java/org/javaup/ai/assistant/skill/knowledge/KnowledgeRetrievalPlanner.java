@@ -23,29 +23,61 @@ public class KnowledgeRetrievalPlanner {
 
     public KnowledgeRetrievalPlan plan(String query) {
         String normalizedQuery = normalize(query);
+        KnowledgeRetrievalPlan.Complexity complexity = gradeComplexity(normalizedQuery);
         List<String> subQuestions;
-        if (isComplex(normalizedQuery)) {
-            try {
-                subQuestions = advancedQueryService.decomposeSubQuestions(normalizedQuery);
-                log.info("First-pass sub-question decomposition: '{}' -> {} sub-questions",
-                        normalizedQuery, subQuestions.size());
-            } catch (Exception e) {
-                log.warn("Sub-question decomposition failed in first pass, using single query", e);
+        int topK;
+        boolean enableRerank;
+
+        switch (complexity) {
+            case SIMPLE -> {
+                topK = 4;
+                enableRerank = false;
                 subQuestions = List.of(normalizedQuery);
             }
-        } else {
-            subQuestions = List.of(normalizedQuery);
+            case MEDIUM -> {
+                topK = RETRIEVAL_TOP_K;
+                enableRerank = true;
+                subQuestions = List.of(normalizedQuery);
+            }
+            case COMPLEX -> {
+                topK = RETRIEVAL_TOP_K;
+                enableRerank = true;
+                try {
+                    subQuestions = advancedQueryService.decomposeSubQuestions(normalizedQuery);
+                    log.info("First-pass sub-question decomposition: '{}' -> {} sub-questions",
+                            normalizedQuery, subQuestions.size());
+                } catch (Exception e) {
+                    log.warn("Sub-question decomposition failed in first pass, using single query", e);
+                    subQuestions = List.of(normalizedQuery);
+                }
+            }
+            default -> {
+                topK = RETRIEVAL_TOP_K;
+                enableRerank = true;
+                subQuestions = List.of(normalizedQuery);
+            }
         }
+
         return new KnowledgeRetrievalPlan(
                 query,
                 normalizedQuery,
-                RETRIEVAL_TOP_K,
-                true,
+                topK,
+                enableRerank,
                 EVIDENCE_SOURCE_LIMIT,
                 EVIDENCE_SNIPPET_LIMIT,
                 EVIDENCE_CONTEXT_CHAR_BUDGET,
-                subQuestions
+                subQuestions,
+                complexity
         );
+    }
+
+    private KnowledgeRetrievalPlan.Complexity gradeComplexity(String query) {
+        if (query == null || query.isEmpty()) return KnowledgeRetrievalPlan.Complexity.SIMPLE;
+        if (isComplex(query)) return KnowledgeRetrievalPlan.Complexity.COMPLEX;
+        if (query.length() > 12 || query.contains("?") || query.contains("？") || query.contains("吗")) {
+            return KnowledgeRetrievalPlan.Complexity.MEDIUM;
+        }
+        return KnowledgeRetrievalPlan.Complexity.SIMPLE;
     }
 
     /**

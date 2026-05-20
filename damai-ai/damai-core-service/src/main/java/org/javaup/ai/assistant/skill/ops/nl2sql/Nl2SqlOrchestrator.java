@@ -1,6 +1,7 @@
 package org.javaup.ai.assistant.skill.ops.nl2sql;
 
 import org.javaup.ai.assistant.tool.AssistantToolInvoker;
+import org.javaup.ai.cache.CacheManager;
 import org.javaup.ai.rag.prompt.PromptTemplateLoader;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -23,6 +24,7 @@ public class Nl2SqlOrchestrator {
     private final Nl2SqlErrorClassifier errorClassifier;
     private final AssistantToolInvoker toolInvoker;
     private final PromptTemplateLoader templateLoader;
+    private final CacheManager cacheManager;
 
     public Nl2SqlOrchestrator(@Qualifier("unifiedOpsChatClient") ChatClient chatClient,
                               Nl2SqlProperties properties,
@@ -32,7 +34,8 @@ public class Nl2SqlOrchestrator {
                               Nl2SqlExecutionService executionService,
                               Nl2SqlErrorClassifier errorClassifier,
                               AssistantToolInvoker toolInvoker,
-                              PromptTemplateLoader templateLoader) {
+                              PromptTemplateLoader templateLoader,
+                              CacheManager cacheManager) {
         this.chatClient = chatClient;
         this.properties = properties;
         this.schemaService = schemaService;
@@ -42,6 +45,7 @@ public class Nl2SqlOrchestrator {
         this.errorClassifier = errorClassifier;
         this.toolInvoker = toolInvoker;
         this.templateLoader = templateLoader;
+        this.cacheManager = cacheManager;
     }
 
     public Map<String, Object> answer(String runId, String question, String conversationKey) {
@@ -75,9 +79,20 @@ public class Nl2SqlOrchestrator {
                     Map.of("sql", generation.getSql()), () -> safetyValidator.validate(generation.getSql()));
             evidence.put("validatedSql", validatedSql);
 
+            String cachedResult = cacheManager.getNl2sqlResult(validatedSql.sql());
+            if (cachedResult != null) {
+                evidence.put("execution", com.alibaba.fastjson2.JSON.parseObject(cachedResult, Nl2SqlExecutionResult.class));
+                evidence.put("status", "COMPLETED");
+                evidence.put("cacheHit", true);
+                return evidence;
+            }
+
             Nl2SqlExecutionResult execution = executeWithRepair(runId, question, conversationKey, schemaContext, evidence, validatedSql);
             evidence.put("execution", execution);
             evidence.put("status", execution.skipped() ? "SQL_READY" : "COMPLETED");
+            if (!execution.skipped()) {
+                cacheManager.putNl2sqlResult(validatedSql.sql(), com.alibaba.fastjson2.JSON.toJSONString(execution));
+            }
             return evidence;
         } catch (Nl2SqlException ex) {
             evidence.put("status", "FAILED");

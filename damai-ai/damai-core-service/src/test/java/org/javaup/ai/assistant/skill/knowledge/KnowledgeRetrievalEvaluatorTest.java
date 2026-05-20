@@ -42,7 +42,7 @@ class KnowledgeRetrievalEvaluatorTest {
                         .build(),
                 List.of(source("c", "structured_rule", 0.35D)),
                 "query_decomposition",
-                new KnowledgeRetrievalPlan("q", "q", 8, true, 2, 8, 4000, List.of("q")));
+                new KnowledgeRetrievalPlan("q", "q", 8, true, 2, 8, 4000, List.of("q"), KnowledgeRetrievalPlan.Complexity.MEDIUM));
 
         assertEquals("query_decomposition", assessment.correctiveAction());
         assertEquals(2, assessment.sources().size());
@@ -50,7 +50,7 @@ class KnowledgeRetrievalEvaluatorTest {
     }
 
     private KnowledgeRetrievalPlan plan() {
-        return new KnowledgeRetrievalPlan("q", "q", 8, true, 6, 260, 4000, List.of("q"));
+        return new KnowledgeRetrievalPlan("q", "q", 8, true, 6, 260, 4000, List.of("q"), KnowledgeRetrievalPlan.Complexity.MEDIUM);
     }
 
     private RagSourceVo source(String chunkId, String source, Double score) {

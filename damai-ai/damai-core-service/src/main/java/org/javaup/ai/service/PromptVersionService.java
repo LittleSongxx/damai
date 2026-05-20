@@ -32,18 +32,47 @@ public class PromptVersionService {
         if (cached != null) {
             return cached;
         }
-        AiPromptVersion active = promptVersionMapper.selectOne(
+        List<AiPromptVersion> activeVersions = promptVersionMapper.selectList(
                 new LambdaQueryWrapper<AiPromptVersion>()
                         .eq(AiPromptVersion::getPromptKey, promptKey)
                         .eq(AiPromptVersion::getActive, true)
                         .eq(AiPromptVersion::getStatus, 1)
-                        .orderByDesc(AiPromptVersion::getVersion)
-                        .last("LIMIT 1"));
-        if (active != null) {
-            cache.put(promptKey, active.getTemplate());
-            return active.getTemplate();
+                        .orderByDesc(AiPromptVersion::getVersion));
+        if (activeVersions.isEmpty()) {
+            return defaultTemplate;
+        }
+        AiPromptVersion selected = selectVersion(activeVersions);
+        if (selected != null) {
+            cache.put(promptKey, selected.getTemplate());
+            return selected.getTemplate();
         }
         return defaultTemplate;
+    }
+
+    private AiPromptVersion selectVersion(List<AiPromptVersion> versions) {
+        if (versions.size() == 1) return versions.get(0);
+
+        // Check for gradual rollout: if the latest version is in GRADUAL status,
+        // split traffic based on trafficPercent
+        AiPromptVersion latest = versions.get(0);
+        AiPromptVersion previousStable = null;
+        for (int i = 1; i < versions.size(); i++) {
+            if ("STABLE".equals(versions.get(i).getRolloutStatus())) {
+                previousStable = versions.get(i);
+                break;
+            }
+        }
+
+        if ("GRADUAL".equals(latest.getRolloutStatus()) && previousStable != null
+                && latest.getTrafficPercent() != null && latest.getTrafficPercent() > 0
+                && latest.getTrafficPercent() < 100) {
+            double roll = Math.random() * 100;
+            if (roll < latest.getTrafficPercent()) {
+                return latest;
+            }
+            return previousStable;
+        }
+        return latest;
     }
 
     public void invalidateCache(String promptKey) {
@@ -98,15 +127,62 @@ public class PromptVersionService {
     }
 
     public void activate(String promptKey, Integer version) {
+        activate(promptKey, version, null, null);
+    }
+
+    public void activate(String promptKey, Integer version, String rolloutStatus, Integer trafficPercent) {
         List<AiPromptVersion> all = promptVersionMapper.selectList(
                 new LambdaQueryWrapper<AiPromptVersion>()
                         .eq(AiPromptVersion::getPromptKey, promptKey)
                         .eq(AiPromptVersion::getStatus, 1));
+        String effectiveRollout = rolloutStatus != null ? rolloutStatus : "STABLE";
+        Integer effectiveTraffic = "GRADUAL".equals(effectiveRollout) && trafficPercent != null
+                ? Math.max(1, Math.min(99, trafficPercent)) : 100;
+
         for (AiPromptVersion pv : all) {
-            pv.setActive(pv.getVersion().equals(version));
+            boolean isTarget = pv.getVersion().equals(version);
+            pv.setActive(isTarget);
+            pv.setRolloutStatus(isTarget ? effectiveRollout : null);
+            pv.setTrafficPercent(isTarget ? effectiveTraffic : null);
             pv.setEditTime(new Date());
             promptVersionMapper.updateById(pv);
         }
         invalidateCache(promptKey);
+        log.info("Prompt activated: key={}, version={}, rollout={}, traffic={}%",
+                promptKey, version, effectiveRollout, effectiveTraffic);
+    }
+
+    public void promoteToStable(String promptKey, Integer version) {
+        AiPromptVersion pv = promptVersionMapper.selectOne(
+                new LambdaQueryWrapper<AiPromptVersion>()
+                        .eq(AiPromptVersion::getPromptKey, promptKey)
+                        .eq(AiPromptVersion::getVersion, version));
+        if (pv != null) {
+            pv.setRolloutStatus("STABLE");
+            pv.setTrafficPercent(100);
+            pv.setEditTime(new Date());
+            promptVersionMapper.updateById(pv);
+            invalidateCache(promptKey);
+        }
+    }
+
+    public void rollback(String promptKey, Integer version) {
+        List<AiPromptVersion> all = promptVersionMapper.selectList(
+                new LambdaQueryWrapper<AiPromptVersion>()
+                        .eq(AiPromptVersion::getPromptKey, promptKey)
+                        .eq(AiPromptVersion::getStatus, 1));
+        AiPromptVersion target = all.stream()
+                .filter(pv -> pv.getVersion().equals(version))
+                .findFirst().orElse(null);
+        if (target != null) {
+            for (AiPromptVersion pv : all) {
+                pv.setActive(pv.getVersion().equals(version));
+                pv.setRolloutStatus(pv.getVersion().equals(version) ? "STABLE" : null);
+                pv.setTrafficPercent(pv.getVersion().equals(version) ? 100 : null);
+                pv.setEditTime(new Date());
+                promptVersionMapper.updateById(pv);
+            }
+            invalidateCache(promptKey);
+        }
     }
 }

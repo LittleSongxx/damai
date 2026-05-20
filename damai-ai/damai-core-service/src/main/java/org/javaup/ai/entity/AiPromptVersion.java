@@ -17,5 +17,7 @@ public class AiPromptVersion extends BaseTableData {
     private String template;
     private String description;
     private Boolean active;
+    private Integer trafficPercent;
+    private String rolloutStatus;
     private Long createdBy;
 }

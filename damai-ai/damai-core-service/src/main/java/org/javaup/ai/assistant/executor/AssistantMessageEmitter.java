@@ -52,7 +52,10 @@ public class AssistantMessageEmitter {
     private String consumeStream(Flux<String> tokenStream, java.util.function.Consumer<String> chunkConsumer) {
         StringBuilder fullAnswer = new StringBuilder();
         AtomicReference<Throwable> errorRef = new AtomicReference<>();
-        tokenStream.doOnNext(token -> {
+        tokenStream
+                .limitRate(100)
+                .onBackpressureBuffer(200)
+                .doOnNext(token -> {
             if (token != null && !token.isEmpty()) {
                 fullAnswer.append(token);
                 chunkConsumer.accept(token);

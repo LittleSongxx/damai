@@ -122,4 +122,65 @@ public class MultiChannelRetrievalEngine {
     private List<RagSourceVo> shrink(List<RagSourceVo> sources, int topK) {
         return RagFusionSupport.limit(sources, topK);
     }
+
+    public RagSearchResultVo retrieveSimple(SearchContext context) {
+        List<CompletableFuture<SearchChannel.SearchChannelResult>> futures = new ArrayList<>();
+        futures.add(denseChannel.search(context));
+        futures.add(sparseChannel.search(context));
+
+        List<SearchChannel.SearchChannelResult> results;
+        try {
+            results = futures.stream()
+                    .map(f -> {
+                        try { return f.get(25, TimeUnit.SECONDS); }
+                        catch (Exception e) {
+                            log.warn("Simple channel search failed: {}", e.getMessage());
+                            return SearchChannel.SearchChannelResult.empty("failed");
+                        }
+                    })
+                    .toList();
+        } catch (Exception e) {
+            log.error("Simple channel execution failed", e);
+            return RagSearchResultVo.builder()
+                    .originalQuery(context.getOriginalQuery())
+                    .normalizedQuery(context.getOriginalQuery())
+                    .rewrittenQuery(context.getRewrittenQuery())
+                    .documents(List.of()).sources(List.of()).build();
+        }
+
+        List<RagSourceVo> allDenseSources = new ArrayList<>();
+        List<RagSourceVo> allSparseSources = new ArrayList<>();
+        for (var result : results) {
+            var sources = result.sources();
+            if (sources == null) continue;
+            switch (result.channelName()) {
+                case "dense" -> allDenseSources.addAll(sources);
+                case "sparse" -> allSparseSources.addAll(sources);
+            }
+        }
+
+        List<RagSourceVo> fusedSources;
+        if (allDenseSources.isEmpty() && allSparseSources.isEmpty()) {
+            fusedSources = List.of();
+        } else if (allSparseSources.isEmpty()) {
+            fusedSources = shrink(allDenseSources, context.getTopK() * 2);
+        } else if (allDenseSources.isEmpty()) {
+            fusedSources = shrink(allSparseSources, context.getTopK() * 2);
+        } else {
+            fusedSources = RagFusionSupport.reciprocalRankFusion(allDenseSources, allSparseSources, context.getTopK() * 2);
+        }
+
+        List<RagSourceVo> finalSources = shrink(fusedSources, context.getTopK());
+
+        return RagSearchResultVo.builder()
+                .originalQuery(context.getOriginalQuery())
+                .normalizedQuery(context.getOriginalQuery())
+                .rewrittenQuery(context.getRewrittenQuery())
+                .denseSources(allDenseSources)
+                .sparseSources(allSparseSources)
+                .fusedSources(fusedSources)
+                .sources(finalSources)
+                .documents(List.of())
+                .build();
+    }
 }

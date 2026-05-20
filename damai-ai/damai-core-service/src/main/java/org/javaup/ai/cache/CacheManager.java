@@ -33,6 +33,7 @@ public class CacheManager {
     private static final String FAQ_SEARCH_PREFIX = "damai:cache:faq:";
     private static final String WEB_SEARCH_PREFIX = "damai:cache:web:";
     private static final String USER_CTX_PREFIX = "damai:cache:user:";
+    private static final String NL2SQL_RESULT_PREFIX = "damai:cache:nl2sql:";
 
     @Value("${spring.ai.openai.chat.options.model:unknown}")
     private String chatModel;
@@ -137,7 +138,21 @@ public class CacheManager {
     }
 
     public void invalidateFaqSearch() {
-        redisTemplate.delete(redisTemplate.keys(FAQ_SEARCH_PREFIX + "*"));
+        var connectionFactory = redisTemplate.getConnectionFactory();
+        if (connectionFactory == null) return;
+        try (var connection = connectionFactory.getConnection()) {
+            var cursor = connection.keyCommands().scan(
+                    org.springframework.data.redis.core.ScanOptions.scanOptions()
+                            .match(FAQ_SEARCH_PREFIX + "*")
+                            .count(100)
+                            .build());
+            while (cursor.hasNext()) {
+                byte[] key = cursor.next();
+                redisTemplate.delete(new String(key, java.nio.charset.StandardCharsets.UTF_8));
+            }
+        } catch (Exception e) {
+            log.warn("Failed to scan-invalidate FAQ cache: {}", e.getMessage());
+        }
         log.info("FAQ search cache invalidated");
     }
 
@@ -201,6 +216,24 @@ public class CacheManager {
 
     public void invalidateNl2sqlSchema(String datasourceKey) {
         nl2sqlSchemaCache.invalidate(datasourceKey);
+    }
+
+    // --- NL2SQL result cache (Redis) ---
+
+    public String getNl2sqlResult(String sql) {
+        if (!properties.getNl2sqlResult().isEnabled() || !StringUtils.hasText(sql)) return null;
+        String key = NL2SQL_RESULT_PREFIX + sha256(sql);
+        String result = (String) redisTemplate.opsForValue().get(key);
+        metrics.recordNl2sqlResult(result != null);
+        return result;
+    }
+
+    public void putNl2sqlResult(String sql, String jsonResult) {
+        if (properties.getNl2sqlResult().isEnabled() && StringUtils.hasText(sql) && StringUtils.hasText(jsonResult)) {
+            String key = NL2SQL_RESULT_PREFIX + sha256(sql);
+            redisTemplate.opsForValue().set(key, jsonResult,
+                    Duration.ofMinutes(properties.getNl2sqlResult().getTtlMinutes()));
+        }
     }
 
     // --- stats ---

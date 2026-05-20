@@ -1,7 +1,9 @@
 package org.javaup.ai.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.javaup.ai.config.AiSecurityProperties;
 import org.javaup.ai.config.LlmFallbackProperties;
+import org.javaup.ai.context.AiRequestContextHolder;
 import org.javaup.ai.metrics.BusinessMetrics;
 import org.javaup.ai.resilience.CircuitBreakerService;
 import org.springframework.ai.chat.client.ChatClient;
@@ -21,20 +23,29 @@ public class ResilientChatService {
     private final LlmFallbackProperties properties;
     private final CircuitBreakerService circuitBreakerService;
     private final BusinessMetrics businessMetrics;
+    private final AiObservabilityService observabilityService;
+    private final AiSecurityProperties securityProperties;
 
     public ResilientChatService(@Qualifier("unifiedChatClient") ChatClient primaryClient,
                                 @Qualifier("fallbackChatClient") ChatClient fallbackClient,
                                 LlmFallbackProperties properties,
                                 CircuitBreakerService circuitBreakerService,
-                                BusinessMetrics businessMetrics) {
+                                BusinessMetrics businessMetrics,
+                                AiObservabilityService observabilityService,
+                                AiSecurityProperties securityProperties) {
         this.primaryClient = primaryClient;
         this.fallbackClient = fallbackClient;
         this.properties = properties;
         this.circuitBreakerService = circuitBreakerService;
         this.businessMetrics = businessMetrics;
+        this.observabilityService = observabilityService;
+        this.securityProperties = securityProperties;
     }
 
     public String call(String userPrompt) {
+        if (isBudgetExhausted()) {
+            return "您今日的AI调用额度已用完，请明日再试或联系管理员提升额度。";
+        }
         return circuitBreakerService.executeLlm(() -> {
             try {
                 ChatResponse response = primaryClient.prompt()
@@ -62,6 +73,9 @@ public class ResilientChatService {
     }
 
     public Flux<String> stream(String userPrompt) {
+        if (isBudgetExhausted()) {
+            return Flux.just("您今日的AI调用额度已用完，请明日再试或联系管理员提升额度。");
+        }
         return primaryClient.prompt()
                 .user(userPrompt)
                 .stream()
@@ -74,6 +88,17 @@ public class ResilientChatService {
                             .stream()
                             .content();
                 });
+    }
+
+    private boolean isBudgetExhausted() {
+        long budget = securityProperties.getDailyTokenBudget();
+        if (budget <= 0) return false;
+        try {
+            Long userId = AiRequestContextHolder.getRequiredUser().getUserId();
+            return observabilityService.isDailyBudgetExceeded(userId, budget);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private String callFallback(String userPrompt) {

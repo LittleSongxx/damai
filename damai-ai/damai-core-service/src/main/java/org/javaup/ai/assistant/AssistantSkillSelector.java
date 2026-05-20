@@ -3,6 +3,7 @@ package org.javaup.ai.assistant;
 import org.javaup.ai.context.AiUserContext;
 import org.javaup.ai.dto.AssistantRunCreateRequest;
 import org.javaup.ai.security.AiPermissionService;
+import org.javaup.ai.service.LlmSkillSelectorService;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -18,25 +19,17 @@ public class AssistantSkillSelector {
     private final AssistantSkillRegistry skillRegistry;
     private final AiPermissionService aiPermissionService;
     private final AssistantSkillDefinitionService skillDefinitionService;
-
-    public AssistantSkillSelector(AssistantSkillRegistry skillRegistry, AiPermissionService aiPermissionService) {
-        this(skillRegistry, aiPermissionService, (AssistantSkillDefinitionService) null);
-    }
+    private final LlmSkillSelectorService llmSkillSelectorService;
 
     @Autowired
     public AssistantSkillSelector(AssistantSkillRegistry skillRegistry,
                                   AiPermissionService aiPermissionService,
-                                  ObjectProvider<AssistantSkillDefinitionService> skillDefinitionServiceProvider) {
-        this(skillRegistry, aiPermissionService,
-                skillDefinitionServiceProvider == null ? null : skillDefinitionServiceProvider.getIfAvailable());
-    }
-
-    private AssistantSkillSelector(AssistantSkillRegistry skillRegistry,
-                                   AiPermissionService aiPermissionService,
-                                   AssistantSkillDefinitionService skillDefinitionService) {
+                                  ObjectProvider<AssistantSkillDefinitionService> skillDefinitionServiceProvider,
+                                  ObjectProvider<LlmSkillSelectorService> llmSkillSelectorServiceProvider) {
         this.skillRegistry = skillRegistry;
         this.aiPermissionService = aiPermissionService;
-        this.skillDefinitionService = skillDefinitionService;
+        this.skillDefinitionService = skillDefinitionServiceProvider.getIfAvailable();
+        this.llmSkillSelectorService = llmSkillSelectorServiceProvider.getIfAvailable();
     }
 
     public AssistantSkillDecision select(AssistantRouteType routeType, AiUserContext user, AssistantRunCreateRequest request) {
@@ -65,15 +58,42 @@ public class AssistantSkillSelector {
         if (candidates.isEmpty()) {
             return decision(null, null, "skill:no_available_candidate", 0.0, false);
         }
-        AssistantSkillDescriptor matched = candidates.stream()
-                .map(descriptor -> new ScoredSkill(descriptor, score(message, descriptor)))
-                .max(Comparator.comparingInt(ScoredSkill::score)
-                        .thenComparing(scored -> scored.descriptor().primarySkill() ? 1 : 0))
-                .filter(scored -> scored.score() > 0)
-                .map(ScoredSkill::descriptor)
-                .orElseGet(() -> primaryOrFirst(candidates));
-        double confidence = score(message, matched) > 0 ? 0.82 : 0.55;
-        String reason = score(message, matched) > 0 ? "skill_candidate:" + matched.getSkillId() : "skill_primary:" + matched.getSkillId();
+        int bestKeywordScore = candidates.stream()
+                .mapToInt(descriptor -> score(message, descriptor))
+                .max().orElse(0);
+
+        AssistantSkillDescriptor matched;
+        double confidence;
+        String reason;
+
+        if (bestKeywordScore > 0) {
+            matched = candidates.stream()
+                    .map(descriptor -> new ScoredSkill(descriptor, score(message, descriptor)))
+                    .max(Comparator.comparingInt(ScoredSkill::score)
+                            .thenComparing(scored -> scored.descriptor().primarySkill() ? 1 : 0))
+                    .map(ScoredSkill::descriptor)
+                    .orElseGet(() -> primaryOrFirst(candidates));
+            confidence = 0.82;
+            reason = "skill_candidate:" + matched.getSkillId();
+        } else if (llmSkillSelectorService != null && candidates.size() > 1) {
+            String llmSelectedId = llmSkillSelectorService.selectSkillId(message, candidates);
+            if (llmSelectedId != null) {
+                matched = candidates.stream()
+                        .filter(c -> c.getSkillId().equals(llmSelectedId))
+                        .findFirst()
+                        .orElseGet(() -> primaryOrFirst(candidates));
+                confidence = 0.70;
+                reason = "skill_llm:" + matched.getSkillId();
+            } else {
+                matched = primaryOrFirst(candidates);
+                confidence = 0.55;
+                reason = "skill_primary:" + matched.getSkillId();
+            }
+        } else {
+            matched = primaryOrFirst(candidates);
+            confidence = 0.55;
+            reason = "skill_primary:" + matched.getSkillId();
+        }
         return decision(matched.getSkillId(), matched, reason, confidence, false);
     }
 

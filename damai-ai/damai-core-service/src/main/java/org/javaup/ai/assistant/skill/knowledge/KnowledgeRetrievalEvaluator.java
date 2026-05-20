@@ -54,6 +54,7 @@ public class KnowledgeRetrievalEvaluator {
         boolean hasContradictions;
         String answerabilityLevel;
         String missingInfo;
+        List<String> verifiedClaims = List.of();
 
         if (heuristicScore >= 0.72 && deduped.size() >= 4) {
             // Fast path: trust heuristic for high-confidence results
@@ -62,6 +63,7 @@ public class KnowledgeRetrievalEvaluator {
             hasContradictions = false;
             answerabilityLevel = "ANSWERABLE";
             missingInfo = "";
+            verifiedClaims = extractClaimAnchors(plan.normalizedQuery(), deduped);
         } else if (deduped.isEmpty()) {
             relevanceLevel = "LOW";
             coverageLevel = "LOW";
@@ -85,6 +87,9 @@ public class KnowledgeRetrievalEvaluator {
             hasContradictions = detectContradictions(topDocs);
             missingInfo = getMissingInfo(plan.normalizedQuery(), topDocs);
             answerabilityLevel = computeAnswerability(relevanceLevel, coverageLevel, hasContradictions);
+            if ("ANSWERABLE".equals(answerabilityLevel)) {
+                verifiedClaims = extractClaimAnchors(plan.normalizedQuery(), deduped);
+            }
         }
 
         // Phase 3: CRAG three-way classification
@@ -99,7 +104,44 @@ public class KnowledgeRetrievalEvaluator {
 
         return new KnowledgeRetrievalAssessment(heuristicScore, level, correctiveAction,
                 RagFusionSupport.evidenceBudget(deduped, plan.evidenceSourceLimit(), plan.evidenceSnippetLimit()),
-                relevanceLevel, coverageLevel, hasContradictions, answerabilityLevel, missingInfo);
+                relevanceLevel, coverageLevel, hasContradictions, answerabilityLevel, missingInfo,
+                verifiedClaims);
+    }
+
+    /**
+     * Extract claim anchors: key factual statements that the evidence supports.
+     * These serve as confidence markers for answer generation.
+     */
+    private List<String> extractClaimAnchors(String query, List<RagSourceVo> sources) {
+        if (sources == null || sources.isEmpty()) return List.of();
+        try {
+            String evidenceBlock = sources.stream()
+                    .limit(4)
+                    .map(s -> "- " + limit(s.getSnippet(), 200))
+                    .collect(Collectors.joining("\n"));
+            String prompt = String.format("""
+                    根据以下检索到的证据，提取2-5个可以确认的关键事实声明。
+                    每个声明一行，以"✓ "开头。只提取证据明确支持的声明，不要推断。
+                    如果证据不足，输出空。
+
+                    查询：%s
+
+                    证据：%s
+
+                    关键事实声明：
+                    """, query, evidenceBlock);
+            String raw = chatClient.prompt().user(prompt).call().content();
+            if (raw == null || raw.isBlank()) return List.of();
+            return raw.lines()
+                    .map(String::trim)
+                    .filter(line -> line.startsWith("✓"))
+                    .map(line -> line.substring(1).trim())
+                    .filter(line -> !line.isEmpty())
+                    .limit(5)
+                    .toList();
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     private String assessSemanticRelevance(String query, List<RagSourceVo> sources) {

@@ -17,6 +17,8 @@ public class CacheMetrics {
     private final Counter userContextMiss;
     private final Counter nl2sqlSchemaHit;
     private final Counter nl2sqlSchemaMiss;
+    private final Counter nl2sqlResultHit;
+    private final Counter nl2sqlResultMiss;
 
     public CacheMetrics(MeterRegistry registry) {
         this.embeddingHit = Counter.builder("damai.cache.embedding.hit")
@@ -39,6 +41,10 @@ public class CacheMetrics {
                 .description("NL2SQL schema cache hits").register(registry);
         this.nl2sqlSchemaMiss = Counter.builder("damai.cache.nl2sql_schema.miss")
                 .description("NL2SQL schema cache misses").register(registry);
+        this.nl2sqlResultHit = Counter.builder("damai.cache.nl2sql_result.hit")
+                .description("NL2SQL result cache hits").register(registry);
+        this.nl2sqlResultMiss = Counter.builder("damai.cache.nl2sql_result.miss")
+                .description("NL2SQL result cache misses").register(registry);
     }
 
     public void recordEmbedding(boolean hit) { if (hit) embeddingHit.increment(); else embeddingMiss.increment(); }
@@ -46,4 +52,5 @@ public class CacheMetrics {
     public void recordWebSearch(boolean hit) { if (hit) webSearchHit.increment(); else webSearchMiss.increment(); }
     public void recordUserContext(boolean hit) { if (hit) userContextHit.increment(); else userContextMiss.increment(); }
     public void recordNl2sqlSchema(boolean hit) { if (hit) nl2sqlSchemaHit.increment(); else nl2sqlSchemaMiss.increment(); }
+    public void recordNl2sqlResult(boolean hit) { if (hit) nl2sqlResultHit.increment(); else nl2sqlResultMiss.increment(); }
 }

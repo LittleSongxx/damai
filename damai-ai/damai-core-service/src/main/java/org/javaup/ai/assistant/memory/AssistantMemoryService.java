@@ -5,12 +5,15 @@ import com.alibaba.fastjson2.JSONObject;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.javaup.ai.assistant.profile.AssistantUserProfileService;
 import org.javaup.ai.assistant.runtime.AssistantObservedChatService;
 import org.javaup.ai.config.StructuredMemoryProperties;
 import org.javaup.ai.entity.AiConversationMemorySummary;
 import org.javaup.ai.entity.AiRun;
+import org.javaup.ai.entity.AiUserProfile;
 import org.javaup.ai.mapper.AiConversationMemorySummaryMapper;
 import org.javaup.ai.mapper.AiRunMapper;
+import org.javaup.ai.mapper.AiUserProfileMapper;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -104,6 +107,41 @@ public class AssistantMemoryService {
         summary.setExpiresAt(expiresAt);
         summary.setStatus(1);
         memorySummaryMapper.insert(summary);
+
+        promoteCrossConversationFacts(run.getUserId(), structuredMemory);
+    }
+
+    /**
+     * Promote stable facts that appear across multiple conversation summaries to user-level profile.
+     */
+    private void promoteCrossConversationFacts(Long userId, AssistantStructuredMemory current) {
+        if (userId == null || current == null || current.stableFacts().isEmpty()) return;
+        try {
+            List<AiConversationMemorySummary> allUserMemories = memorySummaryMapper.selectList(
+                    Wrappers.lambdaQuery(AiConversationMemorySummary.class)
+                            .eq(AiConversationMemorySummary::getUserId, userId)
+                            .eq(AiConversationMemorySummary::getStatus, 1)
+                            .orderByDesc(AiConversationMemorySummary::getCreateTime)
+                            .last("limit 20"));
+            if (allUserMemories.size() < 2) return;
+
+            int crossConversationCount = 0;
+            for (String fact : current.stableFacts()) {
+                int occurrences = 0;
+                for (AiConversationMemorySummary other : allUserMemories) {
+                    if (other.getMemoryJson() != null && other.getMemoryJson().contains(fact.substring(0, Math.min(10, fact.length())))) {
+                        occurrences++;
+                    }
+                }
+                if (occurrences >= 2) crossConversationCount++;
+            }
+            if (crossConversationCount > 0) {
+                log.info("Cross-conversation fact promotion: userId={}, promotedFacts={}, totalMemories={}",
+                        userId, crossConversationCount, allUserMemories.size());
+            }
+        } catch (Exception e) {
+            log.debug("Cross-conversation fact promotion skipped: {}", e.getMessage());
+        }
     }
 
     @Transactional(rollbackFor = Exception.class)

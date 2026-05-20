@@ -3,8 +3,9 @@ package org.javaup.ai.assistant.skill.knowledge;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.assistant.runtime.AssistantStageTraceService;
+import org.javaup.ai.rag.channel.SearchContext;
+import org.javaup.ai.rag.engine.MultiChannelRetrievalEngine;
 import org.javaup.ai.service.AdvancedQueryService;
-import org.javaup.ai.service.HybridSearchService;
 import org.javaup.ai.vo.RagSearchResultVo;
 import org.javaup.ai.vo.RagSourceVo;
 import org.springframework.ai.document.Document;
@@ -30,7 +31,7 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class KnowledgeRetrievalOrchestrator {
 
-    private final HybridSearchService hybridSearchService;
+    private final MultiChannelRetrievalEngine retrievalEngine;
     private final StructuredRuleSupportService structuredRuleSupportService;
     private final KnowledgeRetrievalPlanner retrievalPlanner;
     private final KnowledgeRetrievalEvaluator retrievalEvaluator;
@@ -44,6 +45,39 @@ public class KnowledgeRetrievalOrchestrator {
     }
 
     public KnowledgeRetrievalContext retrieve(KnowledgeRetrievalPlan plan) {
+        if (plan.complexity() == KnowledgeRetrievalPlan.Complexity.SIMPLE) {
+            return retrieveSimple(plan);
+        }
+        return retrieveFull(plan);
+    }
+
+    private KnowledgeRetrievalContext retrieveSimple(KnowledgeRetrievalPlan plan) {
+        RagSearchResultVo result = engineRetrieveSimple(plan.normalizedQuery(), plan.topK());
+        var supportBundle = structuredRuleSupportService.lookup(plan.normalizedQuery());
+        List<RagSourceVo> merged = new ArrayList<>();
+        if (result.getSources() != null) merged.addAll(result.getSources());
+        if (supportBundle.sources() != null) merged.addAll(supportBundle.sources());
+        var deduped = dedup(merged);
+        List<Document> answerDocs = selectAnswerDocuments(
+                result.getDocuments(), supportBundle.documents(), deduped);
+        KnowledgeRetrievalAssessment assessment = new KnowledgeRetrievalAssessment(
+                0.75, "CORRECT", "simple", deduped,
+                "HIGH", "HIGH", false, "ANSWERABLE", "", List.of());
+        return new KnowledgeRetrievalContext(plan, result, supportBundle, assessment, answerDocs);
+    }
+
+    private RagSearchResultVo engineRetrieveSimple(String query, int topK) {
+        SearchContext ctx = SearchContext.builder()
+                .originalQuery(query)
+                .rewrittenQuery(query)
+                .queryVariants(List.of(query))
+                .topK(topK)
+                .enableRerank(false)
+                .build();
+        return retrievalEngine.retrieveSimple(ctx);
+    }
+
+    private KnowledgeRetrievalContext retrieveFull(KnowledgeRetrievalPlan plan) {
         var firstPassSpan = stageTraceService.startStage(
                 "KNOWLEDGE_RETRIEVAL_FIRST_PASS",
                 "KnowledgeRetrieval",
@@ -53,7 +87,7 @@ public class KnowledgeRetrievalOrchestrator {
                         "subQuestions", plan.subQuestions()));
         RagSearchResultVo firstPass;
         try {
-            firstPass = hybridSearchService.hybridSearchWithHyde(plan.normalizedQuery(), plan.topK(), plan.enableRerank());
+            firstPass = engineRetrieve(plan.normalizedQuery(), plan.topK(), plan.enableRerank());
             stageTraceService.complete(firstPassSpan, firstPass.getRewrittenQuery(), null, null, null, null, Map.of(
                     "denseHitCount", size(firstPass.getDenseSources()),
                     "sparseHitCount", size(firstPass.getSparseSources()),
@@ -77,8 +111,7 @@ public class KnowledgeRetrievalOrchestrator {
             List<Document> allSubDocuments = new ArrayList<>(firstPass.getDocuments());
             for (String subQ : plan.subQuestions()) {
                 if (subQ.equals(plan.normalizedQuery())) continue;
-                RagSearchResultVo subResult = hybridSearchService.hybridSearchWithHyde(
-                        subQ, Math.max(4, plan.topK() / 2), plan.enableRerank());
+                var subResult = engineRetrieve(subQ, Math.max(4, plan.topK() / 2), plan.enableRerank());
                 retrievalTraceService.saveStageTrace("stage", "knowledge.retrieval.sub_question_first_pass",
                         firstPass.getRetrievalTraceId(), subQ, subResult.getRewrittenQuery(),
                         subResult.getDenseSources(), subResult.getSparseSources(),
@@ -87,7 +120,7 @@ public class KnowledgeRetrievalOrchestrator {
                 mergeSources(allSubSources, subResult.getSources());
                 mergeDocuments(allSubDocuments, subResult.getDocuments());
             }
-            firstPass = RagSearchResultVo.builder()
+            RagSearchResultVo mergedPass = RagSearchResultVo.builder()
                     .originalQuery(firstPass.getOriginalQuery())
                     .normalizedQuery(firstPass.getNormalizedQuery())
                     .rewrittenQuery(firstPass.getRewrittenQuery())
@@ -98,6 +131,7 @@ public class KnowledgeRetrievalOrchestrator {
                     .sources(dedup(allSubSources))
                     .documents(dedupDocuments(allSubDocuments))
                     .build();
+            firstPass = mergedPass;
         }
 
         var supportBundle = structuredRuleSupportService.lookup(plan.normalizedQuery());
@@ -157,7 +191,7 @@ public class KnowledgeRetrievalOrchestrator {
         List<Document> allDocuments = new ArrayList<>();
 
         try {
-            RagSearchResultVo expanded = hybridSearchService.hybridSearchWithHyde(
+            RagSearchResultVo expanded = engineRetrieve(
                     plan.normalizedQuery(), expandedTopK, plan.enableRerank());
             mergeSources(allSources, expanded.getSources());
             mergeDocuments(allDocuments, expanded.getDocuments());
@@ -166,7 +200,7 @@ public class KnowledgeRetrievalOrchestrator {
                 List<String> subQuestions = advancedQueryService.decomposeSubQuestions(plan.normalizedQuery());
                 if (subQuestions.size() > 1) {
                     for (String subQ : subQuestions) {
-                        RagSearchResultVo subResult = hybridSearchService.hybridSearchWithHyde(
+                        RagSearchResultVo subResult = engineRetrieve(
                                 subQ, Math.max(4, expandedTopK / 2), plan.enableRerank());
                         mergeSources(allSources, subResult.getSources());
                         mergeDocuments(allDocuments, subResult.getDocuments());
@@ -211,7 +245,7 @@ public class KnowledgeRetrievalOrchestrator {
         List<Document> allDocuments = new ArrayList<>();
 
         try {
-            RagSearchResultVo corrected = hybridSearchService.hybridSearchWithHyde(
+            RagSearchResultVo corrected = engineRetrieve(
                     reformulatedQuery, plan.topK() * 2, plan.enableRerank());
             mergeSources(allSources, corrected.getSources());
             mergeDocuments(allDocuments, corrected.getDocuments());
@@ -220,7 +254,7 @@ public class KnowledgeRetrievalOrchestrator {
                 List<String> subQuestions = advancedQueryService.decomposeSubQuestions(reformulatedQuery);
                 for (String subQ : subQuestions) {
                     if (subQ.equals(reformulatedQuery)) continue;
-                    RagSearchResultVo subResult = hybridSearchService.hybridSearchWithHyde(
+                    RagSearchResultVo subResult = engineRetrieve(
                             subQ, Math.max(4, plan.topK()), plan.enableRerank());
                     mergeSources(allSources, subResult.getSources());
                     mergeDocuments(allDocuments, subResult.getDocuments());
@@ -389,6 +423,18 @@ public class KnowledgeRetrievalOrchestrator {
     private String chunkId(Document document) {
         Object value = document.getMetadata().get("chunkId");
         return value == null ? null : String.valueOf(value);
+    }
+
+    private RagSearchResultVo engineRetrieve(String query, int topK, boolean enableRerank) {
+        AdvancedQueryService.QueryRewriteResult rewrite = advancedQueryService.rewriteQuery(query);
+        SearchContext ctx = SearchContext.builder()
+                .originalQuery(query)
+                .rewrittenQuery(rewrite.primaryQuery())
+                .queryVariants(rewrite.allQueries())
+                .topK(topK)
+                .enableRerank(enableRerank)
+                .build();
+        return retrievalEngine.retrieve(ctx);
     }
 
     private record CragCorrectionResult(RagSearchResultVo result, String action) {}

@@ -10,4 +10,5 @@ import org.springframework.stereotype.Component;
 public class AiSecurityProperties {
 
     private String adminUserIds = "";
+    private long dailyTokenBudget = 0;
 }

@@ -279,6 +279,23 @@ public class AiObservabilityService {
                 .toList();
     }
     
+    /**
+     * 检查用户是否超出每日 Token 预算。0 或负数表示不限制。
+     */
+    public boolean isDailyBudgetExceeded(Long userId, long budget) {
+        if (budget <= 0) return false;
+        Date todayStart = getTodayStart();
+        Long totalTokens = aiTraceMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AiTrace>()
+                        .eq(AiTrace::getUserId, userId)
+                        .eq(AiTrace::getStatus, 1)
+                        .ge(AiTrace::getCreateTime, todayStart))
+                .stream()
+                .mapToLong(t -> t.getTotalTokens() != null ? t.getTotalTokens() : 0)
+                .sum();
+        return totalTokens >= budget;
+    }
+
     private Date getTodayStart() {
         Calendar calendar = Calendar.getInstance();
         calendar.set(Calendar.HOUR_OF_DAY, 0);

@@ -13,6 +13,16 @@ public record KnowledgeRetrievalAssessment(
         String coverageLevel,
         boolean hasContradictions,
         String answerabilityLevel,
-        String missingInfo
+        String missingInfo,
+        List<String> verifiedClaims
 ) {
+    public KnowledgeRetrievalAssessment(Double confidenceScore, String confidenceLevel,
+                                         String correctiveAction, List<RagSourceVo> sources,
+                                         String relevanceLevel, String coverageLevel,
+                                         boolean hasContradictions, String answerabilityLevel,
+                                         String missingInfo) {
+        this(confidenceScore, confidenceLevel, correctiveAction, sources,
+                relevanceLevel, coverageLevel, hasContradictions, answerabilityLevel,
+                missingInfo, List.of());
+    }
 }
