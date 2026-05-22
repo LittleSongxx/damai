@@ -12,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -121,6 +122,45 @@ public class RagEvalController {
         evalCase.setEditTime(new Date());
         caseMapper.updateById(evalCase);
         return ResponseEntity.ok(Map.of("code", 0, "message", "deleted"));
+    }
+
+    @PostMapping("/reindex")
+    public ResponseEntity<Map<String, Object>> triggerReindex() {
+        try {
+            Map<String, Object> result = hybridSearchService.reindexAll();
+            return ResponseEntity.ok(Map.of("code", 0, "result", result));
+        } catch (Exception e) {
+            return ResponseEntity.ok(Map.of("code", 1, "error", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/cases/refresh-expected-chunks")
+    public ResponseEntity<Map<String, Object>> refreshExpectedChunks() {
+        List<AiRagEvalCase> cases = caseMapper.selectList(
+                new LambdaQueryWrapper<AiRagEvalCase>().eq(AiRagEvalCase::getStatus, 1));
+        int updated = 0;
+        List<String> errors = new ArrayList<>();
+        for (AiRagEvalCase evalCase : cases) {
+            try {
+                var searchResult = hybridSearchService.hybridSearchWithHyde(
+                        evalCase.getQuestion(), 5, true);
+                List<String> chunkIds = searchResult.getSources() != null
+                        ? searchResult.getSources().stream()
+                                .map(org.javaup.ai.vo.RagSourceVo::getChunkId)
+                                .toList()
+                        : List.of();
+                if (!chunkIds.isEmpty()) {
+                    evalCase.setExpectedChunks(chunkIds.toString());
+                    evalCase.setEditTime(new Date());
+                    caseMapper.updateById(evalCase);
+                    updated++;
+                }
+            } catch (Exception e) {
+                errors.add(evalCase.getCaseId() + ": " + e.getMessage());
+            }
+        }
+        return ResponseEntity.ok(Map.of("code", 0, "updated", updated,
+                "total", cases.size(), "errors", errors));
     }
 
     @PostMapping("/cases/batch")

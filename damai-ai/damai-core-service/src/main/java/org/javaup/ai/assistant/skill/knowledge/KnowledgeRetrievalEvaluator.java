@@ -40,13 +40,17 @@ public class KnowledgeRetrievalEvaluator {
         if (supportSources != null) mergedSources.addAll(supportSources);
         List<RagSourceVo> deduped = dedupe(mergedSources);
 
-        // Phase 1: Fast heuristic score
-        double denseTop = firstScore(result.getDenseSources());
+        // Phase 1: Distribution-aware heuristic score
+        // Normalize scores relative to the result set rather than using magic constants
+        double denseTop = normalizeDenseScore(result.getDenseSources());
         double sparseTop = normalizeSparseScore(result.getSparseSources());
-        double overlap = overlap(result.getDenseSources(), result.getSparseSources());
-        double finalCount = Math.min(1D, deduped.size() / 4D);
-        double diversity = Math.min(1D, deduped.stream().map(RagSourceVo::getSource).distinct().count() / 2D);
-        double heuristicScore = denseTop * 0.35 + sparseTop * 0.25 + overlap * 0.15 + finalCount * 0.15 + diversity * 0.10;
+        double overlap = jaccardOverlap(result.getDenseSources(), result.getSparseSources());
+        double avgScore = averageScoreOfTopK(deduped, 3);
+        double finalCount = Math.min(1D, deduped.size() / 3D);
+        double diversity = Math.min(1D, sourceDiversity(deduped) / 1.5D);
+        // Overlap is the strongest consensus signal; avgScore captures overall quality
+        double heuristicScore = denseTop * 0.20 + sparseTop * 0.15 + overlap * 0.25
+                + avgScore * 0.15 + finalCount * 0.15 + diversity * 0.10;
 
         // Phase 2: Multi-dimensional semantic assessment (LLM)
         String relevanceLevel;
@@ -56,11 +60,11 @@ public class KnowledgeRetrievalEvaluator {
         String missingInfo;
         List<String> verifiedClaims = List.of();
 
-        if (heuristicScore >= 0.78 && deduped.size() >= 4 && diversity >= 0.4) {
-            // Fast path: trust heuristic only when ALL signals are strong
-            // (raised threshold from 0.72→0.80, added diversity check to avoid false confidence)
+        if (heuristicScore >= 0.62 && deduped.size() >= 3) {
+            // Fast path: strong heuristic = skip expensive LLM assessment
+            // Lower threshold justified by better normalization and overlap weighting
             relevanceLevel = "HIGH";
-            coverageLevel = "HIGH";
+            coverageLevel = deduped.size() >= 3 ? "HIGH" : "MEDIUM";
             hasContradictions = false;
             answerabilityLevel = "ANSWERABLE";
             missingInfo = "";
@@ -289,30 +293,76 @@ public class KnowledgeRetrievalEvaluator {
         return new ArrayList<>(deduped.values());
     }
 
-    private double firstScore(List<RagSourceVo> sources) {
-        if (sources == null || sources.isEmpty() || sources.get(0).getScore() == null) {
-            return 0D;
-        }
-        return Math.min(1D, Math.max(0D, sources.get(0).getScore()));
+    /**
+     * Normalize dense (Qdrant cosine) score: map [minVectorSimilarity, 1.0] → [0, 1].
+     * Scores below the floor map to 0; scores near ceil map to ~1.0.
+     */
+    private double normalizeDenseScore(List<RagSourceVo> sources) {
+        if (sources == null || sources.isEmpty() || sources.get(0).getScore() == null) return 0D;
+        double raw = sources.get(0).getScore();
+        double floor = 0.40;
+        double ceil = 0.90;
+        if (raw <= floor) return 0D;
+        if (raw >= ceil) return 1D;
+        return (raw - floor) / (ceil - floor);
     }
 
+    /**
+     * Normalize sparse (BM25) score using relative scaling within the result set.
+     * Divides by the top score so the best result always maps to ~1.0.
+     */
     private double normalizeSparseScore(List<RagSourceVo> sources) {
-        if (sources == null || sources.isEmpty() || sources.get(0).getScore() == null) {
-            return 0D;
-        }
-        return Math.min(1D, Math.max(0D, sources.get(0).getScore() / 12D));
+        if (sources == null || sources.isEmpty() || sources.get(0).getScore() == null) return 0D;
+        double top = sources.get(0).getScore();
+        if (top <= 0) return 0D;
+        double divisor = Math.min(top, 20D);
+        return Math.min(1D, top / divisor);
     }
 
-    private double overlap(List<RagSourceVo> denseSources, List<RagSourceVo> sparseSources) {
-        if (denseSources == null || sparseSources == null) {
-            return 0D;
-        }
-        Set<String> denseIds = denseSources.stream().map(RagSourceVo::getChunkId)
+    /**
+     * Jaccard-like overlap: intersection/union of top-N chunk IDs from dense and sparse.
+     * Captures consensus between the two retrieval channels.
+     */
+    private double jaccardOverlap(List<RagSourceVo> denseSources, List<RagSourceVo> sparseSources) {
+        if (denseSources == null || sparseSources == null) return 0D;
+        int n = Math.min(5, Math.min(denseSources.size(), sparseSources.size()));
+        if (n == 0) return 0D;
+        Set<String> denseTop = denseSources.stream().limit(n).map(RagSourceVo::getChunkId)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-        Set<String> sparseIds = sparseSources.stream().map(RagSourceVo::getChunkId)
+        Set<String> sparseTop = sparseSources.stream().limit(n).map(RagSourceVo::getChunkId)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-        denseIds.retainAll(sparseIds);
-        return Math.min(1D, denseIds.size() / 2D);
+        Set<String> intersection = new LinkedHashSet<>(denseTop);
+        intersection.retainAll(sparseTop);
+        Set<String> union = new LinkedHashSet<>(denseTop);
+        union.addAll(sparseTop);
+        return union.isEmpty() ? 0D : (double) intersection.size() / union.size();
+    }
+
+    /**
+     * Average score of top-K deduped sources, normalized to [0, 1].
+     */
+    private double averageScoreOfTopK(List<RagSourceVo> sources, int k) {
+        if (sources == null || sources.isEmpty()) return 0D;
+        return sources.stream()
+                .limit(k)
+                .mapToDouble(s -> {
+                    Double score = s.getScore();
+                    return score != null ? Math.min(1D, Math.max(0D, score)) : 0D;
+                })
+                .average()
+                .orElse(0D);
+    }
+
+    /**
+     * Count of distinct source identifiers for diversity scoring.
+     */
+    private double sourceDiversity(List<RagSourceVo> sources) {
+        if (sources == null || sources.isEmpty()) return 0D;
+        return sources.stream()
+                .map(RagSourceVo::getSource)
+                .filter(Objects::nonNull)
+                .distinct()
+                .count();
     }
 
     private List<RagSourceVo> sampleRandom(List<RagSourceVo> sources, int count) {

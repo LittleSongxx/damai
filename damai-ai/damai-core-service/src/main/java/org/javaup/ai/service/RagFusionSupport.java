@@ -44,9 +44,9 @@ public final class RagFusionSupport {
         double sparseWeight = 0.5;
         if (queryType != null) {
             switch (queryType) {
-                case SEMANTIC -> { denseWeight = 0.7; sparseWeight = 0.3; }
-                case KEYWORD  -> { denseWeight = 0.3; sparseWeight = 0.7; }
-                default       -> { denseWeight = 0.5; sparseWeight = 0.5; }
+                case SEMANTIC -> { denseWeight = 0.65; sparseWeight = 0.35; }
+                case KEYWORD  -> { denseWeight = 0.30; sparseWeight = 0.70; }
+                default       -> { denseWeight = 0.45; sparseWeight = 0.55; }
             }
         }
         Map<String, Double> scores = new HashMap<>();

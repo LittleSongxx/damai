@@ -96,7 +96,7 @@ public class PostRetrievalFilterService {
         String prompt = String.format("""
                 你是检索质量优化专家。对每个文档，同时完成两项任务：
                 1. 判断其与用户问题的相关度 (0.0-1.0)
-                2. 从相关文档中提取与问题直接相关的关键句子（去除无关内容）
+                2. 从相关文档中提取关键内容（去除明显无关的段落，保留完整性）
 
                 【用户问题】%s
 
@@ -105,15 +105,16 @@ public class PostRetrievalFilterService {
 
                 请输出（不要Markdown包裹）：
                 [DOC_0] RELEVANT|0.85
-                提取的关键内容（保留原文措辞，只保留与问题相关的句子）
+                提取的关键内容（保留原文完整段落结构，仅删除明显不相关的客套话和格式化内容）
                 [DOC_1] IRRELEVANT
                 [DOC_2] RELEVANT|0.72
                 提取的关键内容...
 
                 规则：
-                - 分数>=0.4标记为RELEVANT并提取关键内容，否则标记IRRELEVANT
+                - 分数>=0.35标记为RELEVANT并提取关键内容，否则标记IRRELEVANT
                 - IRRELEVANT的文档不需要提取内容
-                - 保持原文措辞，不要改写
+                - 保持原文措辞和段落结构，不要改写、不要过度压缩
+                - 如果文档整体都与问题相关，保留完整原文
                 - 每个文档的处理结果用 [DOC_N] 开头""", query, docsBlock.toString());
 
         String raw = judgeClient.prompt().user(prompt).call().content();

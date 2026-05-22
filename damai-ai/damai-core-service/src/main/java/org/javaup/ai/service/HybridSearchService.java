@@ -711,16 +711,34 @@ public class HybridSearchService {
 
     private double jaccardSimilarity(String a, String b) {
         if (a.equals(b)) return 1.0;
-        java.util.Set<String> setA = new java.util.HashSet<>();
-        java.util.Set<String> setB = new java.util.HashSet<>();
-        for (String w : a.split("\\s+")) { if (w.length() > 1) setA.add(w); }
-        for (String w : b.split("\\s+")) { if (w.length() > 1) setB.add(w); }
+        java.util.Set<String> setA = tokenizeForDedup(a);
+        java.util.Set<String> setB = tokenizeForDedup(b);
         if (setA.isEmpty() && setB.isEmpty()) return 0;
         java.util.Set<String> union = new java.util.HashSet<>(setA);
         union.addAll(setB);
         java.util.Set<String> intersection = new java.util.HashSet<>(setA);
         intersection.retainAll(setB);
         return (double) intersection.size() / union.size();
+    }
+
+    /**
+     * Hybrid tokenization: whitespace for English, character bigrams for CJK.
+     */
+    private java.util.Set<String> tokenizeForDedup(String text) {
+        java.util.Set<String> tokens = new java.util.LinkedHashSet<>();
+        // Whitespace-based tokens for English content
+        for (String w : text.split("\\s+")) {
+            if (w.length() > 1) tokens.add(w);
+        }
+        // Character bigrams for CJK text (handles Chinese without spaces)
+        for (int i = 0; i < text.length() - 1; i++) {
+            char c1 = text.charAt(i);
+            char c2 = text.charAt(i + 1);
+            if (Character.isIdeographic(c1) && Character.isIdeographic(c2)) {
+                tokens.add("" + c1 + c2);
+            }
+        }
+        return tokens;
     }
 
     private void persistRetrievalTrace(String query, String rewrittenQuery,
