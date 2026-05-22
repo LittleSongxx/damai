@@ -247,6 +247,42 @@ public class AdvancedQueryService {
         }
     }
 
+    /**
+     * Extract 5-8 key search terms from the query for BM25 sparse retrieval.
+     * Generates domain-specific keywords, synonyms, and canonical forms.
+     */
+    public String extractSearchKeywords(String query) {
+        if (!StringUtils.hasText(query)) return query;
+        try {
+            String prompt = """
+                    你是大麦票务平台的搜索关键词提取器。从用户问题中提取5-8个最重要的搜索关键词。
+
+                    规则：
+                    1. 优先提取领域术语（退票、实名、电子票、选座、支付等）
+                    2. 补充同义表达（退货→退票退款、证件→身份证实名）
+                    3. 每个关键词不超过6个字
+                    4. 用空格分隔，不要编号
+
+                    用户问题：%s
+
+                    关键词：
+                    """.formatted(query);
+
+            String result = callObserved("KNOWLEDGE_KEYWORDS", "KnowledgeKeywords", prompt);
+            if (!StringUtils.hasText(result)) return query;
+
+            // Clean and limit
+            String cleaned = result.trim().replaceAll("[\\d.、)）\\-\\*\\[\\]]+", " ").replaceAll("\\s+", " ").trim();
+            if (cleaned.length() < 3) return query;
+
+            log.debug("Keyword extraction: '{}' -> '{}'", query, cleaned);
+            return cleaned;
+        } catch (Exception e) {
+            log.warn("Keyword extraction failed, using original query", e);
+            return query;
+        }
+    }
+
     private List<String> parseLines(String text, int maxLines) {
         if (!StringUtils.hasText(text)) {
             return List.of();

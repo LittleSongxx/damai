@@ -85,6 +85,9 @@ public class HybridSearchService {
     @Value("${damai.ai.retrieval.rrf-k:60}")
     private int rrfK;
 
+    @Value("${damai.ai.retrieval.candidate-multiplier:3}")
+    private int candidateMultiplier;
+
     public HybridSearchService(OpenAiEmbeddingModel embeddingModel,
                                 RerankService rerankService,
                                 AdvancedQueryService advancedQueryService,
@@ -146,6 +149,9 @@ public class HybridSearchService {
             }
         }
         String entityExpandedQuery = advancedQueryService.expandWithEntities(rewrittenQuery);
+        String llmKeywords = advancedQueryService.extractSearchKeywords(query);
+        boolean hasKeywords = StringUtils.hasText(llmKeywords) && !llmKeywords.equals(query)
+                && !llmKeywords.equals(entityExpandedQuery);
 
         String cacheKey = rewrittenQuery + "#" + topK + "#" + enableRerank;
         String cached = cacheManager.getFaqSearch(cacheKey);
@@ -157,16 +163,39 @@ public class HybridSearchService {
             return result;
         }
 
+        int fetchSize = topK * candidateMultiplier;
+
         List<RagSourceVo> denseSources = circuitBreakerService.executeQdrant(
-                () -> multiQueryDenseSearch(expandedQueries, topK * 3),
+                () -> multiQueryDenseSearch(expandedQueries, fetchSize),
                 List.of());
         if (denseSources.isEmpty()) {
             degradationService.begin("dense_search").degradedTo("sparse_only");
         }
 
         List<RagSourceVo> sparseSources = circuitBreakerService.executeEs(
-                () -> sparseSearch(entityExpandedQuery, topK * 3),
+                () -> sparseSearch(entityExpandedQuery, fetchSize),
                 List.of());
+
+        // Additional sparse search with LLM-extracted keywords
+        if (hasKeywords) {
+            try {
+                List<RagSourceVo> keywordSources = circuitBreakerService.executeEs(
+                        () -> sparseSearch(llmKeywords, fetchSize),
+                        List.of());
+                if (!keywordSources.isEmpty()) {
+                    Map<String, RagSourceVo> mergedSparse = new LinkedHashMap<>();
+                    for (RagSourceVo s : sparseSources) mergedSparse.put(s.getChunkId(), s);
+                    for (RagSourceVo s : keywordSources) {
+                        mergedSparse.merge(s.getChunkId(), s,
+                                (a, b) -> a.getScore() >= b.getScore() ? a : b);
+                    }
+                    sparseSources = new ArrayList<>(mergedSparse.values());
+                    sparseSources.sort((a, b) -> Double.compare(b.getScore(), a.getScore()));
+                }
+            } catch (Exception e) {
+                log.warn("Keyword sparse search failed: {}", e.getMessage());
+            }
+        }
         if (sparseSources.isEmpty()) {
             degradationService.begin("sparse_search").degradedTo("dense_only");
         }
@@ -245,6 +274,10 @@ public class HybridSearchService {
         }
         // Entity expansion on the primary query for sparse search
         String entityExpandedQuery = advancedQueryService.expandWithEntities(rewrittenQuery);
+        // LLM keyword extraction for additional sparse query
+        String llmKeywords = advancedQueryService.extractSearchKeywords(query);
+        boolean hasKeywords = StringUtils.hasText(llmKeywords) && !llmKeywords.equals(query)
+                && !llmKeywords.equals(entityExpandedQuery);
 
         String cacheKey = rewrittenQuery + "#" + topK + "#" + enableRerank;
         String cached = cacheManager.getFaqSearch(cacheKey);
@@ -256,20 +289,45 @@ public class HybridSearchService {
             return result;
         }
 
+        int fetchSize = topK * candidateMultiplier;
+
         List<RagSourceVo> standardDenseSources = circuitBreakerService.executeQdrant(
-                () -> multiQueryDenseSearch(expandedQueries, topK * 3),
+                () -> multiQueryDenseSearch(expandedQueries, fetchSize),
                 List.of());
 
         List<RagSourceVo> hydeSources = List.of();
         try {
-            hydeSources = hydeSearch(query, topK * 3);
+            hydeSources = hydeSearch(query, fetchSize);
         } catch (Exception e) {
             log.warn("HyDE in first pass failed, continuing without it: {}", e.getMessage());
         }
 
         List<RagSourceVo> sparseSources = circuitBreakerService.executeEs(
-                () -> sparseSearch(entityExpandedQuery, topK * 3),
+                () -> sparseSearch(entityExpandedQuery, fetchSize),
                 List.of());
+
+        // Additional sparse search with LLM-extracted keywords for better BM25 recall
+        if (hasKeywords) {
+            try {
+                List<RagSourceVo> keywordSources = circuitBreakerService.executeEs(
+                        () -> sparseSearch(llmKeywords, fetchSize),
+                        List.of());
+                if (!keywordSources.isEmpty()) {
+                    // Merge: keep highest score per chunkId
+                    Map<String, RagSourceVo> mergedSparse = new LinkedHashMap<>();
+                    for (RagSourceVo s : sparseSources) mergedSparse.put(s.getChunkId(), s);
+                    for (RagSourceVo s : keywordSources) {
+                        mergedSparse.merge(s.getChunkId(), s,
+                                (a, b) -> a.getScore() >= b.getScore() ? a : b);
+                    }
+                    sparseSources = new ArrayList<>(mergedSparse.values());
+                    sparseSources.sort((a, b) -> Double.compare(b.getScore(), a.getScore()));
+                    log.debug("Keyword-augmented sparse: {}→{} results", keywordSources.size(), sparseSources.size());
+                }
+            } catch (Exception e) {
+                log.warn("Keyword sparse search failed, continuing without it: {}", e.getMessage());
+            }
+        }
 
         if (standardDenseSources.isEmpty() && hydeSources.isEmpty() && sparseSources.isEmpty()) {
             log.warn("All search paths returned empty for query: {}", query);
@@ -303,6 +361,7 @@ public class HybridSearchService {
 
         List<Document> documents = resolveDocumentsFromAllSources(finalSources);
         documents = sentenceWindowService.expand(documents);
+        documents = deduplicateByContent(documents);
         // Unified filter+compress in a single LLM call
         documents = postRetrievalFilterService.filterAndCompress(query, new ArrayList<>(documents));
 
@@ -617,6 +676,51 @@ public class HybridSearchService {
 
     private List<RagSourceVo> shrink(List<RagSourceVo> sources, int topK) {
         return RagFusionSupport.limit(sources, topK);
+    }
+
+    /**
+     * Deduplicate documents with >85% text overlap, keeping the first occurrence.
+     * This prevents sentence-window expansion from bloating the context with near-duplicates.
+     */
+    private List<Document> deduplicateByContent(List<Document> documents) {
+        if (documents == null || documents.size() <= 2) return documents;
+        List<Document> deduped = new ArrayList<>();
+        for (Document doc : documents) {
+            String text = doc.getText();
+            if (text == null) {
+                deduped.add(doc);
+                continue;
+            }
+            boolean isDup = false;
+            for (Document existing : deduped) {
+                String existingText = existing.getText();
+                if (existingText != null && jaccardSimilarity(text, existingText) > 0.85) {
+                    isDup = true;
+                    break;
+                }
+            }
+            if (!isDup) {
+                deduped.add(doc);
+            }
+        }
+        if (deduped.size() < documents.size()) {
+            log.debug("Content dedup: {}→{} docs", documents.size(), deduped.size());
+        }
+        return deduped;
+    }
+
+    private double jaccardSimilarity(String a, String b) {
+        if (a.equals(b)) return 1.0;
+        java.util.Set<String> setA = new java.util.HashSet<>();
+        java.util.Set<String> setB = new java.util.HashSet<>();
+        for (String w : a.split("\\s+")) { if (w.length() > 1) setA.add(w); }
+        for (String w : b.split("\\s+")) { if (w.length() > 1) setB.add(w); }
+        if (setA.isEmpty() && setB.isEmpty()) return 0;
+        java.util.Set<String> union = new java.util.HashSet<>(setA);
+        union.addAll(setB);
+        java.util.Set<String> intersection = new java.util.HashSet<>(setA);
+        intersection.retainAll(setB);
+        return (double) intersection.size() / union.size();
     }
 
     private void persistRetrievalTrace(String query, String rewrittenQuery,

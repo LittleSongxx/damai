@@ -203,6 +203,7 @@ damai:
       min-vector-similarity: ${DAMAI_AI_RETRIEVAL_MIN_VECTOR_SIMILARITY:0.45}
       keyword-relative-score-floor: ${DAMAI_AI_RETRIEVAL_KEYWORD_RELATIVE_SCORE_FLOOR:0.35}
       rrf-k: ${DAMAI_AI_RETRIEVAL_RRF_K:60}
+      candidate-multiplier: ${DAMAI_AI_RETRIEVAL_CANDIDATE_MULTIPLIER:3}
       post-filter:
         enabled: ${DAMAI_AI_POST_FILTER_ENABLED:true}
         relevance-threshold: ${DAMAI_AI_POST_FILTER_THRESHOLD:0.35}
