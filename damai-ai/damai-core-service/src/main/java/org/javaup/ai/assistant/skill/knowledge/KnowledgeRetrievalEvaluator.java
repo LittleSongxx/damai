@@ -42,7 +42,7 @@ public class KnowledgeRetrievalEvaluator {
 
         // Phase 1: Fast heuristic score
         double denseTop = firstScore(result.getDenseSources());
-        double sparseTop = normalizeSparse(firstScore(result.getSparseSources()));
+        double sparseTop = normalizeSparseScore(result.getSparseSources());
         double overlap = overlap(result.getDenseSources(), result.getSparseSources());
         double finalCount = Math.min(1D, deduped.size() / 4D);
         double diversity = Math.min(1D, deduped.stream().map(RagSourceVo::getSource).distinct().count() / 2D);
@@ -56,8 +56,9 @@ public class KnowledgeRetrievalEvaluator {
         String missingInfo;
         List<String> verifiedClaims = List.of();
 
-        if (heuristicScore >= 0.72 && deduped.size() >= 4) {
-            // Fast path: trust heuristic for high-confidence results
+        if (heuristicScore >= 0.78 && deduped.size() >= 4 && diversity >= 0.4) {
+            // Fast path: trust heuristic only when ALL signals are strong
+            // (raised threshold from 0.72→0.80, added diversity check to avoid false confidence)
             relevanceLevel = "HIGH";
             coverageLevel = "HIGH";
             hasContradictions = false;
@@ -295,8 +296,11 @@ public class KnowledgeRetrievalEvaluator {
         return Math.min(1D, Math.max(0D, sources.get(0).getScore()));
     }
 
-    private double normalizeSparse(double score) {
-        return Math.min(1D, score / 12D);
+    private double normalizeSparseScore(List<RagSourceVo> sources) {
+        if (sources == null || sources.isEmpty() || sources.get(0).getScore() == null) {
+            return 0D;
+        }
+        return Math.min(1D, Math.max(0D, sources.get(0).getScore() / 12D));
     }
 
     private double overlap(List<RagSourceVo> denseSources, List<RagSourceVo> sparseSources) {

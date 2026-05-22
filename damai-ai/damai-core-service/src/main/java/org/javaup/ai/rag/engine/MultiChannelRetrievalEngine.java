@@ -89,11 +89,11 @@ public class MultiChannelRetrievalEngine {
         if (allDenseSources.isEmpty() && allSparseSources.isEmpty()) {
             fusedSources = List.of();
         } else if (allSparseSources.isEmpty()) {
-            fusedSources = shrink(allDenseSources, context.getTopK() * 2);
+            fusedSources = shrink(allDenseSources, context.getTopK() * 3);
         } else if (allDenseSources.isEmpty()) {
-            fusedSources = shrink(allSparseSources, context.getTopK() * 2);
+            fusedSources = shrink(allSparseSources, context.getTopK() * 3);
         } else {
-            fusedSources = RagFusionSupport.reciprocalRankFusion(allDenseSources, allSparseSources, context.getTopK() * 2);
+            fusedSources = RagFusionSupport.reciprocalRankFusion(allDenseSources, allSparseSources, context.getTopK() * 3);
         }
 
         // Phase 3: Ordered post-processing chain
@@ -115,7 +115,7 @@ public class MultiChannelRetrievalEngine {
                 .sparseSources(allSparseSources)
                 .fusedSources(fusedSources)
                 .sources(finalSources)
-                .documents(List.of())
+                .documents(List.of()) // resolve documents in caller (HybridSearchService/KnowledgeRetrievalOrchestrator)
                 .build();
     }
 
@@ -159,15 +159,17 @@ public class MultiChannelRetrievalEngine {
             }
         }
 
+        // Use topK * 3 for wider candidate pool before RRF fusion
+        int candidatePool = context.getTopK() * 3;
         List<RagSourceVo> fusedSources;
         if (allDenseSources.isEmpty() && allSparseSources.isEmpty()) {
             fusedSources = List.of();
         } else if (allSparseSources.isEmpty()) {
-            fusedSources = shrink(allDenseSources, context.getTopK() * 2);
+            fusedSources = shrink(allDenseSources, candidatePool);
         } else if (allDenseSources.isEmpty()) {
-            fusedSources = shrink(allSparseSources, context.getTopK() * 2);
+            fusedSources = shrink(allSparseSources, candidatePool);
         } else {
-            fusedSources = RagFusionSupport.reciprocalRankFusion(allDenseSources, allSparseSources, context.getTopK() * 2);
+            fusedSources = RagFusionSupport.reciprocalRankFusion(allDenseSources, allSparseSources, candidatePool);
         }
 
         List<RagSourceVo> finalSources = shrink(fusedSources, context.getTopK());
@@ -180,7 +182,7 @@ public class MultiChannelRetrievalEngine {
                 .sparseSources(allSparseSources)
                 .fusedSources(fusedSources)
                 .sources(finalSources)
-                .documents(List.of())
+                .documents(List.of()) // resolve documents in caller
                 .build();
     }
 }

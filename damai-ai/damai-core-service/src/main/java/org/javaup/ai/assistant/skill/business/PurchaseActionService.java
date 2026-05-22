@@ -145,6 +145,8 @@ public class PurchaseActionService {
         }
 
         AssistantActionResultVo resultVo = result(action.getActionId(), AssistantActionStatus.REJECTED.name(), "已取消本次下单请求");
+        // Dify 风格智能重新提问: 拒绝后提供替代方案，而非仅告知"已取消"
+        resultVo.setSuggestedAlternatives(buildRejectionAlternatives(action));
         assistantRunService.markActionRejected(action, resultVo);
         AiRun run = assistantRunService.getRunInternal(runId);
         assistantRunService.markCompleted(run, "ACTION_REJECTED", "用户取消下单");
@@ -243,6 +245,36 @@ public class PurchaseActionService {
 
     private boolean isExpired(AiAction action) {
         return action.getExpiresAt() != null && action.getExpiresAt().before(new Date());
+    }
+
+    /**
+     * 构建拒绝后的替代方案推荐 —— 遵循 Dify 智能重新提问设计。
+     *
+     * <p>基于预览快照中的节目、城市、艺人、票档等信息，生成可操作的下一步建议。
+     * 每条建议为面向用户的自然语言，LLM/前端可直接展示。
+     */
+    private List<String> buildRejectionAlternatives(AiAction action) {
+        PurchaseActionSnapshot snapshot = parseSnapshot(action);
+        if (snapshot == null) {
+            return List.of();
+        }
+        List<String> alternatives = new java.util.ArrayList<>();
+        String city = snapshot.getCityName();
+        String actor = snapshot.getActor();
+        String programTitle = snapshot.getProgramTitle();
+
+        if (programTitle != null && !programTitle.isBlank()) {
+            alternatives.add("查看「" + programTitle + "」的其他票档和时间，可能有更合适的场次或价位");
+        }
+        if (city != null && !city.isBlank()) {
+            alternatives.add("搜索「" + city + "」其他同期演出，看看有没有更感兴趣的节目");
+        }
+        if (actor != null && !actor.isBlank()) {
+            alternatives.add("搜索「" + actor + "」的其他演出场次或巡演城市");
+        }
+        alternatives.add("调整筛选条件（如扩大城市范围、放宽价格区间）后重新搜索");
+        alternatives.add("如果没有急需购票，可关注大麦APP的最新上架信息");
+        return alternatives;
     }
 
     private AssistantActionResultVo result(String actionId, String status, String message) {

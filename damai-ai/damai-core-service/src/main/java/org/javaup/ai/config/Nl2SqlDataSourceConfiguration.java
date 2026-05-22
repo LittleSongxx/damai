@@ -21,7 +21,7 @@ public class Nl2SqlDataSourceConfiguration {
     private final ThreadPoolProperties threadPoolProperties;
 
     @Bean
-    @ConditionalOnProperty(prefix = "damai.ai.nl2sql", name = "enabled", havingValue = "true", matchIfMissing = true)
+    @ConditionalOnProperty(prefix = "damai.ai.nl2sql", name = "enabled", havingValue = "true", matchIfMissing = false)
     public DataSource nl2sqlDataSource() {
         Nl2SqlProperties.DataSource ds = nl2sqlProperties.getDatasource();
         if (!StringUtils.hasText(ds.getUrl())) {

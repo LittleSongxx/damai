@@ -2,8 +2,6 @@ package org.javaup.ai.service;
 
 import cn.hutool.core.codec.Base64;
 import cn.hutool.core.collection.CollectionUtil;
-import cn.hutool.http.ContentType;
-import cn.hutool.http.HttpRequest;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -57,6 +55,8 @@ public class HybridSearchService {
     private final AiRetrievalTraceMapper retrievalTraceMapper;
     private final RagChunkMapper chunkMapper;
     private final DocumentIngestionService documentIngestionService;
+    private final PostRetrievalFilterService postRetrievalFilterService;
+    private final SentenceWindowService sentenceWindowService;
 
     @Value("${damai.ai.qdrant.collection:damai_ai_faq}")
     private String qdrantCollection;
@@ -82,6 +82,9 @@ public class HybridSearchService {
     @Value("${damai.ai.retrieval.keyword-relative-score-floor:0.35}")
     private double keywordRelativeScoreFloor;
 
+    @Value("${damai.ai.retrieval.rrf-k:60}")
+    private int rrfK;
+
     public HybridSearchService(OpenAiEmbeddingModel embeddingModel,
                                 RerankService rerankService,
                                 AdvancedQueryService advancedQueryService,
@@ -93,7 +96,9 @@ public class HybridSearchService {
                                 BusinessMetrics businessMetrics,
                                 AiRetrievalTraceMapper retrievalTraceMapper,
                                 RagChunkMapper chunkMapper,
-                                DocumentIngestionService documentIngestionService) {
+                                DocumentIngestionService documentIngestionService,
+                                PostRetrievalFilterService postRetrievalFilterService,
+                                SentenceWindowService sentenceWindowService) {
         this.embeddingModel = embeddingModel;
         this.rerankService = rerankService;
         this.advancedQueryService = advancedQueryService;
@@ -106,6 +111,8 @@ public class HybridSearchService {
         this.retrievalTraceMapper = retrievalTraceMapper;
         this.chunkMapper = chunkMapper;
         this.documentIngestionService = documentIngestionService;
+        this.postRetrievalFilterService = postRetrievalFilterService;
+        this.sentenceWindowService = sentenceWindowService;
     }
 
     // ======================== Ingestion (delegated) ========================
@@ -127,24 +134,38 @@ public class HybridSearchService {
     public RagSearchResultVo hybridSearchWithTrace(String query, int topK, boolean enableRerank) {
         ensureDocumentsLoaded();
 
-        String cacheKey = query + "#" + topK + "#" + enableRerank;
-        String cached = cacheManager.getFaqSearch(cacheKey);
-        if (cached != null) {
-            return JSON.parseObject(cached, RagSearchResultVo.class);
-        }
-
         AdvancedQueryService.QueryRewriteResult rewriteResult = advancedQueryService.rewriteQuery(query);
         String rewrittenQuery = rewriteResult.primaryQuery();
 
+        // Sub-question decomposition + entity expansion (same as HyDE path)
+        List<String> expandedQueries = new ArrayList<>(rewriteResult.allQueries());
+        List<String> subQuestions = advancedQueryService.decomposeSubQuestions(query);
+        if (subQuestions.size() > 1) {
+            for (String sq : subQuestions) {
+                if (!expandedQueries.contains(sq)) expandedQueries.add(sq);
+            }
+        }
+        String entityExpandedQuery = advancedQueryService.expandWithEntities(rewrittenQuery);
+
+        String cacheKey = rewrittenQuery + "#" + topK + "#" + enableRerank;
+        String cached = cacheManager.getFaqSearch(cacheKey);
+        if (cached != null) {
+            RagSearchResultVo result = JSON.parseObject(cached, RagSearchResultVo.class);
+            if (result.getDocuments() == null && result.getSources() != null) {
+                result.setDocuments(resolveDocuments(result.getSources()));
+            }
+            return result;
+        }
+
         List<RagSourceVo> denseSources = circuitBreakerService.executeQdrant(
-                () -> multiQueryDenseSearch(rewriteResult.allQueries(), topK * 2),
+                () -> multiQueryDenseSearch(expandedQueries, topK * 3),
                 List.of());
         if (denseSources.isEmpty()) {
             degradationService.begin("dense_search").degradedTo("sparse_only");
         }
 
         List<RagSourceVo> sparseSources = circuitBreakerService.executeEs(
-                () -> sparseSearch(rewrittenQuery, topK * 2),
+                () -> sparseSearch(entityExpandedQuery, topK * 3),
                 List.of());
         if (sparseSources.isEmpty()) {
             degradationService.begin("sparse_search").degradedTo("dense_only");
@@ -161,16 +182,19 @@ public class HybridSearchService {
         }
 
         List<RagSourceVo> fusedSources = denseSources.isEmpty() ? sparseSources
-                : sparseSources.isEmpty() ? shrink(denseSources, topK * 2)
-                : mergeWithRrf(denseSources, sparseSources, topK * 2);
+                : sparseSources.isEmpty() ? shrink(denseSources, topK * 3)
+                : RagFusionSupport.weightedReciprocalRankFusion(
+                        denseSources, sparseSources, topK * 3, rrfK, rewriteResult.queryType());
         List<RagSourceVo> finalSources = enableRerank
                 ? rerankSources(rewrittenQuery, fusedSources, topK)
                 : shrink(fusedSources, topK);
 
         // Resolve to Documents: try DB-backed chunk lookup first, then cache
         List<Document> documents = resolveDocumentsFromAllSources(finalSources);
+        documents = sentenceWindowService.expand(documents);
 
-        documents = contextualCompressionService.compress(query, new ArrayList<>(documents));
+        // Unified filter+compress in a single LLM call (replaces separate compress + filter)
+        documents = postRetrievalFilterService.filterAndCompress(query, new ArrayList<>(documents));
 
         persistRetrievalTrace(query, rewrittenQuery, rewriteResult, denseSources, sparseSources,
                 fusedSources, finalSources, documents, topK, enableRerank);
@@ -187,7 +211,21 @@ public class HybridSearchService {
                 .sources(finalSources)
                 .build();
 
-        cacheManager.putFaqSearch(cacheKey, JSON.toJSONString(result));
+        // Strip heavy Document list before caching to avoid FastJSON deserialization errors
+        RagSearchResultVo cacheResult = RagSearchResultVo.builder()
+                .originalQuery(result.getOriginalQuery())
+                .normalizedQuery(result.getNormalizedQuery())
+                .rewrittenQuery(result.getRewrittenQuery())
+                .retrievalTraceId(result.getRetrievalTraceId())
+                .denseSources(result.getDenseSources())
+                .sparseSources(result.getSparseSources())
+                .fusedSources(result.getFusedSources())
+                .sources(result.getSources())
+                .confidenceScore(result.getConfidenceScore())
+                .confidenceLevel(result.getConfidenceLevel())
+                .correctiveAction(result.getCorrectiveAction())
+                .build();
+        cacheManager.putFaqSearch(cacheKey, JSON.toJSONString(cacheResult));
         return result;
     }
 
@@ -197,25 +235,40 @@ public class HybridSearchService {
         AdvancedQueryService.QueryRewriteResult rewriteResult = advancedQueryService.rewriteQuery(query);
         String rewrittenQuery = rewriteResult.primaryQuery();
 
+        // Sub-question decomposition for complex/multi-aspect queries
+        List<String> expandedQueries = new ArrayList<>(rewriteResult.allQueries());
+        List<String> subQuestions = advancedQueryService.decomposeSubQuestions(query);
+        if (subQuestions.size() > 1) {
+            for (String sq : subQuestions) {
+                if (!expandedQueries.contains(sq)) expandedQueries.add(sq);
+            }
+        }
+        // Entity expansion on the primary query for sparse search
+        String entityExpandedQuery = advancedQueryService.expandWithEntities(rewrittenQuery);
+
         String cacheKey = rewrittenQuery + "#" + topK + "#" + enableRerank;
         String cached = cacheManager.getFaqSearch(cacheKey);
         if (cached != null) {
-            return JSON.parseObject(cached, RagSearchResultVo.class);
+            RagSearchResultVo result = JSON.parseObject(cached, RagSearchResultVo.class);
+            if (result.getDocuments() == null && result.getSources() != null) {
+                result.setDocuments(resolveDocuments(result.getSources()));
+            }
+            return result;
         }
 
         List<RagSourceVo> standardDenseSources = circuitBreakerService.executeQdrant(
-                () -> multiQueryDenseSearch(rewriteResult.allQueries(), topK * 2),
+                () -> multiQueryDenseSearch(expandedQueries, topK * 3),
                 List.of());
 
         List<RagSourceVo> hydeSources = List.of();
         try {
-            hydeSources = hydeSearch(query, topK * 2);
+            hydeSources = hydeSearch(query, topK * 3);
         } catch (Exception e) {
             log.warn("HyDE in first pass failed, continuing without it: {}", e.getMessage());
         }
 
         List<RagSourceVo> sparseSources = circuitBreakerService.executeEs(
-                () -> sparseSearch(rewrittenQuery, topK * 2),
+                () -> sparseSearch(entityExpandedQuery, topK * 3),
                 List.of());
 
         if (standardDenseSources.isEmpty() && hydeSources.isEmpty() && sparseSources.isEmpty()) {
@@ -239,15 +292,19 @@ public class HybridSearchService {
                     denseBefore, allDenseSources.size(), sparseBefore, sparseSources.size());
         }
 
+        // Adaptive RRF: adjust weights based on query type
         List<RagSourceVo> fusedSources = sparseSources.isEmpty()
-                ? shrink(allDenseSources, topK * 2)
-                : RagFusionSupport.reciprocalRankFusion(allDenseSources, sparseSources, topK * 2);
+                ? shrink(allDenseSources, topK * 3)
+                : RagFusionSupport.weightedReciprocalRankFusion(
+                        allDenseSources, sparseSources, topK * 2, rrfK, rewriteResult.queryType());
         List<RagSourceVo> finalSources = enableRerank
                 ? rerankSources(rewrittenQuery, fusedSources, topK)
                 : shrink(fusedSources, topK);
 
         List<Document> documents = resolveDocumentsFromAllSources(finalSources);
-        documents = contextualCompressionService.compress(query, new ArrayList<>(documents));
+        documents = sentenceWindowService.expand(documents);
+        // Unified filter+compress in a single LLM call
+        documents = postRetrievalFilterService.filterAndCompress(query, new ArrayList<>(documents));
 
         RagSearchResultVo result = RagSearchResultVo.builder()
                 .originalQuery(query)
@@ -261,7 +318,21 @@ public class HybridSearchService {
                 .sources(finalSources)
                 .build();
 
-        cacheManager.putFaqSearch(cacheKey, JSON.toJSONString(result));
+        // Strip heavy Document list before caching to avoid FastJSON deserialization errors
+        RagSearchResultVo cacheResult = RagSearchResultVo.builder()
+                .originalQuery(result.getOriginalQuery())
+                .normalizedQuery(result.getNormalizedQuery())
+                .rewrittenQuery(result.getRewrittenQuery())
+                .retrievalTraceId(result.getRetrievalTraceId())
+                .denseSources(result.getDenseSources())
+                .sparseSources(result.getSparseSources())
+                .fusedSources(result.getFusedSources())
+                .sources(result.getSources())
+                .confidenceScore(result.getConfidenceScore())
+                .confidenceLevel(result.getConfidenceLevel())
+                .correctiveAction(result.getCorrectiveAction())
+                .build();
+        cacheManager.putFaqSearch(cacheKey, JSON.toJSONString(cacheResult));
         return result;
     }
 
@@ -277,6 +348,30 @@ public class HybridSearchService {
         return hybridSearch(query, topK).stream()
                 .map(d -> d.getMetadata().getOrDefault("chunkId", d.getId()).toString())
                 .toList();
+    }
+
+    public List<String> searchChunkIdsNoCache(String query, int topK) {
+        ensureDocumentsLoaded();
+        List<RagSourceVo> denseSources = denseSearch(query, topK * 3);
+        List<RagSourceVo> sparseSources = sparseSearch(query, topK * 3);
+        log.info("[DIAG] query={}, denseHits={}, sparseHits={}",
+                query,
+                denseSources.stream().map(s -> s.getChunkId() + ":" + String.format("%.4f", s.getScore())).toList(),
+                sparseSources.stream().map(s -> s.getChunkId() + ":" + String.format("%.4f", s.getScore())).toList());
+        List<RagSourceVo> fusedSources = sparseSources.isEmpty()
+                ? shrink(denseSources, topK * 3)
+                : mergeWithRrf(denseSources, sparseSources, topK * 3);
+        log.info("[DIAG] query={}, fusedBeforeRerank={}", query,
+                fusedSources.stream().map(s -> s.getChunkId() + ":" + String.format("%.4f", s.getScore())).toList());
+        List<RagSourceVo> finalSources = rerankSources(query, fusedSources, topK);
+        log.info("[DIAG] query={}, finalAfterRerank={}", query,
+                finalSources.stream().map(s -> s.getChunkId() + ":" + String.format("%.4f", s.getScore())).toList());
+        List<Document> documents = resolveDocumentsFromAllSources(finalSources);
+        List<String> result = documents.stream()
+                .map(d -> d.getMetadata().getOrDefault("chunkId", d.getId()).toString())
+                .toList();
+        log.info("[DIAG] query={}, finalChunkIds={}", query, result);
+        return result;
     }
 
     public List<RagSourceVo> hydeSearch(String query, int topK) {
@@ -376,6 +471,7 @@ public class HybridSearchService {
                             .setCollectionName(qdrantCollection)
                             .addAllVector(vectorList)
                             .setLimit(topK)
+                            .setScoreThreshold((float) minVectorSimilarity)
                             .setWithPayload(io.qdrant.client.WithPayloadSelectorFactory.enable(true))
                             .build()
             ).get();
@@ -410,9 +506,26 @@ public class HybridSearchService {
             body.put("size", topK);
             body.put("query", new JSONObject(Map.of("multi_match", multiMatch)));
 
-            JSONObject response = executeEs("/" + faqAlias + "/_search", body.toJSONString(), "POST");
-            JSONArray hits = response.getJSONObject("hits").getJSONArray("hits");
-            if (hits == null) return List.of();
+            String requestBody = body.toJSONString();
+            log.info("[DIAG] ES request url=/{}/_search, body={}", faqAlias, requestBody);
+            JSONObject response = executeEs("/" + faqAlias + "/_search", requestBody, "POST");
+            if (response.isEmpty()) {
+                log.warn("[DIAG] ES returned EMPTY JSONObject (no hits, no error) for query={}", query);
+                return List.of();
+            }
+            log.info("[DIAG] ES raw response keys={}, totalField={}", response.keySet(),
+                    response.containsKey("hits") ? response.getJSONObject("hits").containsKey("total") : "no-hits");
+            JSONObject hitsObj = response.getJSONObject("hits");
+            if (hitsObj == null) {
+                log.warn("[DIAG] ES response has no 'hits' object for query={}, response keys={}", query, response.keySet());
+                return List.of();
+            }
+            JSONArray hits = hitsObj.getJSONArray("hits");
+            if (hits == null) {
+                log.warn("[DIAG] ES hits is null for query={}", query);
+                return List.of();
+            }
+            log.info("[DIAG] ES sparseSearch query={}, totalHits={}, returnedHits={}", query, hitsObj.getJSONObject("total") != null ? hitsObj.getJSONObject("total").get("value") : "?", hits.size());
 
             List<RagSourceVo> sources = new ArrayList<>();
             for (int i = 0; i < hits.size(); i++) {
@@ -444,7 +557,7 @@ public class HybridSearchService {
     }
 
     private List<RagSourceVo> mergeWithRrf(List<RagSourceVo> denseSources, List<RagSourceVo> sparseSources, int topK) {
-        return RagFusionSupport.reciprocalRankFusion(denseSources, sparseSources, topK);
+        return RagFusionSupport.reciprocalRankFusion(denseSources, sparseSources, topK, rrfK);
     }
 
     private List<RagSourceVo> gateDenseResults(List<RagSourceVo> denseSources) {
@@ -584,20 +697,40 @@ public class HybridSearchService {
 
     private JSONObject executeEs(String path, String body, String method) {
         String url = "http://" + esAddress + path;
-        HttpRequest request = buildEsRequest(url, method, body)
-                .header("Authorization", esAuthorization());
-        String response = request.execute().body();
-        return JSON.parseObject(response == null ? "{}" : response);
+        log.info("[DIAG] ES executeEs called: url={}, method={}, bodyBytes={}", url, method, body.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
+        try {
+            java.net.http.HttpRequest.Builder requestBuilder = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .header("Authorization", esAuthorization())
+                    .header("Content-Type", "application/json;charset=UTF-8");
+            switch (method) {
+                case "PUT" -> requestBuilder.PUT(java.net.http.HttpRequest.BodyPublishers.ofString(body));
+                case "POST" -> requestBuilder.POST(java.net.http.HttpRequest.BodyPublishers.ofString(body));
+                default -> requestBuilder.GET();
+            }
+            java.net.http.HttpRequest request = requestBuilder.build();
+            java.net.http.HttpResponse<String> response = HTTP_CLIENT.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+            String responseBody = response.body();
+            if (responseBody == null || responseBody.isEmpty()) {
+                log.warn("ES response empty for url={}", url);
+                return new JSONObject();
+            }
+            log.info("[DIAG] ES raw response (first 500 chars): {}", responseBody.length() > 500 ? responseBody.substring(0, 500) : responseBody);
+            JSONObject parsed = JSON.parseObject(responseBody);
+            if (parsed.containsKey("error")) {
+                log.warn("ES returned error for url={}: {}", url, parsed.getJSONObject("error"));
+                return new JSONObject();
+            }
+            return parsed;
+        } catch (Exception ex) {
+            log.warn("ES request failed for url={}", url, ex);
+            return new JSONObject();
+        }
     }
 
-    private HttpRequest buildEsRequest(String url, String method, String body) {
-        HttpRequest request = switch (method) {
-            case "PUT" -> HttpRequest.put(url);
-            case "POST" -> HttpRequest.post(url);
-            default -> HttpRequest.get(url);
-        };
-        return request.contentType(ContentType.JSON.getValue()).body(body);
-    }
+    private static final java.net.http.HttpClient HTTP_CLIENT = java.net.http.HttpClient.newBuilder()
+            .version(java.net.http.HttpClient.Version.HTTP_1_1)
+            .build();
 
     private String esAuthorization() {
         return "Basic " + Base64.encode(esUsername + ":" + esPassword);

@@ -34,7 +34,7 @@ import java.util.Set;
 public class MarkdownLoader {
 
     private static final String DEFAULT_DOCUMENT_PATTERN = "classpath:datum/*.md";
-    private static final int DEFAULT_CHUNK_SIZE = 400;
+    private static final int DEFAULT_CHUNK_SIZE = 200;
     private static final int DEFAULT_MIN_CHUNK_SIZE_CHARS = 50;
     private static final int DEFAULT_MIN_CHUNK_LENGTH_TO_EMBED = 5;
     private static final int DEFAULT_MAX_NUM_CHUNKS = 10000;
@@ -51,6 +51,7 @@ public class MarkdownLoader {
     private final int minChunkLengthToEmbed;
     private final int maxNumChunks;
     private final int minDocLengthForTokenSplit;
+    private final Map<String, String> keywordMap;
     private static final String INDEX_VERSION_PREFIX = "v";
 
     private volatile LoadStats lastLoadStats = new LoadStats(0, 0, 0, 0, 0);
@@ -63,7 +64,8 @@ public class MarkdownLoader {
                 DEFAULT_MIN_CHUNK_SIZE_CHARS,
                 DEFAULT_MIN_CHUNK_LENGTH_TO_EMBED,
                 DEFAULT_MAX_NUM_CHUNKS,
-                DEFAULT_MIN_DOC_LENGTH_FOR_TOKEN_SPLIT);
+                DEFAULT_MIN_DOC_LENGTH_FOR_TOKEN_SPLIT,
+                null);
     }
 
     public MarkdownLoader(ResourcePatternResolver resourcePatternResolver,
@@ -73,6 +75,18 @@ public class MarkdownLoader {
                           int minChunkLengthToEmbed,
                           int maxNumChunks,
                           int minDocLengthForTokenSplit) {
+        this(resourcePatternResolver, documentPattern, chunkSize, minChunkSizeChars,
+                minChunkLengthToEmbed, maxNumChunks, minDocLengthForTokenSplit, null);
+    }
+
+    public MarkdownLoader(ResourcePatternResolver resourcePatternResolver,
+                          String documentPattern,
+                          int chunkSize,
+                          int minChunkSizeChars,
+                          int minChunkLengthToEmbed,
+                          int maxNumChunks,
+                          int minDocLengthForTokenSplit,
+                          Map<String, String> keywordMap) {
         this.resourcePatternResolver = resourcePatternResolver;
         this.documentPattern = StringUtil.isEmpty(documentPattern) ? DEFAULT_DOCUMENT_PATTERN : documentPattern;
         this.chunkSize = positiveOrDefault(chunkSize, DEFAULT_CHUNK_SIZE);
@@ -80,6 +94,7 @@ public class MarkdownLoader {
         this.minChunkLengthToEmbed = positiveOrDefault(minChunkLengthToEmbed, DEFAULT_MIN_CHUNK_LENGTH_TO_EMBED);
         this.maxNumChunks = positiveOrDefault(maxNumChunks, DEFAULT_MAX_NUM_CHUNKS);
         this.minDocLengthForTokenSplit = positiveOrDefault(minDocLengthForTokenSplit, DEFAULT_MIN_DOC_LENGTH_FOR_TOKEN_SPLIT);
+        this.keywordMap = keywordMap != null ? keywordMap : defaultKeywordMap();
     }
 
     /**
@@ -260,7 +275,31 @@ public class MarkdownLoader {
         Map<String, Object> baseMeta = baseMetadata(fileName, section, rawText, docMeta);
 
         if (rawText.length() <= minDocLengthForTokenSplit) {
-            // Short document: single chunk with contextual prefix
+            // Short document: apply overlap-aware splitting for docs near the boundary
+            int overlap = Math.max(50, chunkSize / 5);
+            if (rawText.length() > minDocLengthForTokenSplit * 0.7) {
+                // Near-boundary docs: use token splitter with overlap to preserve context
+                TokenTextSplitter boundarySplitter = new TokenTextSplitter(
+                        chunkSize, minChunkSizeChars, minChunkLengthToEmbed, maxNumChunks, true);
+                List<Document> boundaryChunks = boundarySplitter.split(List.of(new Document(rawText, new HashMap<>())));
+                if (boundaryChunks.size() > 1) {
+                    List<Document> docs = new ArrayList<>();
+                    for (int i = 0; i < boundaryChunks.size(); i++) {
+                        Document chunk = boundaryChunks.get(i);
+                        String chunkText = contextPrefix + "\n\n" + chunk.getText();
+                        Map<String, Object> meta = new HashMap<>(baseMeta);
+                        meta.put("chunkType", "faq");
+                        meta.put("partIndex", i);
+                        meta.put("partCount", boundaryChunks.size());
+                        meta.put("chunkId", chunkId(meta, chunkText, i));
+                        meta.put("parentBlockId", meta.get("chunkId"));
+                        meta.put("contextText", chunkText);
+                        docs.add(new Document(chunkText, meta));
+                    }
+                    return docs;
+                }
+            }
+            // Genuinely short document: single chunk (well under boundary)
             Map<String, Object> meta = new HashMap<>(baseMeta);
             meta.put("chunkType", "faq");
             meta.put("partIndex", 0);
@@ -411,9 +450,8 @@ public class MarkdownLoader {
         return metadata;
     }
 
-    private String extractKeywords(String... values) {
-        Set<String> keywords = new LinkedHashSet<>();
-        Map<String, String> keywordMap = Map.ofEntries(
+    private static Map<String, String> defaultKeywordMap() {
+        return Map.ofEntries(
                 Map.entry("退票", "退票,退款,退钱,退改,取消订单,条件退,手续费"),
                 Map.entry("退款", "退款,退票,退钱,原路退回,到账"),
                 Map.entry("订票", "订票,购票,买票,下单,抢票"),
@@ -449,10 +487,14 @@ public class MarkdownLoader {
                 Map.entry("护照", "护照,外籍,港澳台,国际,跨境"),
                 Map.entry("展览", "展览,体育赛事,直播,线上演出")
         );
+    }
+
+    private String extractKeywords(String... values) {
+        Set<String> keywords = new LinkedHashSet<>();
         for (String value : values) {
             if (StringUtil.isEmpty(value)) continue;
             keywords.add(normalizeFileToken(value));
-            for (Map.Entry<String, String> entry : keywordMap.entrySet()) {
+            for (Map.Entry<String, String> entry : this.keywordMap.entrySet()) {
                 if (value.contains(entry.getKey())) {
                     keywords.addAll(Arrays.asList(entry.getValue().split(",")));
                 }

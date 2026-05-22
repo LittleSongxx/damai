@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "damai.ai.llm-fallback")
 public class LlmFallbackProperties {
 
-    private String primaryModel = "qwen3.6-plus";
-    private String fallbackModel = "qwen-turbo-latest";
+    private String primaryModel = "deepseek-v4-pro";
+    private String fallbackModel = "deepseek-chat";
     private long timeoutMs = 15000;
 }

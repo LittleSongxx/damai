@@ -1,12 +1,21 @@
 package org.javaup.ai.controller;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
+import org.javaup.ai.entity.AiRagEvalCase;
 import org.javaup.ai.entity.AiRagEvalRun;
+import org.javaup.ai.mapper.AiRagEvalCaseMapper;
 import org.javaup.ai.service.RagEvalService;
+import org.javaup.ai.service.HybridSearchService;
+import org.javaup.ai.vo.RagEvalCaseRequest;
 import org.springframework.http.ResponseEntity;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Date;
+import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/rag-eval")
@@ -14,6 +23,14 @@ import java.util.Map;
 public class RagEvalController {
 
     private final RagEvalService ragEvalService;
+    private final AiRagEvalCaseMapper caseMapper;
+    private final HybridSearchService hybridSearchService;
+
+    @GetMapping("/debug-es")
+    public ResponseEntity<Map<String, Object>> debugEs(@RequestParam(defaultValue = "如何申请退票？") String query) {
+        var result = hybridSearchService.sparseSearch(query, 5);
+        return ResponseEntity.ok(Map.of("code", 0, "query", query, "hitCount", result.size(), "hits", result.stream().map(r -> Map.of("chunkId", r.getChunkId(), "score", r.getScore(), "title", r.getTitle() != null ? r.getTitle() : "")).toList()));
+    }
 
     @PostMapping("/start")
     public ResponseEntity<Map<String, Object>> startEval() {
@@ -28,5 +45,104 @@ public class RagEvalController {
             return ResponseEntity.ok(Map.of("code", 1, "message", "not found"));
         }
         return ResponseEntity.ok(Map.of("code", 0, "data", run));
+    }
+
+    // --- Eval Case CRUD ---
+
+    @GetMapping("/cases")
+    public ResponseEntity<Map<String, Object>> listCases(
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String difficulty) {
+        LambdaQueryWrapper<AiRagEvalCase> wrapper = new LambdaQueryWrapper<AiRagEvalCase>()
+                .eq(AiRagEvalCase::getStatus, 1);
+        if (StringUtils.hasText(category)) {
+            wrapper.eq(AiRagEvalCase::getCategory, category);
+        }
+        if (StringUtils.hasText(difficulty)) {
+            wrapper.eq(AiRagEvalCase::getDifficulty, difficulty);
+        }
+        wrapper.orderByDesc(AiRagEvalCase::getCreateTime);
+        List<AiRagEvalCase> cases = caseMapper.selectList(wrapper);
+        return ResponseEntity.ok(Map.of("code", 0, "data", cases));
+    }
+
+    @GetMapping("/cases/{caseId}")
+    public ResponseEntity<Map<String, Object>> getCase(@PathVariable String caseId) {
+        AiRagEvalCase evalCase = caseMapper.selectOne(
+                new LambdaQueryWrapper<AiRagEvalCase>().eq(AiRagEvalCase::getCaseId, caseId));
+        if (evalCase == null) {
+            return ResponseEntity.ok(Map.of("code", 1, "message", "not found"));
+        }
+        return ResponseEntity.ok(Map.of("code", 0, "data", evalCase));
+    }
+
+    @PostMapping("/cases")
+    public ResponseEntity<Map<String, Object>> createCase(@RequestBody RagEvalCaseRequest request) {
+        AiRagEvalCase evalCase = new AiRagEvalCase();
+        evalCase.setCaseId(UUID.randomUUID().toString().replace("-", ""));
+        evalCase.setQuestion(request.getQuestion());
+        evalCase.setExpectedAnswer(request.getExpectedAnswer());
+        evalCase.setExpectedChunks(request.getExpectedChunks());
+        evalCase.setCategory(request.getCategory());
+        evalCase.setDifficulty(request.getDifficulty());
+        evalCase.setStatus(1);
+        evalCase.setCreateTime(new Date());
+        evalCase.setEditTime(new Date());
+        caseMapper.insert(evalCase);
+        return ResponseEntity.ok(Map.of("code", 0, "data", evalCase));
+    }
+
+    @PutMapping("/cases/{caseId}")
+    public ResponseEntity<Map<String, Object>> updateCase(@PathVariable String caseId,
+                                                           @RequestBody RagEvalCaseRequest request) {
+        AiRagEvalCase evalCase = caseMapper.selectOne(
+                new LambdaQueryWrapper<AiRagEvalCase>().eq(AiRagEvalCase::getCaseId, caseId));
+        if (evalCase == null) {
+            return ResponseEntity.ok(Map.of("code", 1, "message", "not found"));
+        }
+        if (StringUtils.hasText(request.getQuestion())) evalCase.setQuestion(request.getQuestion());
+        if (StringUtils.hasText(request.getExpectedAnswer())) evalCase.setExpectedAnswer(request.getExpectedAnswer());
+        if (StringUtils.hasText(request.getExpectedChunks())) evalCase.setExpectedChunks(request.getExpectedChunks());
+        if (StringUtils.hasText(request.getCategory())) evalCase.setCategory(request.getCategory());
+        if (StringUtils.hasText(request.getDifficulty())) evalCase.setDifficulty(request.getDifficulty());
+        evalCase.setEditTime(new Date());
+        caseMapper.updateById(evalCase);
+        return ResponseEntity.ok(Map.of("code", 0, "data", evalCase));
+    }
+
+    @DeleteMapping("/cases/{caseId}")
+    public ResponseEntity<Map<String, Object>> deleteCase(@PathVariable String caseId) {
+        AiRagEvalCase evalCase = caseMapper.selectOne(
+                new LambdaQueryWrapper<AiRagEvalCase>().eq(AiRagEvalCase::getCaseId, caseId));
+        if (evalCase == null) {
+            return ResponseEntity.ok(Map.of("code", 1, "message", "not found"));
+        }
+        evalCase.setStatus(0);
+        evalCase.setEditTime(new Date());
+        caseMapper.updateById(evalCase);
+        return ResponseEntity.ok(Map.of("code", 0, "message", "deleted"));
+    }
+
+    @PostMapping("/cases/batch")
+    public ResponseEntity<Map<String, Object>> batchImport(@RequestBody List<RagEvalCaseRequest> requests) {
+        int imported = 0;
+        for (RagEvalCaseRequest req : requests) {
+            try {
+                AiRagEvalCase evalCase = new AiRagEvalCase();
+                evalCase.setCaseId(UUID.randomUUID().toString().replace("-", ""));
+                evalCase.setQuestion(req.getQuestion());
+                evalCase.setExpectedAnswer(req.getExpectedAnswer());
+                evalCase.setExpectedChunks(req.getExpectedChunks());
+                evalCase.setCategory(req.getCategory());
+                evalCase.setDifficulty(req.getDifficulty());
+                evalCase.setStatus(1);
+                evalCase.setCreateTime(new Date());
+                evalCase.setEditTime(new Date());
+                caseMapper.insert(evalCase);
+                imported++;
+            } catch (Exception ignored) {
+            }
+        }
+        return ResponseEntity.ok(Map.of("code", 0, "imported", imported));
     }
 }

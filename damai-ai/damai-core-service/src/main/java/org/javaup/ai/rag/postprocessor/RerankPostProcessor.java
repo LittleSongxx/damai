@@ -25,7 +25,7 @@ import java.util.Objects;
 public class RerankPostProcessor implements SearchResultPostProcessor {
 
     private final RerankService rerankService;
-    private final org.javaup.ai.service.HybridSearchService hybridSearchService;
+    private final org.javaup.ai.service.DocumentIngestionService documentIngestionService;
 
     @Override
     public String name() { return "rerank"; }
@@ -39,7 +39,15 @@ public class RerankPostProcessor implements SearchResultPostProcessor {
             return sources;
         }
         try {
-            List<Document> docs = hybridSearchService.resolveDocuments(sources);
+            // Resolve documents directly from cache/DB — avoids circular dep on HybridSearchService
+            Map<String, org.springframework.ai.document.Document> cache = documentIngestionService.getDocumentCache();
+            List<Document> docs = new ArrayList<>();
+            for (RagSourceVo s : sources) {
+                org.springframework.ai.document.Document cached = cache.get(s.getChunkId());
+                if (cached != null) {
+                    docs.add(cached);
+                }
+            }
             if (CollectionUtil.isEmpty(docs)) return sources;
             List<Document> reranked = rerankService.rerank(context.getRewrittenQuery(), docs,
                     Math.min(context.getTopK(), docs.size()));

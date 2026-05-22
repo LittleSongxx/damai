@@ -27,6 +27,7 @@ import org.javaup.ai.vo.RagSourceVo;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -75,6 +76,9 @@ public class DocumentIngestionService {
     @Value("${DAMAI_AI_OPENAI_EMBEDDING_DIMENSIONS:1024}")
     private Integer embeddingDimensions;
 
+    @Value("${damai.ai.ingestion.skip-hypothetical-questions:false}")
+    private boolean skipHypotheticalQuestions;
+
     private final Map<String, Document> documentCache = new ConcurrentHashMap<>();
 
     public DocumentIngestionService(MarkdownLoader markdownLoader,
@@ -85,7 +89,7 @@ public class DocumentIngestionService {
                                      RagIngestionTaskMapper taskMapper,
                                      CacheManager cacheManager,
                                      HypotheticalQuestionService hypotheticalService,
-                                     MultiChannelRetrievalEngine retrievalEngine) {
+                                     @Lazy MultiChannelRetrievalEngine retrievalEngine) {
         this.markdownLoader = markdownLoader;
         this.embeddingModel = embeddingModel;
         this.qdrantClient = qdrantClient;
@@ -118,8 +122,13 @@ public class DocumentIngestionService {
             taskMapper.updateById(task);
 
             // Hypothetical questions for FAQ chunks (async-friendly, blocking for now)
-            updateTaskStatus(task, "embedding");
-            generateHypotheticalQuestions(documents, ragChunks);
+            if (!skipHypotheticalQuestions) {
+                updateTaskStatus(task, "embedding");
+                generateHypotheticalQuestions(documents, ragChunks);
+            } else {
+                updateTaskStatus(task, "embedding");
+                log.info("Skipping hypothetical question generation (damai.ai.ingestion.skip-hypothetical-questions=true)");
+            }
 
             // Recreate Qdrant collection
             recreateQdrantCollection();
@@ -473,12 +482,23 @@ public class DocumentIngestionService {
             chunkIdToDbId.put(rc.getChunkUid(), rc.getId());
         }
 
-        List<PointStruct> points = new ArrayList<>();
+        // Collect valid documents for batch embedding
+        List<Document> validDocs = new ArrayList<>();
         for (Document doc : documents) {
             String cid = chunkId(doc);
-            if (!StringUtils.hasText(cid) || !StringUtils.hasText(doc.getText())) continue;
+            if (StringUtils.hasText(cid) && StringUtils.hasText(doc.getText())) {
+                validDocs.add(doc);
+            }
+        }
 
-            float[] vector = embeddingModel.embed(doc.getText());
+        // Batch embed all texts at once to reduce API calls
+        Map<String, float[]> embeddingMap = batchEmbed(validDocs);
+
+        List<PointStruct> points = new ArrayList<>();
+        for (Document doc : validDocs) {
+            String cid = chunkId(doc);
+            float[] vector = embeddingMap.get(cid);
+            if (vector == null) continue;
             List<Float> vectorList = new ArrayList<>(vector.length);
             for (float v : vector) vectorList.add(v);
 
@@ -700,4 +720,39 @@ public class DocumentIngestionService {
     }
 
     private record EsReindexResult(String physicalIndex, int documentCount) {}
+
+    /**
+     * Batch embed documents using a single API call.
+     * Falls back to individual embedding if batch call fails.
+     */
+    private Map<String, float[]> batchEmbed(List<Document> documents) {
+        Map<String, float[]> result = new LinkedHashMap<>();
+        if (documents.isEmpty()) return result;
+
+        try {
+            List<String> texts = documents.stream().map(Document::getText).toList();
+            org.springframework.ai.embedding.EmbeddingRequest request =
+                    new org.springframework.ai.embedding.EmbeddingRequest(texts, null);
+            org.springframework.ai.embedding.EmbeddingResponse response = embeddingModel.call(request);
+            List<org.springframework.ai.embedding.Embedding> embeddings = response.getResults();
+
+            for (int i = 0; i < documents.size() && i < embeddings.size(); i++) {
+                String cid = chunkId(documents.get(i));
+                float[] vector = embeddings.get(i).getOutput();
+                result.put(cid, vector);
+            }
+            log.info("Batch embedded {} documents in one API call", result.size());
+        } catch (Exception e) {
+            log.warn("Batch embedding failed, falling back to individual embedding: {}", e.getMessage());
+            for (Document doc : documents) {
+                try {
+                    String cid = chunkId(doc);
+                    result.put(cid, embeddingModel.embed(doc.getText()));
+                } catch (Exception ex) {
+                    log.warn("Individual embedding failed for chunk {}", chunkId(doc));
+                }
+            }
+        }
+        return result;
+    }
 }

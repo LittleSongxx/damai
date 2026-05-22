@@ -43,7 +43,7 @@ public class AgentLoopExecutor implements AssistantExecutor {
                              AssistantMessageEmitter messageEmitter,
                              AiSpanService spanService,
                              @Qualifier("unifiedChatClient") ChatClient baseChatClient,
-                             ChatModel chatModel,
+                             @Qualifier("openAiChatModel") ChatModel chatModel,
                              List<ToolCallback> toolCallbacks,
                              PromptTemplateLoader templateLoader) {
         this.properties = properties;

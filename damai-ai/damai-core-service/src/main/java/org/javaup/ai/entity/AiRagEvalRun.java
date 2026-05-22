@@ -16,9 +16,17 @@ public class AiRagEvalRun extends BaseTableData {
     private Integer totalCases;
     private Integer completedCases;
     private Double avgRecall;
+    private Double avgPrecision;
+    private Double avgHitRate;
     private Double avgMrr;
     private Double avgNdcg;
     private Double avgFaithfulness;
+    private Double avgAnswerRelevancy;
+    private Double avgCompleteness;
+    private Double avgCtxPrecision;
+    private Double avgCtxRecall;
+    private Double avgContextRelevance;
+    private Double avgAnswerCorrectness;
     private String runStatus;
     private String errorMessage;
 }

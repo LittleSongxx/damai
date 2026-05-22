@@ -1,8 +1,11 @@
 package org.javaup.ai.assistant.skill.ops.nl2sql;
 
+import org.javaup.ai.assistant.budget.TokenBudget;
+import org.javaup.ai.assistant.budget.TokenBudgetManager;
 import org.javaup.ai.assistant.tool.AssistantToolInvoker;
 import org.javaup.ai.cache.CacheManager;
 import org.javaup.ai.rag.prompt.PromptTemplateLoader;
+import org.javaup.ai.service.Nl2SqlMultiTurnContextService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -25,6 +28,8 @@ public class Nl2SqlOrchestrator {
     private final AssistantToolInvoker toolInvoker;
     private final PromptTemplateLoader templateLoader;
     private final CacheManager cacheManager;
+    private final Nl2SqlMultiTurnContextService multiTurnContextService;
+    private final TokenBudgetManager tokenBudgetManager;
 
     public Nl2SqlOrchestrator(@Qualifier("unifiedOpsChatClient") ChatClient chatClient,
                               Nl2SqlProperties properties,
@@ -35,7 +40,9 @@ public class Nl2SqlOrchestrator {
                               Nl2SqlErrorClassifier errorClassifier,
                               AssistantToolInvoker toolInvoker,
                               PromptTemplateLoader templateLoader,
-                              CacheManager cacheManager) {
+                              CacheManager cacheManager,
+                              Nl2SqlMultiTurnContextService multiTurnContextService,
+                              TokenBudgetManager tokenBudgetManager) {
         this.chatClient = chatClient;
         this.properties = properties;
         this.schemaService = schemaService;
@@ -46,6 +53,8 @@ public class Nl2SqlOrchestrator {
         this.toolInvoker = toolInvoker;
         this.templateLoader = templateLoader;
         this.cacheManager = cacheManager;
+        this.multiTurnContextService = multiTurnContextService;
+        this.tokenBudgetManager = tokenBudgetManager;
     }
 
     public Map<String, Object> answer(String runId, String question, String conversationKey) {
@@ -68,6 +77,11 @@ public class Nl2SqlOrchestrator {
                     Map.of("question", question, "tables", schemaContext.tables().stream().map(Nl2SqlProperties.Table::getName).toList()),
                     () -> generateSql(question, schemaContext, conversationKey, null, null));
             evidence.put("generation", generation);
+            // NL2SQL 独立上下文: 记录本轮问答，用于后续多轮指代消解
+            if (generation.isNeedSql() && StringUtils.hasText(generation.getSql()) && conversationKey != null) {
+                multiTurnContextService.recordTurn(conversationKey, question, generation.getSql(),
+                        generation.getExplanation() != null ? generation.getExplanation() : "");
+            }
 
             if (!generation.isNeedSql() || !StringUtils.hasText(generation.getSql())) {
                 evidence.put("status", "NEED_CLARIFICATION");
@@ -140,7 +154,23 @@ public class Nl2SqlOrchestrator {
                                                String previousError) {
         Nl2SqlErrorClassifier.ErrorCategory errorCategory = errorClassifier.classify(previousError);
         String repairGuidance = errorClassifier.buildRepairGuidance(errorCategory);
-        String prompt = buildGenerationPrompt(question, schemaContext, previousSql, previousError, repairGuidance);
+
+        // NL2SQL 独立上下文窗口: 注入多轮对话历史前缀，不与其他 Skill 共享 ChatMemory
+        StringBuilder fullPrompt = new StringBuilder();
+        if (conversationKey != null) {
+            String contextPrefix = multiTurnContextService.buildContextPrefix(conversationKey);
+            if (!contextPrefix.isEmpty()) {
+                fullPrompt.append(contextPrefix);
+            }
+        }
+        fullPrompt.append(buildGenerationPrompt(question, schemaContext, previousSql, previousError, repairGuidance));
+        String prompt = fullPrompt.toString();
+
+        // Token 预算跟踪: 独立统计 NL2SQL 提示各组成部分
+        TokenBudget budget = tokenBudgetManager.createBudget("qwen3.6-plus");
+        budget.recordUsage("SYSTEM_PROMPT", tokenBudgetManager.estimateTokens(schemaContext.formattedSchema()));
+        tokenBudgetManager.verifyBudget(budget);
+
         ChatClient.ChatClientRequestSpec request = chatClient.prompt().user(prompt);
         if (StringUtils.hasText(conversationKey)) {
             request.advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationKey));

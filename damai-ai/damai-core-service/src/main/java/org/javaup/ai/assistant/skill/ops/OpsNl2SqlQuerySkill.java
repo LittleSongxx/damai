@@ -7,6 +7,7 @@ import org.javaup.ai.assistant.AssistantSkillContext;
 import org.javaup.ai.assistant.AssistantSkillDescriptor;
 import org.javaup.ai.assistant.AssistantSkillResult;
 import org.javaup.ai.assistant.AssistantSkillRiskLevel;
+import org.javaup.ai.assistant.executor.SkillAgentLoopService;
 import org.javaup.ai.assistant.memory.AssistantMemoryKeyService;
 import org.javaup.ai.assistant.skill.ops.nl2sql.Nl2SqlOrchestrator;
 import org.springframework.ai.chat.client.ChatClient;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Component
 public class OpsNl2SqlQuerySkill implements AssistantSkill {
@@ -23,13 +25,19 @@ public class OpsNl2SqlQuerySkill implements AssistantSkill {
     private final ChatClient unifiedOpsChatClient;
     private final Nl2SqlOrchestrator nl2SqlOrchestrator;
     private final AssistantMemoryKeyService memoryKeyService;
+    private final SkillAgentLoopService agentLoopService;
+    private final DiagnosticPlanner diagnosticPlanner;
 
     public OpsNl2SqlQuerySkill(@Qualifier("unifiedOpsChatClient") ChatClient unifiedOpsChatClient,
                                Nl2SqlOrchestrator nl2SqlOrchestrator,
-                               AssistantMemoryKeyService memoryKeyService) {
+                               AssistantMemoryKeyService memoryKeyService,
+                               SkillAgentLoopService agentLoopService,
+                               DiagnosticPlanner diagnosticPlanner) {
         this.unifiedOpsChatClient = unifiedOpsChatClient;
         this.nl2SqlOrchestrator = nl2SqlOrchestrator;
         this.memoryKeyService = memoryKeyService;
+        this.agentLoopService = agentLoopService;
+        this.diagnosticPlanner = diagnosticPlanner;
     }
 
     @Override
@@ -78,6 +86,10 @@ public class OpsNl2SqlQuerySkill implements AssistantSkill {
 
         Map<String, Object> evidence = nl2SqlOrchestrator.answer(runId, prompt, conversationKey);
 
+        // LangGraph chain 模式: 规划诊断推理链，引导 LLM 按步骤排查
+        DiagnosticPlan diagnosticPlan = diagnosticPlanner.plan(prompt);
+        String diagnosticContext = formatDiagnosticPlan(diagnosticPlan);
+
         String answerPrompt = """
                 你是大麦运维助手。请基于给定的真实运维证据做分析，不要编造未出现的数据。
 
@@ -87,6 +99,8 @@ public class OpsNl2SqlQuerySkill implements AssistantSkill {
                 用户问题：
                 %s
 
+                %s
+
                 证据：
                 %s
 
@@ -94,13 +108,24 @@ public class OpsNl2SqlQuerySkill implements AssistantSkill {
                 1. 先概括当前发现。
                 2. 再指出最可能的问题位置。
                 3. 如果证据类型是 nl2sql，必须说明 SQL 是否已执行；如果未配置只读数据源，只展示已生成并校验的 SQL 和配置缺口。
-                4. 最后给出下一步排查建议。
-                """.formatted(memorySummary(context), prompt, JSON.toJSONString(evidence));
-        String answer = unifiedOpsChatClient.prompt()
-                .user(answerPrompt)
-                .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationKey))
-                .call()
-                .content();
+                4. 最后按诊断链给出下一步排查建议。
+                """.formatted(memorySummary(context), prompt, diagnosticContext, JSON.toJSONString(evidence));
+
+        // Agentic 决策循环: 若第一轮分析未找到根因，自动拓展排查维度
+        List<String> alternativeHints = List.of(
+                "扩大时间窗口重新查询（如前推/后推 1 小时）",
+                "检查同一 traceId 上下游服务的日志和指标",
+                "对比同时段正常状态的基线指标数据",
+                "如果多次排查仍无法定位，汇总已有发现并建议人工介入"
+        );
+
+        String answer = agentLoopService.executeWithRetry(
+                unifiedOpsChatClient,
+                runId,
+                answerPrompt,
+                descriptor(),
+                alternativeHints);
+
         return AssistantSkillResult.builder()
                 .message(answer)
                 .responseSummary(answer)
@@ -112,5 +137,27 @@ public class OpsNl2SqlQuerySkill implements AssistantSkill {
             return "无";
         }
         return context.getMemoryContext().summary();
+    }
+
+    /**
+     * 将诊断计划格式化为 LLM 可读的诊断链描述 —— 遵循 LangGraph chain 模式。
+     */
+    private String formatDiagnosticPlan(DiagnosticPlan plan) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("诊断推理链（共 " + plan.getTotalSteps() + " 步）：\n");
+        List<DiagnosticPlan.Step> steps = plan.getSteps();
+        for (int i = 0; i < steps.size(); i++) {
+            DiagnosticPlan.Step step = steps.get(i);
+            sb.append("  " + (i + 1) + ". [" + step.phase() + "] " + step.toolName());
+            sb.append(": " + step.description());
+            if (!step.serviceTargets().isEmpty()) {
+                sb.append("（目标服务: " + String.join(", ", step.serviceTargets()) + "）");
+            }
+            if (step.conditional()) {
+                sb.append(" [条件: " + step.conditionDescription() + "]");
+            }
+            sb.append("\n");
+        }
+        return sb.toString();
     }
 }

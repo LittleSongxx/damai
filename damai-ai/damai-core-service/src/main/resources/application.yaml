@@ -65,12 +65,14 @@ spring:
       chat:
         model: ${DAMAI_AI_OLLAMA_CHAT_MODEL:deepseek-r1:7b}
     openai:
-      base-url: ${DAMAI_AI_OPENAI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
-      api-key: ${DAMAI_AI_ALIBABA_API_KEY:}
+      base-url: ${DAMAI_AI_OPENAI_BASE_URL:https://api.deepseek.com}
+      api-key: ${DAMAI_AI_DEEPSEEK_API_KEY:}
       chat:
         options:
-          model: ${DAMAI_AI_OPENAI_CHAT_MODEL:qwen3.6-plus}
+          model: ${DAMAI_AI_OPENAI_CHAT_MODEL:deepseek-v4-pro}
       embedding:
+        base-url: ${DAMAI_AI_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
+        api-key: ${DAMAI_AI_EMBEDDING_API_KEY:${DAMAI_AI_ALIBABA_API_KEY:}}
         options:
           model: ${DAMAI_AI_OPENAI_EMBEDDING_MODEL:text-embedding-v4}
           dimensions: ${DAMAI_AI_OPENAI_EMBEDDING_DIMENSIONS:1024}
@@ -80,14 +82,14 @@ spring:
       chat:
         options:
           model: ${DAMAI_AI_DEEPSEEK_CHAT_MODEL:deepseek-chat}
-    mcp:
-      client:
-        sse:
-          connections:
-            damai-log:
-              url: ${DAMAI_AI_MCP_LOG_URL:http://127.0.0.1:8085/sse}
-            damai-metrics:
-              url: ${DAMAI_AI_MCP_METRICS_URL:http://127.0.0.1:8086/sse}
+##     mcp:
+##       client:
+##         sse:
+##           connections:
+##             damai-log:
+##               url: ${DAMAI_AI_MCP_LOG_URL:http://127.0.0.1:8085/sse}
+##             damai-metrics:
+##               url: ${DAMAI_AI_MCP_METRICS_URL:http://127.0.0.1:8086/sse}
 easy-es:
   #默认为true,若为false则认为不启用本框架
   enable: true
@@ -136,6 +138,8 @@ damai:
   ai:
     playground:
       enabled: ${DAMAI_AI_PLAYGROUND_ENABLED:false}
+    eval:
+      degraded-mode: ${DAMAI_AI_EVAL_DEGRADED_MODE:false}
     security:
       admin-user-ids: ${DAMAI_AI_ADMIN_USER_IDS:}
     web-search:
@@ -153,8 +157,13 @@ damai:
         url: ${DAMAI_AI_BOCHA_URL:https://api.bochaai.com/v1/web-search}
     rerank:
       model: ${DAMAI_AI_RERANK_MODEL:qwen3-rerank}
-      api-url: ${DAMAI_AI_RERANK_API_URL:https://dashscope.aliyuncs.com/api/v1/services/rerank}
+      api-url: ${DAMAI_AI_RERANK_API_URL:https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank}
       top-n: ${DAMAI_AI_RERANK_TOP_N:10}
+      api-key: ${DAMAI_AI_RERANK_API_KEY:${DAMAI_AI_EMBEDDING_API_KEY:${DAMAI_AI_ALIBABA_API_KEY:}}}
+      cross-encoder:
+        enabled: ${DAMAI_AI_CROSS_ENCODER_ENABLED:false}
+        api-url: ${DAMAI_AI_CROSS_ENCODER_API_URL:}
+        model: ${DAMAI_AI_CROSS_ENCODER_MODEL:bge-reranker-v2-m3}
     prometheus:
       url: ${DAMAI_AI_PROMETHEUS_URL:http://127.0.0.1:9090}
     qdrant:
@@ -163,7 +172,7 @@ damai:
       grpc-port: ${DAMAI_AI_QDRANT_GRPC_PORT:16334}
       collection: ${DAMAI_AI_QDRANT_COLLECTION:damai_ai_faq}
     nl2sql:
-      enabled: ${DAMAI_AI_NL2SQL_ENABLED:true}
+      enabled: ${DAMAI_AI_NL2SQL_ENABLED:false}
       schema-collection: ${DAMAI_AI_NL2SQL_SCHEMA_COLLECTION:damai_ai_nl2sql_schema}
       max-rows: ${DAMAI_AI_NL2SQL_MAX_ROWS:100}
       schema-top-k: ${DAMAI_AI_NL2SQL_SCHEMA_TOP_K:5}
@@ -178,7 +187,7 @@ damai:
       alias: ${DAMAI_AI_FAQ_ALIAS:damai-ai-faq-current}
     rag:
       document-pattern: ${DAMAI_AI_RAG_DOCUMENT_PATTERN:classpath:datum/*.md}
-      chunk-size: ${DAMAI_AI_RAG_CHUNK_SIZE:400}
+      chunk-size: ${DAMAI_AI_RAG_CHUNK_SIZE:200}
       min-chunk-size-chars: ${DAMAI_AI_RAG_MIN_CHUNK_SIZE_CHARS:50}
       min-chunk-length-to-embed: ${DAMAI_AI_RAG_MIN_CHUNK_LENGTH_TO_EMBED:5}
       max-num-chunks: ${DAMAI_AI_RAG_MAX_NUM_CHUNKS:10000}
@@ -193,6 +202,14 @@ damai:
     retrieval:
       min-vector-similarity: ${DAMAI_AI_RETRIEVAL_MIN_VECTOR_SIMILARITY:0.45}
       keyword-relative-score-floor: ${DAMAI_AI_RETRIEVAL_KEYWORD_RELATIVE_SCORE_FLOOR:0.35}
+      rrf-k: ${DAMAI_AI_RETRIEVAL_RRF_K:60}
+      post-filter:
+        enabled: ${DAMAI_AI_POST_FILTER_ENABLED:true}
+        relevance-threshold: ${DAMAI_AI_POST_FILTER_THRESHOLD:0.35}
+        min-docs-to-keep: ${DAMAI_AI_POST_FILTER_MIN_DOCS:2}
+      sentence-window:
+        enabled: ${DAMAI_AI_SENTENCE_WINDOW_ENABLED:true}
+        window-size: ${DAMAI_AI_SENTENCE_WINDOW_SIZE:2}
       parent-elevation-enabled: ${DAMAI_AI_RETRIEVAL_PARENT_ELEVATION_ENABLED:false}
     memory:
       structured:
@@ -248,8 +265,8 @@ damai:
       max-steps: ${DAMAI_AI_AGENT_LOOP_MAX_STEPS:5}
       step-timeout-ms: ${DAMAI_AI_AGENT_LOOP_STEP_TIMEOUT_MS:30000}
     llm-fallback:
-      primary-model: ${DAMAI_AI_LLM_PRIMARY_MODEL:qwen3.6-plus}
-      fallback-model: ${DAMAI_AI_LLM_FALLBACK_MODEL:qwen-turbo-latest}
+      primary-model: ${DAMAI_AI_LLM_PRIMARY_MODEL:deepseek-v4-pro}
+      fallback-model: ${DAMAI_AI_LLM_FALLBACK_MODEL:deepseek-chat}
       timeout-ms: ${DAMAI_AI_LLM_TIMEOUT_MS:15000}
     retry:
       max-retries: ${DAMAI_AI_RETRY_MAX:1}

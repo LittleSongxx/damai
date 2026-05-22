@@ -19,11 +19,40 @@ public final class RagFusionSupport {
     public static List<RagSourceVo> reciprocalRankFusion(List<RagSourceVo> denseSources,
                                                          List<RagSourceVo> sparseSources,
                                                          int topK) {
+        return reciprocalRankFusion(denseSources, sparseSources, topK, 60);
+    }
+
+    public static List<RagSourceVo> reciprocalRankFusion(List<RagSourceVo> denseSources,
+                                                         List<RagSourceVo> sparseSources,
+                                                         int topK,
+                                                         int rrfK) {
+        return weightedReciprocalRankFusion(denseSources, sparseSources, topK, rrfK, null);
+    }
+
+    /**
+     * Adaptive weighted RRF: applies channel weights based on query type.
+     * SEMANTIC queries favor dense (0.7/0.3), KEYWORD queries favor sparse (0.3/0.7),
+     * MIXED uses equal weights (0.5/0.5).
+     */
+    public static List<RagSourceVo> weightedReciprocalRankFusion(
+            List<RagSourceVo> denseSources,
+            List<RagSourceVo> sparseSources,
+            int topK,
+            int rrfK,
+            org.javaup.ai.service.AdvancedQueryService.QueryType queryType) {
+        double denseWeight = 0.5;
+        double sparseWeight = 0.5;
+        if (queryType != null) {
+            switch (queryType) {
+                case SEMANTIC -> { denseWeight = 0.7; sparseWeight = 0.3; }
+                case KEYWORD  -> { denseWeight = 0.3; sparseWeight = 0.7; }
+                default       -> { denseWeight = 0.5; sparseWeight = 0.5; }
+            }
+        }
         Map<String, Double> scores = new HashMap<>();
         Map<String, RagSourceVo> sourceMap = new HashMap<>();
-        int k = 60;
-        merge(scores, sourceMap, denseSources, k);
-        merge(scores, sourceMap, sparseSources, k);
+        weightedMerge(scores, sourceMap, denseSources, rrfK, denseWeight);
+        weightedMerge(scores, sourceMap, sparseSources, rrfK, sparseWeight);
         return scores.entrySet().stream()
                 .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
                 .limit(topK)
@@ -59,9 +88,17 @@ public final class RagFusionSupport {
                               Map<String, RagSourceVo> sourceMap,
                               List<RagSourceVo> sources,
                               int k) {
+        weightedMerge(scores, sourceMap, sources, k, 1.0);
+    }
+
+    private static void weightedMerge(Map<String, Double> scores,
+                                      Map<String, RagSourceVo> sourceMap,
+                                      List<RagSourceVo> sources,
+                                      int k,
+                                      double weight) {
         for (int i = 0; i < sources.size(); i++) {
             RagSourceVo source = sources.get(i);
-            scores.merge(source.getChunkId(), 1.0 / (k + i + 1), Double::sum);
+            scores.merge(source.getChunkId(), weight / (k + i + 1), Double::sum);
             sourceMap.putIfAbsent(source.getChunkId(), source);
         }
     }

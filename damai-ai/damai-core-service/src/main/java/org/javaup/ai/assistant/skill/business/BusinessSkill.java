@@ -7,11 +7,13 @@ import org.javaup.ai.assistant.AssistantSkillContext;
 import org.javaup.ai.assistant.AssistantSkillDescriptor;
 import org.javaup.ai.assistant.AssistantSkillRiskLevel;
 import org.javaup.ai.assistant.AssistantSkillResult;
+import org.javaup.ai.assistant.executor.SkillAgentLoopService;
 import org.javaup.ai.assistant.memory.AssistantMemoryKeyService;
 import org.javaup.ai.entity.AiAction;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -22,13 +24,16 @@ public class BusinessSkill implements AssistantSkill {
     private final ChatClient unifiedBusinessChatClient;
     private final AssistantRunService assistantRunService;
     private final AssistantMemoryKeyService memoryKeyService;
+    private final SkillAgentLoopService agentLoopService;
 
-    public BusinessSkill(@Qualifier("unifiedBusinessChatClient") ChatClient unifiedBusinessChatClient,
+    public BusinessSkill(@Lazy @Qualifier("unifiedBusinessChatClient") ChatClient unifiedBusinessChatClient,
                          AssistantRunService assistantRunService,
-                         AssistantMemoryKeyService memoryKeyService) {
+                         AssistantMemoryKeyService memoryKeyService,
+                         @Lazy SkillAgentLoopService agentLoopService) {
         this.unifiedBusinessChatClient = unifiedBusinessChatClient;
         this.assistantRunService = assistantRunService;
         this.memoryKeyService = memoryKeyService;
+        this.agentLoopService = agentLoopService;
     }
 
     @Override
@@ -73,12 +78,25 @@ public class BusinessSkill implements AssistantSkill {
 
     @Override
     public AssistantSkillResult execute(AssistantSkillContext context) {
-        String content = unifiedBusinessChatClient.prompt()
-                .user(context.buildUserPrompt())
-                .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, memoryKeyService.userConversationKey(context.getRun().getUserId(), context.getRun().getConversationId())))
-                .call()
-                .content();
+        // Agentic 决策循环: 遵循 Anthropic "Building Effective Agents" Agent 模式
+        // 当 Tool Calling 未产生满意结果时自动进入替代策略重试
+        List<String> alternativeHints = List.of(
+                "扩大搜索城市范围，搜索全国所有城市的该类型演出",
+                "尝试搜索该艺人/类型的其他场次或巡演",
+                "降低筛选条件（如不限制价格区间），展示更多选项",
+                "如果多次尝试仍无结果，诚实告知并建议用户关注大麦APP最新上架信息"
+        );
+
+        String content = agentLoopService.executeWithRetry(
+                unifiedBusinessChatClient,
+                context.getRun().getRunId(),
+                context.buildUserPrompt(),
+                descriptor(),
+                alternativeHints);
+
         AiAction pendingAction = assistantRunService.getPendingAction(context.getRun().getRunId());
+
+        // 如果有 Tool Calling 产生了购票快照（pendingAction），附加到结果中
         return AssistantSkillResult.builder()
                 .message(content)
                 .responseSummary(content)

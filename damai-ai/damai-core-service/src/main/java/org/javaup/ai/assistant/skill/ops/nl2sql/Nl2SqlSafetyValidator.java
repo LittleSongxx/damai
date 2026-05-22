@@ -113,7 +113,7 @@ public class Nl2SqlSafetyValidator {
     }
 
     private boolean containsSqlToken(String lowerSql, String token) {
-        return Pattern.compile("(?i)(^|[^a-z0-9_])" + Pattern.quote(token) + "([^a-z0-9_]|$)")
+        return Pattern.compile("(?i)(^|[^a-z0-9])" + Pattern.quote(token) + "([^a-z0-9]|$)")
                 .matcher(lowerSql)
                 .find();
     }

@@ -10,6 +10,8 @@ import org.javaup.ai.assistant.AssistantSkillContext;
 import org.javaup.ai.assistant.AssistantSkillDescriptor;
 import org.javaup.ai.assistant.AssistantSkillRiskLevel;
 import org.javaup.ai.assistant.AssistantSkillResult;
+import org.javaup.ai.assistant.budget.TokenBudget;
+import org.javaup.ai.assistant.budget.TokenBudgetManager;
 import org.javaup.ai.assistant.memory.AssistantMemoryKeyService;
 import org.javaup.ai.assistant.runtime.AssistantObservedChatService;
 import org.javaup.ai.assistant.tool.AssistantToolInvoker;
@@ -41,6 +43,7 @@ public class KnowledgeSkill implements AssistantSkill {
     private final KnowledgeShadowRoutingService shadowRoutingService;
     private final KnowledgeRetrievalTraceService retrievalTraceService;
     private final AssistantObservedChatService observedChatService;
+    private final TokenBudgetManager tokenBudgetManager;
 
     public KnowledgeSkill(@Qualifier("unifiedKnowledgeChatClient") ChatClient unifiedKnowledgeChatClient,
                           KnowledgeRetrievalPlanner retrievalPlanner,
@@ -51,7 +54,8 @@ public class KnowledgeSkill implements AssistantSkill {
                           AssistantToolInvoker toolInvoker,
                           KnowledgeShadowRoutingService shadowRoutingService,
                           KnowledgeRetrievalTraceService retrievalTraceService,
-                          AssistantObservedChatService observedChatService) {
+                          AssistantObservedChatService observedChatService,
+                          TokenBudgetManager tokenBudgetManager) {
         this.unifiedKnowledgeChatClient = unifiedKnowledgeChatClient;
         this.retrievalPlanner = retrievalPlanner;
         this.retrievalOrchestrator = retrievalOrchestrator;
@@ -62,6 +66,7 @@ public class KnowledgeSkill implements AssistantSkill {
         this.shadowRoutingService = shadowRoutingService;
         this.retrievalTraceService = retrievalTraceService;
         this.observedChatService = observedChatService;
+        this.tokenBudgetManager = tokenBudgetManager;
     }
 
     @Override
@@ -195,7 +200,12 @@ public class KnowledgeSkill implements AssistantSkill {
                     .build();
         }
 
-        KnowledgePromptAssemblyResult prompt = promptAssemblyService.assemble(context.buildUserPrompt(), retrievalContext);
+        TokenBudget tokenBudget = tokenBudgetManager.createBudget("qwen3.6-plus");
+        String userPrompt = context.buildUserPrompt();
+        tokenBudget.recordUsage("MEMORY", tokenBudgetManager.estimateTokens(context.formatMemorySummary()));
+        tokenBudget.recordUsage("USER_PROFILE", tokenBudgetManager.estimateTokens(context.formatUserProfile()));
+        KnowledgePromptAssemblyResult prompt = promptAssemblyService.assemble(userPrompt, retrievalContext, tokenBudget);
+        tokenBudgetManager.verifyBudget(tokenBudget);
         Flux<String> tokenStream = observedChatService.stream(
                 unifiedKnowledgeChatClient,
                 "KNOWLEDGE_ANSWER",

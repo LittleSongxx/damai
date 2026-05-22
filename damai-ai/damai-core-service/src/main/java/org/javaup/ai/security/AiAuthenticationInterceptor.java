@@ -22,7 +22,10 @@ import java.util.Set;
 public class AiAuthenticationInterceptor implements HandlerInterceptor {
 
     private static final Set<String> OPEN_PREFIXES = Set.of(
-            "/actuator/"
+            "/actuator/",
+            "/api/rag-eval",
+            "/ai/rag",
+            "/error"
     );
 
     @Value("${damai.ai.playground.enabled:false}")

@@ -35,7 +35,7 @@ public class UnifiedAssistantAutoConfiguration {
                         MessageChatMemoryAdvisor.builder(chatMemory).order(MESSAGE_CHAT_MEMORY_ADVISOR_ORDER).build(),
                         AiObservabilityAdvisor.builder(observabilityService)
                                 .order(OBSERVABILITY_ADVISOR_ORDER)
-                                .modelName("qwen3.6-plus")
+                                .modelName("deepseek-v4-pro")
                                 .requestType("UnifiedBusiness")
                                 .build()
                 )
@@ -54,7 +54,7 @@ public class UnifiedAssistantAutoConfiguration {
                         MessageChatMemoryAdvisor.builder(chatMemory).order(MESSAGE_CHAT_MEMORY_ADVISOR_ORDER).build(),
                         AiObservabilityAdvisor.builder(observabilityService)
                                 .order(OBSERVABILITY_ADVISOR_ORDER)
-                                .modelName("qwen3.6-plus")
+                                .modelName("deepseek-v4-pro")
                                 .requestType("UnifiedKnowledge")
                                 .build()
                 )
@@ -77,7 +77,7 @@ public class UnifiedAssistantAutoConfiguration {
                         MessageChatMemoryAdvisor.builder(chatMemory).order(MESSAGE_CHAT_MEMORY_ADVISOR_ORDER).build(),
                         AiObservabilityAdvisor.builder(observabilityService)
                                 .order(OBSERVABILITY_ADVISOR_ORDER)
-                                .modelName("qwen3.6-plus")
+                                .modelName("deepseek-v4-pro")
                                 .requestType("UnifiedGeneral")
                                 .build()
                 )
@@ -95,7 +95,7 @@ public class UnifiedAssistantAutoConfiguration {
                         MessageChatMemoryAdvisor.builder(chatMemory).order(MESSAGE_CHAT_MEMORY_ADVISOR_ORDER).build(),
                         AiObservabilityAdvisor.builder(observabilityService)
                                 .order(OBSERVABILITY_ADVISOR_ORDER)
-                                .modelName("qwen3.6-plus")
+                                .modelName("deepseek-v4-pro")
                                 .requestType("UnifiedOps")
                                 .build()
                 )

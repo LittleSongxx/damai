@@ -13,6 +13,7 @@ import org.javaup.ai.assistant.executor.AssistantExecutorRegistry;
 import org.javaup.ai.assistant.executor.AssistantMessageEmitter;
 import org.javaup.ai.assistant.runtime.AssistantRuntimeLeaseService;
 import org.javaup.ai.assistant.runtime.AssistantStageTraceService;
+import org.javaup.ai.assistant.runtime.CheckpointManager;
 import org.javaup.ai.entity.AiRun;
 import org.javaup.ai.entity.AiRunEvent;
 import org.javaup.ai.guardrails.GuardrailAuditService;
@@ -60,6 +61,7 @@ public class AssistantRuntimeService {
     private final BusinessMetrics businessMetrics;
     private final org.javaup.ai.config.ThreadPoolProperties threadPoolProperties;
     private final org.javaup.ai.assistant.mq.AssistantRunRequestPublisher overflowPublisher;
+    private final CheckpointManager checkpointManager;
 
     public AssistantRunCreatedVo createRun(AssistantRunCreateRequest request) {
         return runService.createRun(request);
@@ -174,13 +176,27 @@ public class AssistantRuntimeService {
                 request.getMessage(),
                 Map.of("conversationId", run.getConversationId()));
         AssistantExecutionPlan plan;
+        // LangGraph durable execution: 检测是否有可恢复的 checkpoint
+        CheckpointManager.ResumeContext resumeCtx = checkpointManager.tryResume(run);
+        boolean isResume = resumeCtx != null;
+
         try {
-            plan = executionPlanner.plan(run, user, request);
-            traceRecorder.completeStage(planningSpan, plan.getReason(), Map.of(
+            if (isResume && resumeCtx.canSkipRouting()) {
+                // 从 checkpoint 恢复：从快照重建 plan，跳过已完成的阶段
+                log.info("Resuming runId={} from checkpoint stage={}", run.getRunId(), resumeCtx.stage());
+                plan = rebuildPlanFromCheckpoint(run, resumeCtx);
+                traceRecorder.completeStage(planningSpan, "resumed_from:" + resumeCtx.stage(), Map.of(
+                        "resumed", true,
+                        "checkpointStage", resumeCtx.stage()
+                ));
+            } else {
+                plan = executionPlanner.plan(run, user, request);
+                traceRecorder.completeStage(planningSpan, plan.getReason(), Map.of(
                     "routeType", plan.getRouteDecision() == null || plan.getRouteDecision().getRouteType() == null
                             ? "" : plan.getRouteDecision().getRouteType().getCode(),
                     "executionMode", plan.getExecutionMode() == null ? "" : plan.getExecutionMode().name()
             ));
+            }
         } catch (Exception ex) {
             traceRecorder.failStage(planningSpan, "planning failed", ex.getMessage(), Map.of());
             throw ex;
@@ -197,6 +213,14 @@ public class AssistantRuntimeService {
         ));
         runService.appendEvent(run.getRunId(), AssistantEventTypes.ROUTE_SELECTED, routeSelectedPayload(run, plan));
 
+        // Checkpoint: 路由决策已完成，保存可恢复状态（LangGraph durable execution）
+        checkpointManager.saveCheckpoint(run.getRunId(), "ROUTED", Map.of(
+                "routeType", decision.getRouteType().getCode(),
+                "executionMode", plan.getExecutionMode().name(),
+                "skillId", plan.getSkillDecision() != null ? plan.getSkillDecision().getSkillId() : "",
+                "originalMessage", plan.getOriginalMessage()
+        ));
+
         try {
             AssistantExecutor executor = executorRegistry.getRequired(plan.getExecutionMode());
             executor.execute(AssistantExecutionContext.builder()
@@ -206,7 +230,17 @@ public class AssistantRuntimeService {
                     .user(user)
                     .traceRecorder(traceRecorder)
                     .build());
+            // LangGraph durable execution: 成功完成后清空 checkpoint
+            checkpointManager.clearCheckpoint(run.getRunId());
         } catch (Exception ex) {
+            // LangGraph durable execution: 失败时保存失败阶段的 checkpoint 以便恢复重试
+            checkpointManager.saveCheckpoint(run.getRunId(), "EXECUTION_FAILED", Map.of(
+                    "routeType", decision.getRouteType().getCode(),
+                    "executionMode", plan.getExecutionMode().name(),
+                    "skillId", plan.getSkillDecision() != null ? plan.getSkillDecision().getSkillId() : "",
+                    "originalMessage", plan.getOriginalMessage(),
+                    "error", ex.getMessage()
+            ));
             ConversationTraceRecorder.StageHandle finalizeSpan = traceRecorder.startStage(
                     ConversationTraceStageCode.FINALIZE, "FAILED",
                     "finalizing failed run", Map.of());
@@ -343,6 +377,49 @@ public class AssistantRuntimeService {
                 .runId(context.getRunId())
                 .chatType(context.getChatType())
                 .requestType(context.getRequestType())
+                .build();
+    }
+
+    /**
+     * LangGraph durable execution: 从 checkpoint 快照重建 {@link AssistantExecutionPlan}。
+     *
+     * <p>当 Run 从断点恢复时（如 ROUTED、RETRIEVAL_COMPLETED 等阶段），
+     * 不再重新调用 LLM 做路由规划，而是基于 checkpoint 中保存的决策信息直接重建 plan。
+     */
+    private AssistantExecutionPlan rebuildPlanFromCheckpoint(AiRun run, CheckpointManager.ResumeContext resumeCtx) {
+        AssistantRouteType routeType = AssistantRouteType.fromCode(resumeCtx.getString("routeType"));
+        if (routeType == null) {
+            routeType = AssistantRouteType.GENERAL;
+        }
+        AssistantExecutionMode mode;
+        try {
+            mode = AssistantExecutionMode.valueOf(resumeCtx.getString("executionMode"));
+        } catch (IllegalArgumentException e) {
+            mode = AssistantExecutionMode.SKILL;
+        }
+        String skillId = resumeCtx.getString("skillId");
+        String originalMessage = resumeCtx.getString("originalMessage");
+
+        AssistantSkillDecision skillDecision = null;
+        if (skillId != null && !skillId.isBlank()) {
+            skillDecision = AssistantSkillDecision.builder()
+                    .skillId(skillId)
+                    .reason("resumed from checkpoint stage=" + resumeCtx.stage())
+                    .build();
+        }
+
+        return AssistantExecutionPlan.builder()
+                .runId(run.getRunId())
+                .conversationId(run.getConversationId())
+                .originalMessage(originalMessage != null ? originalMessage : run.getUserMessage())
+                .executionMode(mode)
+                .routeDecision(AssistantRouteDecision.builder()
+                        .routeType(routeType)
+                        .reason("resumed from checkpoint stage=" + resumeCtx.stage())
+                        .fromFallback(false)
+                        .build())
+                .skillDecision(skillDecision)
+                .reason("resumed from checkpoint")
                 .build();
     }
 

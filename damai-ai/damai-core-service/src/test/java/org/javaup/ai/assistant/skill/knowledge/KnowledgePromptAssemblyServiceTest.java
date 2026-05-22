@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class KnowledgePromptAssemblyServiceTest {
 
-    private final KnowledgePromptAssemblyService service = new KnowledgePromptAssemblyService();
+    private final KnowledgePromptAssemblyService service = new KnowledgePromptAssemblyService(null);
 
     @Test
     void shouldAssembleGroundedPromptWithinContextBudget() {

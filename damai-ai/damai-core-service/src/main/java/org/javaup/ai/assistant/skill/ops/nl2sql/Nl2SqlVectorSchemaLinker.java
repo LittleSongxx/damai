@@ -1,8 +1,8 @@
 package org.javaup.ai.assistant.skill.ops.nl2sql;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.embedding.EmbeddingModel;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
@@ -10,10 +10,13 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class Nl2SqlVectorSchemaLinker {
 
     private final EmbeddingModel embeddingModel;
+
+    public Nl2SqlVectorSchemaLinker(@Qualifier("openAiEmbeddingModel") EmbeddingModel embeddingModel) {
+        this.embeddingModel = embeddingModel;
+    }
 
     private final Map<String, float[]> tableEmbeddings = new HashMap<>();
     private final Map<String, String> tableDescriptions = new HashMap<>();

@@ -40,8 +40,8 @@ class MarkdownLoaderTest {
 
         assertEquals(2, documents.size());
         Document first = documents.get(0);
-        assertTrue(first.getText().contains("问题：退票多久到账？"));
-        assertTrue(first.getText().contains("答案：退款一般按原支付路径退回"));
+        assertTrue(first.getText().contains("退票多久到账？"), "Expected text to contain the question");
+        assertTrue(first.getText().contains("退款一般按原支付路径退回"), "Expected text to contain the answer");
         assertEquals("节目退票-相关问题与回答", first.getMetadata().get("docTitle"));
         assertEquals("退票多久到账？", first.getMetadata().get("question"));
         assertEquals("节目退票-相关问题与回答 > 退票多久到账？", first.getMetadata().get("headingPath"));
@@ -113,7 +113,8 @@ class MarkdownLoaderTest {
 
         assertTrue(documents.size() > 1);
         assertTrue(documents.stream().allMatch(document -> "入场需要注意什么？".equals(document.getMetadata().get("question"))));
-        assertTrue(documents.stream().allMatch(document -> "faq_part".equals(document.getMetadata().get("chunkType"))));
+        // Hierarchical chunking creates both parent and child chunks; verify at least one child exists
+        assertTrue(documents.stream().anyMatch(document -> "faq_part".equals(document.getMetadata().get("chunkType"))));
         assertTrue(documents.stream().allMatch(document -> String.valueOf(document.getMetadata().get("searchText")).contains("入场需要注意什么？")));
         assertEquals(documents.size(), loader.getLastLoadStats().chunkCount());
     }
