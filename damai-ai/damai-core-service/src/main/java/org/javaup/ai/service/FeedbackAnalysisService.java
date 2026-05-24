@@ -6,9 +6,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.config.AiSecurityProperties;
 import org.javaup.ai.entity.AiFeedback;
 import org.javaup.ai.entity.AiRun;
+import org.javaup.ai.entity.FaqEntry;
 import org.javaup.ai.entity.FeedbackAnalysis;
 import org.javaup.ai.mapper.AiFeedbackMapper;
 import org.javaup.ai.mapper.AiRunMapper;
+import org.javaup.ai.mapper.FaqEntryMapper;
 import org.javaup.ai.mapper.FeedbackAnalysisMapper;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -33,19 +35,22 @@ public class FeedbackAnalysisService {
     private final ChatClient chatClient;
     private final NotificationService notificationService;
     private final AiSecurityProperties securityProperties;
+    private final FaqEntryMapper faqEntryMapper;
 
     public FeedbackAnalysisService(AiFeedbackMapper feedbackMapper,
                                     AiRunMapper runMapper,
                                     FeedbackAnalysisMapper analysisMapper,
                                     @Qualifier("unifiedGeneralChatClient") ChatClient chatClient,
                                     NotificationService notificationService,
-                                    AiSecurityProperties securityProperties) {
+                                    AiSecurityProperties securityProperties,
+                                    FaqEntryMapper faqEntryMapper) {
         this.feedbackMapper = feedbackMapper;
         this.runMapper = runMapper;
         this.analysisMapper = analysisMapper;
         this.chatClient = chatClient;
         this.notificationService = notificationService;
         this.securityProperties = securityProperties;
+        this.faqEntryMapper = faqEntryMapper;
     }
 
     /**
@@ -179,6 +184,29 @@ public class FeedbackAnalysisService {
                         "补充知识", "in_app");
             } catch (NumberFormatException ignored) {
                 // Skip invalid admin user IDs
+            }
+        }
+
+        // Auto-save FAQ draft for admin review when KNOWLEDGE_GAP detected
+        if ("KNOWLEDGE_GAP".equals(analysis.getAnalysisType())) {
+            try {
+                FaqEntry entry = new FaqEntry();
+                entry.setFaqId("fb-gap-" + UUID.randomUUID().toString().replace("-", "").substring(0, 8));
+                entry.setQuestion(analysis.getIssueSummary());
+                entry.setAnswer(kbDraft);
+                entry.setCategory(analysis.getClusterKey());
+                entry.setPriority(5);
+                entry.setHitCount(0);
+                entry.setEnabled(0);
+                entry.setEmbeddingCached(0);
+                entry.setCreateTime(new Date());
+                entry.setEditTime(new Date());
+                entry.setStatus(1);
+                faqEntryMapper.insert(entry);
+                log.info("Auto-created FAQ draft from feedback analysis: faqId={}, clusterKey={}",
+                        entry.getFaqId(), analysis.getClusterKey());
+            } catch (Exception e) {
+                log.warn("Failed to auto-create FAQ draft from feedback: {}", e.getMessage());
             }
         }
     }

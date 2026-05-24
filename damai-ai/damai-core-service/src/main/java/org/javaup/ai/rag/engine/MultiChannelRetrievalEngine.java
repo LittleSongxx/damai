@@ -11,15 +11,12 @@ import org.javaup.ai.rag.postprocessor.SearchResultPostProcessor;
 import org.javaup.ai.service.RagFusionSupport;
 import org.javaup.ai.vo.RagSearchResultVo;
 import org.javaup.ai.vo.RagSourceVo;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -40,8 +37,17 @@ public class MultiChannelRetrievalEngine {
     private final HydeSearchChannel hydeChannel;
     private final List<SearchResultPostProcessor> postProcessors;
 
+    @Value("${damai.ai.retrieval.candidate-multiplier:5}")
+    private int candidateMultiplier;
+
+    @Value("${damai.ai.retrieval.max-candidates:50}")
+    private int maxCandidates;
+
+    @Value("${damai.ai.retrieval.rrf-k:60}")
+    private int rrfK;
+
     public RagSearchResultVo retrieve(SearchContext context) {
-        // Phase 1: Parallel channel execution
+        context.setCandidateTopK(candidateTopK(context));
         List<CompletableFuture<SearchChannel.SearchChannelResult>> futures = new ArrayList<>();
         futures.add(denseChannel.search(context));
         futures.add(hydeChannel.search(context));
@@ -67,11 +73,10 @@ public class MultiChannelRetrievalEngine {
                     .documents(List.of()).sources(List.of()).build();
         }
 
-        // Phase 2: Merge all channel results with RRF
         List<RagSourceVo> allDenseSources = new ArrayList<>();
         List<RagSourceVo> allSparseSources = new ArrayList<>();
         for (var result : results) {
-            var sources = result.sources();
+            var sources = markChannel(result.sources(), result.channelName());
             if (sources == null) continue;
             switch (result.channelName()) {
                 case "dense" -> allDenseSources.addAll(sources);
@@ -85,20 +90,25 @@ public class MultiChannelRetrievalEngine {
             }
         }
 
+        allDenseSources = applyNamedProcessor("evidence-gate", allDenseSources, context);
+        allSparseSources = applyNamedProcessor("evidence-gate", allSparseSources, context);
+
+        int candidatePool = Math.max(context.getTopK() * 3, context.getCandidateTopK());
         List<RagSourceVo> fusedSources;
         if (allDenseSources.isEmpty() && allSparseSources.isEmpty()) {
             fusedSources = List.of();
         } else if (allSparseSources.isEmpty()) {
-            fusedSources = shrink(allDenseSources, context.getTopK() * 3);
+            fusedSources = shrink(allDenseSources, candidatePool);
         } else if (allDenseSources.isEmpty()) {
-            fusedSources = shrink(allSparseSources, context.getTopK() * 3);
+            fusedSources = shrink(allSparseSources, candidatePool);
         } else {
-            fusedSources = RagFusionSupport.reciprocalRankFusion(allDenseSources, allSparseSources, context.getTopK() * 3);
+            fusedSources = RagFusionSupport.weightedReciprocalRankFusion(
+                    allDenseSources, allSparseSources, candidatePool, effectiveRrfK(), context.getQueryType());
         }
 
-        // Phase 3: Ordered post-processing chain
         List<SearchResultPostProcessor> ordered = postProcessors.stream()
                 .sorted(Comparator.comparingInt(SearchResultPostProcessor::order))
+                .filter(pp -> !"evidence-gate".equals(pp.name()))
                 .toList();
         List<RagSourceVo> processed = fusedSources;
         for (var pp : ordered) {
@@ -124,6 +134,7 @@ public class MultiChannelRetrievalEngine {
     }
 
     public RagSearchResultVo retrieveSimple(SearchContext context) {
+        context.setCandidateTopK(candidateTopK(context));
         List<CompletableFuture<SearchChannel.SearchChannelResult>> futures = new ArrayList<>();
         futures.add(denseChannel.search(context));
         futures.add(sparseChannel.search(context));
@@ -151,7 +162,7 @@ public class MultiChannelRetrievalEngine {
         List<RagSourceVo> allDenseSources = new ArrayList<>();
         List<RagSourceVo> allSparseSources = new ArrayList<>();
         for (var result : results) {
-            var sources = result.sources();
+            var sources = markChannel(result.sources(), result.channelName());
             if (sources == null) continue;
             switch (result.channelName()) {
                 case "dense" -> allDenseSources.addAll(sources);
@@ -159,8 +170,10 @@ public class MultiChannelRetrievalEngine {
             }
         }
 
-        // Use topK * 3 for wider candidate pool before RRF fusion
-        int candidatePool = context.getTopK() * 3;
+        allDenseSources = applyNamedProcessor("evidence-gate", allDenseSources, context);
+        allSparseSources = applyNamedProcessor("evidence-gate", allSparseSources, context);
+
+        int candidatePool = Math.max(context.getTopK() * 3, context.getCandidateTopK());
         List<RagSourceVo> fusedSources;
         if (allDenseSources.isEmpty() && allSparseSources.isEmpty()) {
             fusedSources = List.of();
@@ -169,7 +182,8 @@ public class MultiChannelRetrievalEngine {
         } else if (allDenseSources.isEmpty()) {
             fusedSources = shrink(allSparseSources, candidatePool);
         } else {
-            fusedSources = RagFusionSupport.reciprocalRankFusion(allDenseSources, allSparseSources, candidatePool);
+            fusedSources = RagFusionSupport.weightedReciprocalRankFusion(
+                    allDenseSources, allSparseSources, candidatePool, effectiveRrfK(), context.getQueryType());
         }
 
         List<RagSourceVo> finalSources = shrink(fusedSources, context.getTopK());
@@ -184,5 +198,37 @@ public class MultiChannelRetrievalEngine {
                 .sources(finalSources)
                 .documents(List.of()) // resolve documents in caller
                 .build();
+    }
+
+    private int candidateTopK(SearchContext context) {
+        int topK = Math.max(1, context.getTopK());
+        int multiplier = candidateMultiplier > 0 ? candidateMultiplier : 5;
+        int computed = Math.max(topK, topK * multiplier);
+        int cap = maxCandidates > 0 ? maxCandidates : computed;
+        return Math.min(cap, computed);
+    }
+
+    private int effectiveRrfK() {
+        return rrfK > 0 ? rrfK : 60;
+    }
+
+    private List<RagSourceVo> markChannel(List<RagSourceVo> sources, String channelName) {
+        if (sources == null) return null;
+        for (RagSourceVo source : sources) {
+            if (source.getChannelName() == null || source.getChannelName().isBlank()) {
+                source.setChannelName(channelName);
+            }
+        }
+        return sources;
+    }
+
+    private List<RagSourceVo> applyNamedProcessor(String name, List<RagSourceVo> sources, SearchContext context) {
+        if (sources == null || sources.isEmpty()) return sources == null ? List.of() : sources;
+        for (SearchResultPostProcessor processor : postProcessors) {
+            if (name.equals(processor.name())) {
+                return processor.process(sources, context);
+            }
+        }
+        return sources;
     }
 }

@@ -57,6 +57,28 @@ class RagFusionSupportTest {
         assertEquals("abcd", budgeted.get(1).getSnippet());
     }
 
+    @Test
+    void shouldPreserveParentBlockAndChannelMetadataWhenCopyingSources() {
+        RagSourceVo original = RagSourceVo.builder()
+                .chunkId("chunk-a")
+                .title("A")
+                .source("A.md")
+                .section("section")
+                .snippet("123456")
+                .score(0.9)
+                .parentBlockId("parent-1")
+                .channelName("dense")
+                .build();
+
+        List<RagSourceVo> limited = RagFusionSupport.limit(List.of(original), 1);
+        List<RagSourceVo> budgeted = RagFusionSupport.evidenceBudget(List.of(original), 1, 3);
+
+        assertEquals("parent-1", limited.get(0).getParentBlockId());
+        assertEquals("dense", limited.get(0).getChannelName());
+        assertEquals("parent-1", budgeted.get(0).getParentBlockId());
+        assertEquals("dense", budgeted.get(0).getChannelName());
+    }
+
     private RagSourceVo source(String chunkId, String title) {
         return source(chunkId, title, "snippet");
     }

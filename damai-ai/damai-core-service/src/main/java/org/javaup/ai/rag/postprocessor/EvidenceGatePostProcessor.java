@@ -30,25 +30,40 @@ public class EvidenceGatePostProcessor implements SearchResultPostProcessor {
     @Override
     public List<RagSourceVo> process(List<RagSourceVo> sources, SearchContext context) {
         if (sources == null || sources.isEmpty()) return List.of();
-        // Gate dense (vector) results by absolute similarity threshold
         if (minVectorSimilarity > 0) {
             sources = sources.stream()
-                    .filter(s -> s.getScore() == null || s.getScore() >= minVectorSimilarity)
+                    .filter(s -> !isDenseLike(s) || s.getScore() == null || s.getScore() >= minVectorSimilarity)
                     .toList();
         }
-        // Gate sparse (keyword) results by relative score floor (only if scores are BM25-scale, >1)
         if (keywordRelativeScoreFloor > 0 && !sources.isEmpty()) {
             double topScore = sources.stream()
+                    .filter(this::isSparseLike)
                     .filter(s -> s.getScore() != null)
                     .mapToDouble(RagSourceVo::getScore)
                     .max().orElse(0D);
             if (topScore > 1.0) { // BM25 scores are typically >1, cosine scores 0-1
                 double floor = topScore * keywordRelativeScoreFloor;
                 sources = sources.stream()
-                        .filter(s -> s.getScore() == null || s.getScore() >= floor)
+                        .filter(s -> !isSparseLike(s) || s.getScore() == null || s.getScore() >= floor)
                         .toList();
             }
         }
         return sources;
+    }
+
+    private boolean isDenseLike(RagSourceVo source) {
+        String channel = source.getChannelName();
+        if (channel == null || channel.isBlank()) {
+            return source.getScore() == null || source.getScore() <= 1.0;
+        }
+        return "dense".equalsIgnoreCase(channel) || "hyde".equalsIgnoreCase(channel);
+    }
+
+    private boolean isSparseLike(RagSourceVo source) {
+        String channel = source.getChannelName();
+        if (channel == null || channel.isBlank()) {
+            return source.getScore() != null && source.getScore() > 1.0;
+        }
+        return "sparse".equalsIgnoreCase(channel);
     }
 }

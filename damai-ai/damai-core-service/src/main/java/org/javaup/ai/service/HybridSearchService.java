@@ -85,7 +85,7 @@ public class HybridSearchService {
     @Value("${damai.ai.retrieval.rrf-k:60}")
     private int rrfK;
 
-    @Value("${damai.ai.retrieval.candidate-multiplier:3}")
+    @Value("${damai.ai.retrieval.candidate-multiplier:5}")
     private int candidateMultiplier;
 
     public HybridSearchService(OpenAiEmbeddingModel embeddingModel,
@@ -354,7 +354,7 @@ public class HybridSearchService {
         List<RagSourceVo> fusedSources = sparseSources.isEmpty()
                 ? shrink(allDenseSources, topK * 3)
                 : RagFusionSupport.weightedReciprocalRankFusion(
-                        allDenseSources, sparseSources, topK * 2, rrfK, rewriteResult.queryType());
+                        allDenseSources, sparseSources, topK * 3, rrfK, rewriteResult.queryType());
         List<RagSourceVo> finalSources = enableRerank
                 ? rerankSources(rewrittenQuery, fusedSources, topK)
                 : shrink(fusedSources, topK);
@@ -436,21 +436,19 @@ public class HybridSearchService {
     public List<RagSourceVo> hydeSearch(String query, int topK) {
         try {
             String hypothetical = advancedQueryService.generateHypotheticalDocument(query);
-            return denseSearch(hypothetical, topK);
+            List<RagSourceVo> sources = denseSearch(hypothetical, topK);
+            sources.forEach(source -> source.setChannelName("hyde"));
+            return sources;
         } catch (Exception e) {
             log.warn("HyDE search failed, falling back to dense search", e);
-            return denseSearch(query, topK);
+            List<RagSourceVo> sources = denseSearch(query, topK);
+            sources.forEach(source -> source.setChannelName("hyde"));
+            return sources;
         }
     }
 
     public List<Document> resolveDocuments(List<RagSourceVo> sources) {
-        if (sources == null || sources.isEmpty()) return List.of();
-        ensureDocumentsLoaded();
-        Map<String, Document> cache = documentIngestionService.getDocumentCache();
-        return sources.stream()
-                .map(s -> cache.get(s.getChunkId()))
-                .filter(Objects::nonNull)
-                .toList();
+        return resolveDocumentsFromAllSources(sources);
     }
 
     /**
@@ -539,6 +537,7 @@ public class HybridSearchService {
             for (ScoredPoint point : scoredPoints) {
                 Map<String, io.qdrant.client.grpc.JsonWithInt.Value> payloadMap = point.getPayloadMap();
                 RagSourceVo source = buildSourceFromGrpc(payloadMap, (double) point.getScore());
+                source.setChannelName("dense");
                 // Enrich with parentBlockId from metadata
                 String parentBlockId = grpcString(payloadMap, "parentBlockId");
                 if (parentBlockId != null) {
@@ -566,13 +565,13 @@ public class HybridSearchService {
             body.put("query", new JSONObject(Map.of("multi_match", multiMatch)));
 
             String requestBody = body.toJSONString();
-            log.info("[DIAG] ES request url=/{}/_search, body={}", faqAlias, requestBody);
+            log.debug("[DIAG] ES request url=/{}/_search, body={}", faqAlias, requestBody);
             JSONObject response = executeEs("/" + faqAlias + "/_search", requestBody, "POST");
             if (response.isEmpty()) {
                 log.warn("[DIAG] ES returned EMPTY JSONObject (no hits, no error) for query={}", query);
                 return List.of();
             }
-            log.info("[DIAG] ES raw response keys={}, totalField={}", response.keySet(),
+            log.debug("[DIAG] ES raw response keys={}, totalField={}", response.keySet(),
                     response.containsKey("hits") ? response.getJSONObject("hits").containsKey("total") : "no-hits");
             JSONObject hitsObj = response.getJSONObject("hits");
             if (hitsObj == null) {
@@ -584,7 +583,7 @@ public class HybridSearchService {
                 log.warn("[DIAG] ES hits is null for query={}", query);
                 return List.of();
             }
-            log.info("[DIAG] ES sparseSearch query={}, totalHits={}, returnedHits={}", query, hitsObj.getJSONObject("total") != null ? hitsObj.getJSONObject("total").get("value") : "?", hits.size());
+            log.debug("[DIAG] ES sparseSearch query={}, totalHits={}, returnedHits={}", query, hitsObj.getJSONObject("total") != null ? hitsObj.getJSONObject("total").get("value") : "?", hits.size());
 
             List<RagSourceVo> sources = new ArrayList<>();
             for (int i = 0; i < hits.size(); i++) {
@@ -592,6 +591,7 @@ public class HybridSearchService {
                 JSONObject source = hit.getJSONObject("_source");
                 source.put("chunkId", source.getString("chunkId"));
                 RagSourceVo vo = buildSource(source, hit.getDouble("_score"));
+                vo.setChannelName("sparse");
                 String parentBlockId = source.getString("parentBlockId");
                 if (parentBlockId != null) {
                     vo.setParentBlockId(parentBlockId);
@@ -784,6 +784,8 @@ public class HybridSearchService {
 
     private RagSourceVo buildSource(JSONObject payload, Double score) {
         String text = payload.getString("text");
+        Long validUntil = payload.getLong("validUntil");
+        Integer version = payload.getInteger("version");
         return RagSourceVo.builder()
                 .chunkId(payload.getString("chunkId"))
                 .title(payload.getString("title"))
@@ -791,12 +793,17 @@ public class HybridSearchService {
                 .section(payload.getString("section"))
                 .snippet(text == null ? "" : text.substring(0, Math.min(200, text.length())))
                 .score(score)
+                .parentBlockId(payload.getString("parentBlockId"))
+                .validUntil(validUntil)
+                .version(version)
                 .build();
     }
 
     private RagSourceVo buildSourceFromGrpc(Map<String, io.qdrant.client.grpc.JsonWithInt.Value> payloadMap,
                                              Double score) {
         String text = grpcString(payloadMap, "text");
+        Long validUntil = grpcLong(payloadMap, "validUntil");
+        Integer version = grpcInt(payloadMap, "version");
         return RagSourceVo.builder()
                 .chunkId(grpcString(payloadMap, "chunkId"))
                 .title(grpcString(payloadMap, "title"))
@@ -804,6 +811,9 @@ public class HybridSearchService {
                 .section(grpcString(payloadMap, "section"))
                 .snippet(text == null ? "" : text.substring(0, Math.min(200, text.length())))
                 .score(score)
+                .parentBlockId(grpcString(payloadMap, "parentBlockId"))
+                .validUntil(validUntil)
+                .version(version)
                 .build();
     }
 
@@ -813,13 +823,25 @@ public class HybridSearchService {
         return value.getStringValue();
     }
 
+    private Long grpcLong(Map<String, io.qdrant.client.grpc.JsonWithInt.Value> map, String key) {
+        io.qdrant.client.grpc.JsonWithInt.Value value = map.get(key);
+        if (value == null || !value.hasIntegerValue()) return null;
+        return value.getIntegerValue();
+    }
+
+    private Integer grpcInt(Map<String, io.qdrant.client.grpc.JsonWithInt.Value> map, String key) {
+        io.qdrant.client.grpc.JsonWithInt.Value value = map.get(key);
+        if (value == null || !value.hasIntegerValue()) return null;
+        return (int) value.getIntegerValue();
+    }
+
     private JSONObject field(String type) {
         return new JSONObject(Map.of("type", type));
     }
 
     private JSONObject executeEs(String path, String body, String method) {
         String url = "http://" + esAddress + path;
-        log.info("[DIAG] ES executeEs called: url={}, method={}, bodyBytes={}", url, method, body.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
+        log.debug("[DIAG] ES executeEs called: url={}, method={}, bodyBytes={}", url, method, body.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
         try {
             java.net.http.HttpRequest.Builder requestBuilder = java.net.http.HttpRequest.newBuilder()
                     .uri(java.net.URI.create(url))
@@ -837,7 +859,7 @@ public class HybridSearchService {
                 log.warn("ES response empty for url={}", url);
                 return new JSONObject();
             }
-            log.info("[DIAG] ES raw response (first 500 chars): {}", responseBody.length() > 500 ? responseBody.substring(0, 500) : responseBody);
+            log.debug("[DIAG] ES raw response (first 500 chars): {}", responseBody.length() > 500 ? responseBody.substring(0, 500) : responseBody);
             JSONObject parsed = JSON.parseObject(responseBody);
             if (parsed.containsKey("error")) {
                 log.warn("ES returned error for url={}: {}", url, parsed.getJSONObject("error"));

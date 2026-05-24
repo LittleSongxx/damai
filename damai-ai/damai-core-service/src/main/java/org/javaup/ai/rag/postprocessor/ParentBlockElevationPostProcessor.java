@@ -58,7 +58,11 @@ public class ParentBlockElevationPostProcessor implements SearchResultPostProces
                     .mapToDouble(RagSourceVo::getScore)
                     .max().orElse(0D);
             int supportWeight = children.size() - 1;
-            long channelCount = children.stream().map(RagSourceVo::getSource).filter(Objects::nonNull).distinct().count();
+            long channelCount = children.stream()
+                    .map(s -> s.getChannelName() != null ? s.getChannelName() : s.getSource())
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .count();
             int multiChannelBonus = channelCount > 1 ? 1 : 0;
             double aggregatedScore = bestScore * (1.0 + supportWeight * 0.15 + multiChannelBonus * 0.25);
 
@@ -72,6 +76,8 @@ public class ParentBlockElevationPostProcessor implements SearchResultPostProces
                     .section(best.getSection())
                     .snippet(best.getSnippet())
                     .score(aggregatedScore)
+                    .parentBlockId(best.getParentBlockId())
+                    .channelName(best.getChannelName())
                     .build();
             elevated.add(elevatedBlock);
         }

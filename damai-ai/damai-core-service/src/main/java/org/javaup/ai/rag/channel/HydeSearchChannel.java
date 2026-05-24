@@ -20,7 +20,11 @@ public class HydeSearchChannel {
             long start = System.currentTimeMillis();
             List<RagSourceVo> sources;
             try {
-                sources = hybridSearchService.hydeSearch(context.getOriginalQuery(), context.getTopK());
+                int limit = context.getCandidateTopK() > 0 ? context.getCandidateTopK() : context.getTopK();
+                sources = hybridSearchService.hydeSearch(context.getOriginalQuery(), limit);
+                for (RagSourceVo source : sources) {
+                    source.setChannelName("hyde");
+                }
             } catch (Exception e) {
                 log.warn("HyDE search failed, returning empty: {}", e.getMessage());
                 sources = List.of();

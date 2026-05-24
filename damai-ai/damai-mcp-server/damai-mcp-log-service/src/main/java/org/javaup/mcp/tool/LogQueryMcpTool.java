@@ -38,7 +38,10 @@ public class LogQueryMcpTool {
     /**
      * 获取可用的服务列表
      */
-    @Tool(description = "获取大麦系统中所有可用的微服务列表")
+    @Tool(description = """
+            获取所有可查询日志的微服务列表。这是日志查询工具的入口——其他日志查询工具
+            的 serviceName 参数都必须来自此工具返回的服务名列表。
+            返回: 服务名列表（按字母排序）和数量。""")
     public ToolResult getServiceList() {
         List<String> serviceList = getServiceListFromEs();
         
@@ -98,12 +101,17 @@ public class LogQueryMcpTool {
     /**
      * 按关键词搜索日志
      */
-    @Tool(description = "根据关键词搜索日志内容，支持模糊匹配日志消息")
+    @Tool(description = """
+            按关键词模糊搜索日志消息。适用于: 搜索含特定错误消息、业务关键词的日志。
+            何时使用: 用户描述了一个具体症状（如"订单创建失败"、"连接超时"），需要查看相关日志。
+            何时不用: 已知 traceId 时用 getLogsByTraceId 更精确；想按级别浏览时用 getErrorLogs/getWarnLogs。
+            参数建议: keyword 尽量具体（如异常类型名"NullPointerException"），避免过于宽泛的搜索。
+            返回: 匹配的日志列表（最多100条），每条含时间、服务、级别、消息、traceId。""")
     public ToolResult searchLogsByKeyword(
-            @ToolParam(description = "搜索关键词，用于匹配日志消息内容") String keyword,
-            @ToolParam(description = "服务名称，可选。如：gateway-service、order-service等", required = false) String serviceName,
-            @ToolParam(description = "日志级别，可选。如：INFO、WARN、ERROR、DEBUG", required = false) String level,
-            @ToolParam(description = "返回的日志条数，默认20条", required = false) Integer size) {
+            @ToolParam(description = "搜索关键词，用于匹配日志消息内容。支持异常类名、业务关键词、错误码") String keyword,
+            @ToolParam(description = "服务名称，可选。如：gateway-service、order-service。先从 getServiceList 获取可用服务名", required = false) String serviceName,
+            @ToolParam(description = "日志级别，可选。仅支持: INFO、WARN、ERROR、DEBUG", required = false) String level,
+            @ToolParam(description = "返回的日志条数，默认20条，最大100条", required = false) Integer size) {
 
         try {
             int limit = (size != null && size > 0) ? Math.min(size, 100) : 20;
@@ -138,9 +146,15 @@ public class LogQueryMcpTool {
     /**
      * 通过 traceId 查询调用链路日志
      */
-    @Tool(description = "通过traceId查询完整的调用链路日志，串联所有微服务的日志记录，用于问题排查和链路追踪")
+    @Tool(description = """
+            通过 traceId 查询完整调用链路日志，串联所有微服务按时间排序。
+            何时使用: 已知 traceId（从其他日志中提取、从网关响应头获取、或用户提供了请求ID）。
+            traceId 来源: 可从 searchLogsByKeyword 返回的日志条目中提取 traceId 字段；
+                         也可从告警信息、用户反馈的请求ID中获取。
+            返回: 按时序排列的链路日志，按服务分组展示调用顺序。
+            注意: traceId 为 "-" 时表示无链路追踪，传入该值会返回错误。""")
     public ToolResult getLogsByTraceId(
-            @ToolParam(description = "链路追踪ID（traceId）") String traceId) {
+            @ToolParam(description = "链路追踪ID（traceId）。格式: 32位十六进制字符串（如 a1b2c3d4e5f6789012345678abcdef01）") String traceId) {
 
         try {
             if (traceId == null || traceId.isEmpty() || "-".equals(traceId)) {
@@ -300,9 +314,13 @@ public class LogQueryMcpTool {
     /**
      * 日志统计概览
      */
-    @Tool(description = "获取各微服务的日志统计概览，包括各级别日志的数量分布")
+    @Tool(description = """
+            获取各微服务日志统计概览（ERROR/WARN/INFO/DEBUG 各级别数量分布）。
+            何时使用: 排查前先获得全局视角——哪个服务错误最多、是否有突增。
+            何时不用: 已有具体关键词时用 searchLogsByKeyword，已知 traceId 时用 getLogsByTraceId。
+            返回: 按服务×级别的数量统计，帮助定位问题服务。""")
     public ToolResult getLogStatistics(
-            @ToolParam(description = "服务名称，可选。不填则统计所有服务", required = false) String serviceName) {
+            @ToolParam(description = "服务名称，可选。不填则统计所有服务。服务名需从 getServiceList 获取", required = false) String serviceName) {
 
         try {
             List<String> levels = Arrays.asList("ERROR", "WARN", "INFO", "DEBUG");

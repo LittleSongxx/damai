@@ -16,6 +16,9 @@ import org.javaup.ai.assistant.memory.AssistantMemoryKeyService;
 import org.javaup.ai.assistant.runtime.AssistantObservedChatService;
 import org.javaup.ai.assistant.tool.AssistantToolInvoker;
 import org.javaup.ai.entity.AiRetrieval;
+import org.javaup.ai.entity.AiRun;
+import org.javaup.ai.mapper.AiRunMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -44,6 +47,7 @@ public class KnowledgeSkill implements AssistantSkill {
     private final KnowledgeRetrievalTraceService retrievalTraceService;
     private final AssistantObservedChatService observedChatService;
     private final TokenBudgetManager tokenBudgetManager;
+    private final AiRunMapper runMapper;
 
     public KnowledgeSkill(@Qualifier("unifiedKnowledgeChatClient") ChatClient unifiedKnowledgeChatClient,
                           KnowledgeRetrievalPlanner retrievalPlanner,
@@ -55,7 +59,8 @@ public class KnowledgeSkill implements AssistantSkill {
                           KnowledgeShadowRoutingService shadowRoutingService,
                           KnowledgeRetrievalTraceService retrievalTraceService,
                           AssistantObservedChatService observedChatService,
-                          TokenBudgetManager tokenBudgetManager) {
+                          TokenBudgetManager tokenBudgetManager,
+                          AiRunMapper runMapper) {
         this.unifiedKnowledgeChatClient = unifiedKnowledgeChatClient;
         this.retrievalPlanner = retrievalPlanner;
         this.retrievalOrchestrator = retrievalOrchestrator;
@@ -67,6 +72,7 @@ public class KnowledgeSkill implements AssistantSkill {
         this.retrievalTraceService = retrievalTraceService;
         this.observedChatService = observedChatService;
         this.tokenBudgetManager = tokenBudgetManager;
+        this.runMapper = runMapper;
     }
 
     @Override
@@ -190,6 +196,14 @@ public class KnowledgeSkill implements AssistantSkill {
                 || "INCORRECT".equals(assessment.confidenceLevel())
                 || (assessment.hasContradictions() && assessment.sources().size() < 3)) {
             String answer = "我已经检索了当前的闭域规则库，但这轮命中的证据不够扎实或存在冲突，暂时不能直接给出确定结论。请补充具体场景、节目或关键词，我再基于规则继续检索。";
+            // Escalation: detect consecutive refusal rounds and suggest human takeover
+            if (shouldSuggestEscalation(context)) {
+                answer += "\n\n您已多次遇到检索无结果的情况。建议您转人工客服获得更直接的帮助。";
+                assistantRunService.appendEvent(context.getRun().getRunId(),
+                        "ESCALATION_SUGGESTED",
+                        Map.of("reason", "consecutive_refusal",
+                                "conversationId", context.getRun().getConversationId()));
+            }
             log.warn("Self-RAG: refusing to answer due to {} evidence, hasContradictions={}, missingInfo={}",
                     assessment.answerabilityLevel(), assessment.hasContradictions(), assessment.missingInfo());
             return AssistantSkillResult.builder()
@@ -259,6 +273,33 @@ public class KnowledgeSkill implements AssistantSkill {
         int count = retrievalContext.searchResult().getSources() == null ? 0 : retrievalContext.searchResult().getSources().size();
         count += retrievalContext.supportBundle().sources().size();
         return count;
+    }
+
+    /**
+     * Checks recent runs in the same conversation for consecutive refusal/fallback patterns.
+     * Suggests escalation when ≥2 consecutive runs ended without a successful answer.
+     */
+    private boolean shouldSuggestEscalation(AssistantSkillContext context) {
+        if (context.getRun() == null || context.getRun().getConversationId() == null) return false;
+        var wrapper = new LambdaQueryWrapper<AiRun>()
+                .eq(AiRun::getConversationId, context.getRun().getConversationId())
+                .eq(AiRun::getStatus, 1)
+                .orderByDesc(AiRun::getCreateTime)
+                .last("LIMIT 5");
+        List<AiRun> recent = runMapper.selectList(wrapper);
+        if (recent.size() < 2) return false;
+        // Count consecutive runs that ended in either CLARIFICATION mode or with a refusal response
+        int consecutiveFailures = 0;
+        for (AiRun r : recent) {
+            if (r.getRunId().equals(context.getRun().getRunId())) continue;
+            String status = r.getRunStatus();
+            if (status != null && (status.contains("CLARIFICATION") || status.contains("REFUSED"))) {
+                consecutiveFailures++;
+            } else {
+                break; // only count consecutive
+            }
+        }
+        return consecutiveFailures >= 2;
     }
 
 }

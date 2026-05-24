@@ -36,6 +36,7 @@ public class KnowledgeRetrievalOrchestrator {
     private final KnowledgeRetrievalPlanner retrievalPlanner;
     private final KnowledgeRetrievalEvaluator retrievalEvaluator;
     private final AdvancedQueryService advancedQueryService;
+    private final org.javaup.ai.service.HybridSearchService hybridSearchService;
     private final KnowledgeRetrievalTraceService retrievalTraceService;
     private final AssistantStageTraceService stageTraceService;
 
@@ -71,10 +72,12 @@ public class KnowledgeRetrievalOrchestrator {
                 .originalQuery(query)
                 .rewrittenQuery(query)
                 .queryVariants(List.of(query))
+                .queryType(AdvancedQueryService.QueryType.MIXED)
                 .topK(topK)
                 .enableRerank(false)
+                .now(System.currentTimeMillis())
                 .build();
-        return retrievalEngine.retrieveSimple(ctx);
+        return withResolvedDocuments(retrievalEngine.retrieveSimple(ctx));
     }
 
     private KnowledgeRetrievalContext retrieveFull(KnowledgeRetrievalPlan plan) {
@@ -431,10 +434,36 @@ public class KnowledgeRetrievalOrchestrator {
                 .originalQuery(query)
                 .rewrittenQuery(rewrite.primaryQuery())
                 .queryVariants(rewrite.allQueries())
+                .queryType(rewrite.queryType())
                 .topK(topK)
                 .enableRerank(enableRerank)
+                .now(System.currentTimeMillis())
                 .build();
-        return retrievalEngine.retrieve(ctx);
+        return withResolvedDocuments(retrievalEngine.retrieve(ctx));
+    }
+
+    private RagSearchResultVo withResolvedDocuments(RagSearchResultVo result) {
+        if (result == null) {
+            return null;
+        }
+        if (result.getDocuments() != null && !result.getDocuments().isEmpty()) {
+            return result;
+        }
+        List<Document> documents = hybridSearchService.resolveDocuments(result.getSources());
+        return RagSearchResultVo.builder()
+                .originalQuery(result.getOriginalQuery())
+                .normalizedQuery(result.getNormalizedQuery())
+                .rewrittenQuery(result.getRewrittenQuery())
+                .retrievalTraceId(result.getRetrievalTraceId())
+                .denseSources(result.getDenseSources())
+                .sparseSources(result.getSparseSources())
+                .fusedSources(result.getFusedSources())
+                .sources(result.getSources())
+                .documents(documents)
+                .confidenceScore(result.getConfidenceScore())
+                .confidenceLevel(result.getConfidenceLevel())
+                .correctiveAction(result.getCorrectiveAction())
+                .build();
     }
 
     private record CragCorrectionResult(RagSearchResultVo result, String action) {}

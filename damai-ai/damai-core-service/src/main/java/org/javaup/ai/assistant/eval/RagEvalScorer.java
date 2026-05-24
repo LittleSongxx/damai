@@ -362,4 +362,68 @@ public class RagEvalScorer {
         if (text == null) return "";
         return text.length() <= maxLen ? text : text.substring(0, maxLen) + "...";
     }
+
+    /**
+     * LLM-driven per-chunk relevance grading for NDCG computation.
+     * Evaluates each retrieved chunk against the question and expected answer,
+     * assigning a relevance grade on a 0–3 scale:
+     *   3 = highly relevant (contains key answer elements)
+     *   2 = partially relevant (provides supporting context)
+     *   1 = tangentially relevant (same topic, minimal help)
+     *   0 = irrelevant
+     * Returns a map of chunk index → relevance grade (0–3).
+     */
+    public Map<Integer, Integer> evaluateChunkRelevance(
+            String question, String expectedAnswer, List<String> chunkContents) {
+        Map<Integer, Integer> grades = new java.util.LinkedHashMap<>();
+        if (chunkContents == null || chunkContents.isEmpty()) return grades;
+
+        StringBuilder chunksBlock = new StringBuilder();
+        for (int i = 0; i < chunkContents.size(); i++) {
+            chunksBlock.append("[").append(i).append("] ")
+                    .append(truncate(chunkContents.get(i), 800)).append("\n\n");
+        }
+
+        String prompt = """
+                你是一个检索质量评估专家。请根据用户问题和参考答案，对每个检索到的文本块评估相关性。
+
+                评分标准 (0-3):
+                3 = 高度相关 (包含回答问题的关键信息)
+                2 = 部分相关 (提供有用背景，但不足以直接回答)
+                1 = 弱相关 (同主题但帮助极小)
+                0 = 不相关 (与问题无关)
+
+                用户问题:
+                %s
+
+                参考答案:
+                %s
+
+                检索到的文本块:
+                %s
+
+                请返回一个 JSON 对象，键为文本块编号(整数)，值为相关性评分(0-3)。
+                只评估编号 0 到 %d 的文本块。
+                只返回 JSON，不要 Markdown，不要解释。
+
+                示例输出:
+                {"0": 3, "1": 1, "2": 0}"""
+
+                .formatted(question,
+                        expectedAnswer != null ? truncate(expectedAnswer, 500) : "(无参考答案)",
+                        chunksBlock.toString(),
+                        chunkContents.size() - 1);
+
+        try {
+            String raw = callLlm("你是一个精确的检索质量评估器。只返回 JSON。", prompt);
+            com.alibaba.fastjson2.JSONObject obj = com.alibaba.fastjson2.JSON.parseObject(raw.trim());
+            for (String key : obj.keySet()) {
+                int idx = Integer.parseInt(key);
+                grades.put(idx, Math.min(3, Math.max(0, obj.getIntValue(key))));
+            }
+        } catch (Exception e) {
+            log.warn("Chunk relevance grading failed: {}", e.getMessage());
+        }
+        return grades;
+    }
 }

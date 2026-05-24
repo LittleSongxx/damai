@@ -29,4 +29,15 @@ public class RagSourceVo {
      * Name of the retrieval channel that produced this result (dense/sparse/hyde).
      */
     private String channelName;
+
+    /**
+     * Document expiry timestamp (millis). Chunks from expired documents
+     * are filtered out by TemporalValidityPostProcessor during retrieval.
+     */
+    private Long validUntil;
+
+    /**
+     * Document version number. Higher values indicate newer revisions.
+     */
+    private Integer version;
 }

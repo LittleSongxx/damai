@@ -11,6 +11,7 @@ import org.springframework.core.io.support.ResourcePatternResolver;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -440,6 +441,18 @@ public class MarkdownLoader {
         metadata.put("loadTime", LocalDateTime.now().toString());
         metadata.put("indexVersion", currentIndexVersion);
         metadata.put("docVersion", DigestUtil.md5Hex(section.docTitle() + ":" + section.question() + ":" + section.answer()));
+
+        // Propagate document validity and version to chunk payload for temporal filtering
+        Object validUntil = docMeta.frontMatter().get("valid_until");
+        if (validUntil instanceof String s && !s.isEmpty()) {
+            try {
+                metadata.put("validUntil", java.sql.Timestamp.valueOf(s + " 23:59:59").getTime());
+            } catch (Exception ignored) {}
+        }
+        Object docVersion = docMeta.frontMatter().get("version");
+        if (docVersion instanceof Number n) {
+            metadata.put("version", n.intValue());
+        }
 
         // Carry forward front matter into chunk metadata
         docMeta.frontMatter().forEach((k, v) -> {

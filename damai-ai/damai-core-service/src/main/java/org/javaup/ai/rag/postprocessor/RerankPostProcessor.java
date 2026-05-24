@@ -3,10 +3,13 @@ package org.javaup.ai.rag.postprocessor;
 import cn.hutool.core.collection.CollectionUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.javaup.ai.entity.RagChunk;
+import org.javaup.ai.mapper.RagChunkMapper;
 import org.javaup.ai.rag.channel.SearchContext;
 import org.javaup.ai.service.RerankService;
 import org.javaup.ai.vo.RagSourceVo;
 import org.springframework.ai.document.Document;
+import org.springframework.util.StringUtils;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -26,6 +29,7 @@ public class RerankPostProcessor implements SearchResultPostProcessor {
 
     private final RerankService rerankService;
     private final org.javaup.ai.service.DocumentIngestionService documentIngestionService;
+    private final RagChunkMapper ragChunkMapper;
 
     @Override
     public String name() { return "rerank"; }
@@ -46,6 +50,11 @@ public class RerankPostProcessor implements SearchResultPostProcessor {
                 org.springframework.ai.document.Document cached = cache.get(s.getChunkId());
                 if (cached != null) {
                     docs.add(cached);
+                    continue;
+                }
+                RagChunk chunk = ragChunkMapper.selectByChunkUid(s.getChunkId());
+                if (chunk != null && StringUtils.hasText(chunk.getText())) {
+                    docs.add(new Document(chunk.getText(), Map.of("chunkId", chunk.getChunkUid())));
                 }
             }
             if (CollectionUtil.isEmpty(docs)) return sources;

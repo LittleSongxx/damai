@@ -507,9 +507,17 @@ CREATE TABLE IF NOT EXISTS `d_ai_rag_eval_run` (
   `total_cases` int DEFAULT 0 COMMENT '总用例数',
   `completed_cases` int DEFAULT 0 COMMENT '完成数',
   `avg_recall` double DEFAULT NULL COMMENT '平均Recall@5',
+  `avg_precision` double DEFAULT NULL COMMENT '平均Precision@5',
+  `avg_hit_rate` double DEFAULT NULL COMMENT '平均HitRate@5',
   `avg_mrr` double DEFAULT NULL COMMENT '平均MRR',
   `avg_ndcg` double DEFAULT NULL COMMENT '平均NDCG@5',
   `avg_faithfulness` double DEFAULT NULL COMMENT '平均Faithfulness',
+  `avg_answer_relevancy` double DEFAULT NULL COMMENT '平均答案相关性',
+  `avg_completeness` double DEFAULT NULL COMMENT '平均完整性',
+  `avg_context_relevance` double DEFAULT NULL COMMENT '平均上下文相关性',
+  `avg_ctx_precision` double DEFAULT NULL COMMENT '平均上下文精确度',
+  `avg_ctx_recall` double DEFAULT NULL COMMENT '平均上下文召回率',
+  `avg_answer_correctness` double DEFAULT NULL COMMENT '平均答案正确性',
   `run_status` varchar(32) DEFAULT 'RUNNING' COMMENT '状态',
   `error_message` text DEFAULT NULL COMMENT '错误信息',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
@@ -530,6 +538,12 @@ CREATE TABLE IF NOT EXISTS `d_ai_rag_eval_result` (
   `mrr` double DEFAULT NULL COMMENT 'MRR',
   `ndcg_at_5` double DEFAULT NULL COMMENT 'NDCG@5',
   `faithfulness_score` double DEFAULT NULL COMMENT 'Faithfulness得分',
+  `context_precision` double DEFAULT NULL COMMENT 'RAGAS上下文精度',
+  `context_recall` double DEFAULT NULL COMMENT 'RAGAS上下文召回',
+  `context_relevance` double DEFAULT NULL COMMENT 'RAGAS上下文相关性',
+  `answer_relevancy_score` double DEFAULT NULL COMMENT 'RAGAS答案相关性',
+  `answer_correctness_score` double DEFAULT NULL COMMENT 'RAGAS答案正确性',
+  `eval_method` varchar(32) DEFAULT NULL COMMENT '评估方法: HEURISTIC/LLM_JUDGE/RAGAS_LLM_JUDGE',
   `latency_ms` bigint DEFAULT NULL COMMENT '延迟ms',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
   `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
@@ -538,6 +552,61 @@ CREATE TABLE IF NOT EXISTS `d_ai_rag_eval_result` (
   KEY `idx_ai_rag_eval_result_run` (`eval_run_id`),
   KEY `idx_ai_rag_eval_result_case` (`case_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='RAG评估结果表';
+
+CREATE TABLE IF NOT EXISTS `d_ai_nl2sql_eval_case` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `case_id` varchar(128) NOT NULL COMMENT '用例ID',
+  `question` text NOT NULL COMMENT '自然语言问题',
+  `expected_sql` text DEFAULT NULL COMMENT '期望SQL(可选,用于精确匹配评测)',
+  `expected_table_names` varchar(512) DEFAULT NULL COMMENT '期望涉及的表名(逗号分隔)',
+  `category` varchar(64) DEFAULT NULL COMMENT '分类: order/sales/pay/refund/api/mq/cost',
+  `difficulty` varchar(16) DEFAULT 'medium' COMMENT '难度: easy/medium/hard',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ai_nl2sql_eval_case_id` (`case_id`),
+  KEY `idx_ai_nl2sql_eval_case_cat` (`category`),
+  KEY `idx_ai_nl2sql_eval_case_diff` (`difficulty`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='NL2SQL评测用例表';
+
+CREATE TABLE IF NOT EXISTS `d_ai_nl2sql_eval_run` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `eval_run_id` varchar(128) NOT NULL COMMENT '评估运行ID',
+  `total_cases` int DEFAULT 0 COMMENT '总用例数',
+  `completed_cases` int DEFAULT 0 COMMENT '完成数',
+  `sql_validity_rate` double DEFAULT NULL COMMENT 'SQL合法性通过率(SQL Validity)',
+  `execution_accuracy` double DEFAULT NULL COMMENT '执行准确率(Execution Accuracy)',
+  `exact_match_rate` double DEFAULT NULL COMMENT 'SQL精确匹配率(Exact Set Match)',
+  `avg_latency_ms` double DEFAULT NULL COMMENT '平均延迟ms',
+  `run_status` varchar(32) DEFAULT 'RUNNING' COMMENT '状态',
+  `error_message` text DEFAULT NULL COMMENT '错误信息',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ai_nl2sql_eval_run_id` (`eval_run_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='NL2SQL评测运行表';
+
+CREATE TABLE IF NOT EXISTS `d_ai_nl2sql_eval_result` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `eval_run_id` varchar(128) NOT NULL COMMENT '评估运行ID',
+  `case_id` varchar(128) NOT NULL COMMENT '用例ID',
+  `question` text DEFAULT NULL COMMENT '问题',
+  `generated_sql` text DEFAULT NULL COMMENT '生成的SQL',
+  `is_valid_sql` tinyint(1) DEFAULT NULL COMMENT 'SQL是否通过安全校验',
+  `execute_success` tinyint(1) DEFAULT NULL COMMENT 'SQL是否执行成功',
+  `exact_match` tinyint(1) DEFAULT NULL COMMENT '是否与expected_sql精确匹配',
+  `latency_ms` bigint DEFAULT NULL COMMENT '延迟ms',
+  `error_message` text DEFAULT NULL COMMENT '错误信息',
+  `eval_method` varchar(32) DEFAULT NULL COMMENT '评估方法',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  KEY `idx_ai_nl2sql_eval_result_run` (`eval_run_id`),
+  KEY `idx_ai_nl2sql_eval_result_case` (`case_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='NL2SQL评测结果表';
 
 CREATE TABLE IF NOT EXISTS `d_ai_episodic_memory` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
@@ -735,6 +804,196 @@ WHERE `event_seq` IS NULL;
 UPDATE `d_ai_action`
 SET `version` = 0
 WHERE `version` IS NULL;
+
+-- RAGAS 评测指标列 (d_ai_rag_eval_result)
+SET @sql := IF(
+  EXISTS(
+    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_rag_eval_result' AND COLUMN_NAME = 'context_precision'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_rag_eval_result` ADD COLUMN `context_precision` double DEFAULT NULL COMMENT ''RAGAS上下文精度'' AFTER `faithfulness_score`'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_rag_eval_result' AND COLUMN_NAME = 'context_recall'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_rag_eval_result` ADD COLUMN `context_recall` double DEFAULT NULL COMMENT ''RAGAS上下文召回'' AFTER `context_precision`'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_rag_eval_result' AND COLUMN_NAME = 'answer_relevancy_score'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_rag_eval_result` ADD COLUMN `answer_relevancy_score` double DEFAULT NULL COMMENT ''RAGAS答案相关性'' AFTER `context_recall`'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_rag_eval_result' AND COLUMN_NAME = 'eval_method'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_rag_eval_result` ADD COLUMN `eval_method` varchar(32) DEFAULT NULL COMMENT ''评估方法: HEURISTIC/LLM_JUDGE'' AFTER `answer_relevancy_score`'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 新增 RAGAS 扩展指标列 (d_ai_rag_eval_result)
+SET @sql := IF(
+  EXISTS(
+    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_rag_eval_result' AND COLUMN_NAME = 'context_relevance'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_rag_eval_result` ADD COLUMN `context_relevance` double DEFAULT NULL COMMENT ''RAGAS上下文相关性'' AFTER `context_recall`'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_rag_eval_result' AND COLUMN_NAME = 'answer_correctness_score'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_rag_eval_result` ADD COLUMN `answer_correctness_score` double DEFAULT NULL COMMENT ''RAGAS答案正确性'' AFTER `answer_relevancy_score`'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 新增运行汇总指标列 (d_ai_rag_eval_run)
+SET @sql := IF(
+  EXISTS(
+    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_rag_eval_run' AND COLUMN_NAME = 'avg_answer_relevancy'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_rag_eval_run` ADD COLUMN `avg_answer_relevancy` double DEFAULT NULL COMMENT ''平均答案相关性'' AFTER `avg_faithfulness`'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_rag_eval_run' AND COLUMN_NAME = 'avg_completeness'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_rag_eval_run` ADD COLUMN `avg_completeness` double DEFAULT NULL COMMENT ''平均完整性'' AFTER `avg_answer_relevancy`'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_rag_eval_run' AND COLUMN_NAME = 'avg_context_relevance'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_rag_eval_run` ADD COLUMN `avg_context_relevance` double DEFAULT NULL COMMENT ''平均上下文相关性'' AFTER `avg_completeness`'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_rag_eval_run' AND COLUMN_NAME = 'avg_answer_correctness'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_rag_eval_run` ADD COLUMN `avg_answer_correctness` double DEFAULT NULL COMMENT ''平均答案正确性'' AFTER `avg_context_relevance`'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_rag_eval_run' AND COLUMN_NAME = 'avg_ctx_precision'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_rag_eval_run` ADD COLUMN `avg_ctx_precision` double DEFAULT NULL COMMENT ''平均上下文精确度'' AFTER `avg_context_relevance`'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_rag_eval_run' AND COLUMN_NAME = 'avg_ctx_recall'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_rag_eval_run` ADD COLUMN `avg_ctx_recall` double DEFAULT NULL COMMENT ''平均上下文召回率'' AFTER `avg_ctx_precision`'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- RAG 评测用例种子数据
+INSERT IGNORE INTO `d_ai_rag_eval_case` (`case_id`, `question`, `expected_answer`, `expected_chunks`, `category`, `difficulty`, `create_time`, `edit_time`, `status`) VALUES
+('eval_case_001', '如何申请退票？', '退票需要在演出开始前48小时通过大麦APP或官网提交申请，退票手续费根据距离开演时间阶梯收取。', '["5b93c5c7162facc8ef2d112f9b72e509","abda442228f338d5210be369dbe96159"]', 'refund', 'easy', NOW(), NOW(), 1),
+('eval_case_002', '如果演出取消了我的票会自动退款吗？需要多长时间到账？', '演出取消时无需手动申请退票，系统会自动退款至原支付账户。退款到账时间一般为1-15个工作日，具体取决于支付方式。银行卡1-3个工作日，微信/支付宝1-7个工作日，信用卡1-15个工作日。','["f89fa1a59410a25b8a0e0f961727e00d","52a9bf11971454cd90fdb4dc30cdb5c5","5b93c5c7162facc8ef2d112f9b72e509","abda442228f338d5210be369dbe96159"]', 'refund', 'hard', NOW(), NOW(), 1),
+('eval_case_003', '电子票怎么取票？', '电子票无需取票，演出当天凭购票时使用的身份证件和电子票二维码入场即可。', '["9edde96f909989de41fbe770856a5e17","1f667d740455687e84374634352c3d48","d5db536f6b3372d35d3166cec1f68944"]', 'delivery', 'easy', NOW(), NOW(), 1),
+('eval_case_004', '购买时选了快递配送，最晚什么时候能收到票？', '快递配送一般在演出前7-10天陆续发出，演出开始前3天停止配送。若超过演出前5天仍未收到，建议联系客服核实物流状态。', '["d0e0fe4da689691b548344ca08f98c1a","4db55f25b5f68aee4188979b5bf08eac","fc7481f0d1f4c1a606cc0ec41ea7d466"]', 'delivery', 'medium', NOW(), NOW(), 1),
+('eval_case_005', '订单支付超时了怎么办？', '订单支付超时后会自动取消，需要重新下单。建议在下单后15分钟内完成支付。', '["edf5c7514ed7e1b9be5921816e714dbb","d5fe3c91a6e279ed4ca94e2d54e86f34","d0bbc1ff4909a7c24c50e20abb4b3f10"]', 'payment', 'medium', NOW(), NOW(), 1),
+('eval_case_006', '重复支付了同一笔订单会怎样？银行卡被扣了两次款。', '系统会自动检测重复支付，多扣的款项会在1-3个工作日内原路退回。如果超过3个工作日未收到退款，请在订单详情页提交重复支付申诉或联系人工客服处理。', '["ea1447ae201f689b20d408912716e47b","40b2466adccc388bf0bae7067f8b5dd6","4b74f15d47d4f57ea70042d53aba419e"]', 'payment', 'hard', NOW(), NOW(), 1),
+('eval_case_007', '儿童需要买票吗？', '儿童也需要购票入场，1.2米以下儿童谢绝入场（儿童剧除外），1.2米以上儿童凭票入场。具体以演出页面说明为准。', '["c67a29b86c07dd12a29380cb4cf8245a","ea767fee13a66a9599105f397096535a"]', 'entry', 'easy', NOW(), NOW(), 1),
+('eval_case_008', '观演人信息填错了能改吗？', '观演人信息在订单支付成功后不支持修改。如确实填写错误，建议取消订单重新购买。部分演出支持转赠功能，可通过票夹将电子票转赠给他人。', '["b9f2e8972ebb628d7c5770ff1576f903","0014def686eb408669788e270ab251b1","8eed40754ad5398b4367240b416c8eb7"]', 'entry', 'medium', NOW(), NOW(), 1),
+('eval_case_009', '能带相机进场吗？', '一般演出禁止携带专业摄影摄像设备入场，手机拍照不受限制。具体以演出页面的观演须知为准。', '["978e3e4126d916f5c573486af9ba1f51","217d08cc51009befaad0c61cc6d87f86"]', 'venue', 'easy', NOW(), NOW(), 1),
+('eval_case_010', '我在非官方渠道买的票被拦在门口了，有什么办法吗？', '非官方渠道购买的票存在假票风险，大麦不承担非官方渠道购票的损失。建议通过官方渠道重新购票，并向购票平台投诉维权，保留交易记录作为证据。', '["00143f082fa1f4c759f0464e0152ecfe","6e8ef763b0e90bfe361a0e49aea93f63","9b8cc07a54139a6cda283544aa11a4c2","9f6e8eecefae6305715a888ec19e8b25"]', 'venue', 'hard', NOW(), NOW(), 1),
+
+-- ============================================================
+-- 扩展评测用例 (P5: 40 additional cases, total 50+)
+-- ============================================================
+
+-- ===== 退票/退款 (refund) =====
+('eval_case_011', '退票申请后多久能到账？', '退票款项将在1-7个工作日内退回原支付账户，具体到账时间取决于银行处理速度。银行卡通常1-3个工作日，第三方支付1-7个工作日。', '["5b93c5c7162facc8ef2d112f9b72e509","abda442228f338d5210be369dbe96159","f89fa1a59410a25b8a0e0f961727e00d"]', 'refund', 'easy', NOW(), NOW(), 1),
+('eval_case_012', '退票手续费怎么算？', '退票手续费根据距离开演时间阶梯收取。开演前48小时以上手续费较低，48小时内手续费较高。具体费率以演出页面退票规则为准。', '["5b93c5c7162facc8ef2d112f9b72e509","abda442228f338d5210be369dbe96159"]', 'refund', 'medium', NOW(), NOW(), 1),
+('eval_case_013', '帮朋友买的票他能自己退吗？', '退票需要使用购票账户登录并在订单详情页点击申请退票，非购票账户无法操作。建议让购票人自行操作或提供账户信息。', '["5b93c5c7162facc8ef2d112f9b72e509","abda442228f338d5210be369dbe96159"]', 'refund', 'medium', NOW(), NOW(), 1),
+('eval_case_014', '已经过了退票截止时间还能退吗？', '超过退票截止时间的订单一般不支持退票。特殊情况下（如突发疾病、自然灾害）可联系客服申请特殊处理，但不保证通过。', '["5b93c5c7162facc8ef2d112f9b72e509","abda442228f338d5210be369dbe96159","52a9bf11971454cd90fdb4dc30cdb5c5"]', 'refund', 'hard', NOW(), NOW(), 1),
+('eval_case_015', '退票后优惠券会退回吗？', '退票成功后，订单中使用的优惠券是否退还需根据优惠券使用规则判断。部分限时优惠券过期后不予退还。', '["5b93c5c7162facc8ef2d112f9b72e509","f89fa1a59410a25b8a0e0f961727e00d"]', 'refund', 'medium', NOW(), NOW(), 1),
+('eval_case_016', '买的连座票能只退一张吗？', '连座票一般作为一个订单整体处理，不支持部分退票。如有特殊需求建议联系客服咨询。', '["5b93c5c7162facc8ef2d112f9b72e509","abda442228f338d5210be369dbe96159"]', 'refund', 'medium', NOW(), NOW(), 1),
+('eval_case_017', '演出延期了能退票吗？', '演出延期时，购票平台一般会提供退票通道。用户可选择保留订单等待延期演出或申请全额退款。具体以平台公告为准。', '["f89fa1a59410a25b8a0e0f961727e00d","52a9bf11971454cd90fdb4dc30cdb5c5"]', 'refund', 'easy', NOW(), NOW(), 1),
+('eval_case_018', '退票申请提交错了能撤销吗？', '退票申请提交后无法撤销，请谨慎操作。如需帮助请联系客服，但一旦系统已处理则无法恢复订单。', '["5b93c5c7162facc8ef2d112f9b72e509"]', 'refund', 'hard', NOW(), NOW(), 1),
+
+-- ===== 配送/取票 (delivery) =====
+('eval_case_019', '快递票可以改成电子票吗？', '订单支付完成后配送方式一般不支持修改。如需更改请取消订单重新购买并选择所需配送方式。', '["9edde96f909989de41fbe770856a5e17","d0e0fe4da689691b548344ca08f98c1a"]', 'delivery', 'medium', NOW(), NOW(), 1),
+('eval_case_020', '快递票丢了怎么办？', '快递票丢失后建议第一时间联系客服。根据演出类型不同，可申请补票或凭购票凭证及身份证件现场核实身份后入场。', '["d0e0fe4da689691b548344ca08f98c1a","4db55f25b5f68aee4188979b5bf08eac"]', 'delivery', 'hard', NOW(), NOW(), 1),
+('eval_case_021', '收货地址填错了怎么改？', '订单支付成功后收货地址不支持修改。如尚未发货可尝试联系客服，但无法保证成功。建议及时关注物流状态。', '["d0e0fe4da689691b548344ca08f98c1a","4db55f25b5f68aee4188979b5bf08eac"]', 'delivery', 'medium', NOW(), NOW(), 1),
+('eval_case_022', '现场取票和快递哪个好？', '电子票最便捷无需等待。快递配送适合需要纸质票留念的用户。现场取票需要提前到现场，具体以演出页面可选配送方式为准。', '["9edde96f909989de41fbe770856a5e17","1f667d740455687e84374634352c3d48","d5db536f6b3372d35d3166cec1f68944","d0e0fe4da689691b548344ca08f98c1a"]', 'delivery', 'easy', NOW(), NOW(), 1),
+('eval_case_023', '我的票什么时候发货？', '快递票一般在演出前7-10天陆续发出，发货后会短信通知快递单号。演出前3天停止配送，临近演出将改为现场取票。', '["4db55f25b5f68aee4188979b5bf08eac","fc7481f0d1f4c1a606cc0ec41ea7d466"]', 'delivery', 'easy', NOW(), NOW(), 1),
+('eval_case_024', '国外地址能配送吗？', '快递配送仅支持中国大陆地区。海外用户建议选择电子票，或委托国内亲友代收后转交。', '["d0e0fe4da689691b548344ca08f98c1a","4db55f25b5f68aee4188979b5bf08eac"]', 'delivery', 'medium', NOW(), NOW(), 1),
+('eval_case_025', '怎么查看快递单号？', '可在订单详情页查看物流信息，包括快递公司和快递单号。发货后也会通过短信通知购票人。', '["4db55f25b5f68aee4188979b5bf08eac","fc7481f0d1f4c1a606cc0ec41ea7d466"]', 'delivery', 'easy', NOW(), NOW(), 1),
+('eval_case_026', '买了三张票快递来了两张怎么办？', '建议先核对待收货数量和订单信息，确认是否为分批配送。如确实少发，保存快递包装并在订单详情页报备，联系客服核实处理。', '["d0e0fe4da689691b548344ca08f98c1a","4db55f25b5f68aee4188979b5bf08eac","fc7481f0d1f4c1a606cc0ec41ea7d466"]', 'delivery', 'hard', NOW(), NOW(), 1),
+
+-- ===== 支付 (payment) =====
+('eval_case_027', '支持哪些支付方式？', '支持银行卡、微信支付、支付宝、花呗分期、信用卡分期等多种支付方式。具体以结算页面展示为准。', '["edf5c7514ed7e1b9be5921816e714dbb","d5fe3c91a6e279ed4ca94e2d54e86f34"]', 'payment', 'easy', NOW(), NOW(), 1),
+('eval_case_028', '支付时提示余额不足但我卡里有钱？', '建议检查是否开通了快捷支付限额。部分银行对大额支付有限额，可分多张卡支付或联系银行调整限额。', '["edf5c7514ed7e1b9be5921816e714dbb","d5fe3c91a6e279ed4ca94e2d54e86f34"]', 'payment', 'medium', NOW(), NOW(), 1),
+('eval_case_029', '为什么一直显示支付处理中？', '支付处理中通常是因为银行系统延迟，一般5-10分钟内会有结果。如超过15分钟仍无反应建议联系银行客服确认扣款状态。', '["edf5c7514ed7e1b9be5921816e714dbb","d0bbc1ff4909a7c24c50e20abb4b3f10"]', 'payment', 'medium', NOW(), NOW(), 1),
+('eval_case_030', '可以花呗分期吗？', '部分演出支持花呗分期付款，具体以结算页面是否显示分期选项为准。免息分期活动以花呗官方活动规则为准。', '["edf5c7514ed7e1b9be5921816e714dbb"]', 'payment', 'easy', NOW(), NOW(), 1),
+('eval_case_031', '支付成功后订单还是显示待支付？', '支付成功但状态未更新可能是因为银行通知延迟。可在订单详情页手动刷新或等待5-10分钟。如长时间未更新请提供付款凭证联系客服。', '["d0bbc1ff4909a7c24c50e20abb4b3f10","ea1447ae201f689b20d408912716e47b"]', 'payment', 'hard', NOW(), NOW(), 1),
+('eval_case_032', '微信支付的扣款记录和订单金额不一致？', '如有金额差异请截图保存微信支付记录和订单页面。联系客服提供两边的对比截图，客服会核实是否存在多扣或系统错误。', '["ea1447ae201f689b20d408912716e47b","40b2466adccc388bf0bae7067f8b5dd6","4b74f15d47d4f57ea70042d53aba419e"]', 'payment', 'hard', NOW(), NOW(), 1),
+('eval_case_033', '组合支付怎么操作？', '部分订单支持组合支付（余额+银行卡或余额+微信等），在结算页面选择"组合支付"后按提示操作即可。', '["edf5c7514ed7e1b9be5921816e714dbb","d5fe3c91a6e279ed4ca94e2d54e86f34"]', 'payment', 'medium', NOW(), NOW(), 1),
+('eval_case_034', '支付时优惠券怎么没用上？', '请检查优惠券的使用条件（满减门槛、适用演出、有效期限）。确认符合条件后在提交订单页面手动勾选优惠券。', '["edf5c7514ed7e1b9be5921816e714dbb","d0bbc1ff4909a7c24c50e20abb4b3f10"]', 'payment', 'easy', NOW(), NOW(), 1),
+
+-- ===== 入场/观演 (entry) =====
+('eval_case_035', '电子票用什么证件入场？', '电子票需凭购票时填写的身份证件入场，支持身份证、护照、港澳通行证、台胞证。入场时需同时出示电子票二维码和证件。', '["1f667d740455687e84374634352c3d48","d5db536f6b3372d35d3166cec1f68944","c67a29b86c07dd12a29380cb4cf8245a"]', 'entry', 'easy', NOW(), NOW(), 1),
+('eval_case_036', '可以带小孩去看演唱会吗？', '大部分演唱会1.2米以下儿童谢绝入场，儿童剧除外。1.2米以上儿童需购票入场。具体以演出页面的"儿童入场说明"为准。', '["c67a29b86c07dd12a29380cb4cf8245a","ea767fee13a66a9599105f397096535a"]', 'entry', 'easy', NOW(), NOW(), 1),
+('eval_case_037', '购票后身份证丢了怎么入场？', '身份证丢失可使用临时身份证、户口本或护照等有效证件。也可在演出前到公安机关办理临时身份证明。建议尽快补办并联系客服确认替代方案。', '["b9f2e8972ebb628d7c5770ff1576f903","1f667d740455687e84374634352c3d48"]', 'entry', 'hard', NOW(), NOW(), 1),
+('eval_case_038', '可以把票转给朋友吗？', '部分演出支持电子票转赠功能，可在票夹中选择"转赠"将电子票发送给朋友。转赠后原购票人将无法使用该票。快递票不支持线上转赠。', '["b9f2e8972ebb628d7c5770ff1576f903","0014def686eb408669788e270ab251b1","8eed40754ad5398b4367240b416c8eb7"]', 'entry', 'medium', NOW(), NOW(), 1),
+('eval_case_039', '进场后发现座位有人坐了怎么办？', '请先核对双方票面信息确认座位归属。如有争议，联系现场工作人员协调处理，不要自行解决以免影响其他观众。', '["b9f2e8972ebb628d7c5770ff1576f903","0014def686eb408669788e270ab251b1"]', 'entry', 'medium', NOW(), NOW(), 1),
+('eval_case_040', '可以强实名制的票用别人的身份证能进吗？', '实行强实名制的演出必须人、证、票一致方可入场。使用他人身份证购买的门票持票人本人无法入场，建议确认演出是否为强实名制后再购票。', '["b9f2e8972ebb628d7c5770ff1576f903","0014def686eb408669788e270ab251b1","c67a29b86c07dd12a29380cb4cf8245a"]', 'entry', 'hard', NOW(), NOW(), 1),
+('eval_case_041', '检票口在哪里？', '检票口位置可在电子票页面查看，或到达现场后根据场馆导引指示找到对应检票口。部分大型场馆有多个检票口，根据座位区域选择最近的入口。', '["1f667d740455687e84374634352c3d48","d5db536f6b3372d35d3166cec1f68944"]', 'entry', 'easy', NOW(), NOW(), 1),
+('eval_case_042', '迟到还能进场吗？', '一般演出开始后仍可入场，但部分演出（如古典音乐会、话剧）为不影响其他观众和演出秩序，迟到观众需等待曲目间隙或幕间休息时方可入场。', '["c67a29b86c07dd12a29380cb4cf8245a","8eed40754ad5398b4367240b416c8eb7"]', 'entry', 'medium', NOW(), NOW(), 1),
+
+-- ===== 场馆/观演须知 (venue) =====
+('eval_case_043', '演出大概时长多久？', '演出时长以演出页面说明为准，通常演唱会在1.5-3小时之间。演出开始时间为票面标注时间，建议提前30-60分钟到场。', '["978e3e4126d916f5c573486af9ba1f51","217d08cc51009befaad0c61cc6d87f86"]', 'venue', 'easy', NOW(), NOW(), 1),
+('eval_case_044', '场馆有寄存处吗？', '大部分大型场馆设有寄存处，但收费标准和容量有限。建议尽量减少随身物品。寄存费用以场馆规定为准。', '["978e3e4126d916f5c573486af9ba1f51","217d08cc51009befaad0c61cc6d87f86"]', 'venue', 'easy', NOW(), NOW(), 1),
+('eval_case_045', '场馆附近有停车场吗？', '大型演出场馆一般配备停车场或周边有商业停车场。但演出日车位紧张，建议乘坐公共交通前往。具体停车场信息可在场馆官网查询。', '["978e3e4126d916f5c573486af9ba1f51"]', 'venue', 'medium', NOW(), NOW(), 1),
+('eval_case_046', '座位图怎么看？', '选座购票时系统会显示座位图，可按区域和价格筛选。座位图标注了舞台位置、各区域价格、已售/可选状态。建议结合舞台位置选择最佳观演区域。', '["217d08cc51009befaad0c61cc6d87f86"]', 'venue', 'easy', NOW(), NOW(), 1),
+('eval_case_047', '黄牛票和官方票怎么区分？', '官方票通过大麦APP/官网/小程序购买，票面有防伪标识并可在大麦票夹中验证。黄牛票无法通过官方渠道验证，且存在假票、重复售票等风险。', '["00143f082fa1f4c759f0464e0152ecfe","6e8ef763b0e90bfe361a0e49aea93f63","9b8cc07a54139a6cda283544aa11a4c2"]', 'venue', 'medium', NOW(), NOW(), 1),
+('eval_case_048', '场馆内可以吃东西吗？', '大部分演出场馆内禁止饮食，但部分设有餐饮区。建议在演出开始前在指定区域用餐。入场安检时食品和饮料可能会被要求寄存或丢弃。', '["978e3e4126d916f5c573486af9ba1f51","217d08cc51009befaad0c61cc6d87f86"]', 'venue', 'medium', NOW(), NOW(), 1),
+('eval_case_049', '演出当天天气不好会不会取消？', '一般天气不影响室内演出。户外演出如遇极端天气（台风、暴雨、暴雪），主办方会评估后发布公告，请关注官方通知。演出取消会有短信通知。', '["978e3e4126d916f5c573486af9ba1f51","f89fa1a59410a25b8a0e0f961727e00d","52a9bf11971454cd90fdb4dc30cdb5c5"]', 'venue', 'medium', NOW(), NOW(), 1),
+('eval_case_050', '无障碍设施在哪里？', '大型场馆一般配备无障碍通道、无障碍卫生间和轮椅专用观演区域。如需协助可提前联系场馆或现场联系工作人员。', '["978e3e4126d916f5c573486af9ba1f51","217d08cc51009befaad0c61cc6d87f86"]', 'venue', 'hard', NOW(), NOW(), 1);
 
 -- ============================================================
 -- RAG 文档管理相关表

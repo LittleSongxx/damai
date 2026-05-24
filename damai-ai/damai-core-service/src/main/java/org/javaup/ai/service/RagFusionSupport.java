@@ -111,6 +111,8 @@ public final class RagFusionSupport {
                 .section(source.getSection())
                 .snippet(source.getSnippet())
                 .score(score)
+                .parentBlockId(source.getParentBlockId())
+                .channelName(source.getChannelName())
                 .build();
     }
 
@@ -126,6 +128,8 @@ public final class RagFusionSupport {
                 .section(source.getSection())
                 .snippet(snippet)
                 .score(source.getScore())
+                .parentBlockId(source.getParentBlockId())
+                .channelName(source.getChannelName())
                 .build();
     }
 }

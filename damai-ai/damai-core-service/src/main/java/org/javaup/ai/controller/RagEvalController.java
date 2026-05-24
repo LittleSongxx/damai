@@ -8,6 +8,7 @@ import org.javaup.ai.mapper.AiRagEvalCaseMapper;
 import org.javaup.ai.service.RagEvalService;
 import org.javaup.ai.service.HybridSearchService;
 import org.javaup.ai.vo.RagEvalCaseRequest;
+import org.javaup.ai.vo.RagEvalRunRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
@@ -33,9 +34,14 @@ public class RagEvalController {
         return ResponseEntity.ok(Map.of("code", 0, "query", query, "hitCount", result.size(), "hits", result.stream().map(r -> Map.of("chunkId", r.getChunkId(), "score", r.getScore(), "title", r.getTitle() != null ? r.getTitle() : "")).toList()));
     }
 
+    @PostMapping("/preview")
+    public ResponseEntity<Map<String, Object>> previewEval(@RequestBody(required = false) RagEvalRunRequest request) {
+        return ResponseEntity.ok(Map.of("code", 0, "data", ragEvalService.previewEvaluation(request)));
+    }
+
     @PostMapping("/start")
-    public ResponseEntity<Map<String, Object>> startEval() {
-        AiRagEvalRun run = ragEvalService.startEvaluation();
+    public ResponseEntity<Map<String, Object>> startEval(@RequestBody(required = false) RagEvalRunRequest request) {
+        AiRagEvalRun run = ragEvalService.startEvaluation(request);
         return ResponseEntity.ok(Map.of("code", 0, "evalRunId", run.getEvalRunId(), "totalCases", run.getTotalCases()));
     }
 
@@ -45,7 +51,26 @@ public class RagEvalController {
         if (run == null) {
             return ResponseEntity.ok(Map.of("code", 1, "message", "not found"));
         }
-        return ResponseEntity.ok(Map.of("code", 0, "data", run));
+        return ResponseEntity.ok(Map.of(
+                "code", 0,
+                "data", run,
+                "qualityGate", ragEvalService.buildQualityGate(run)
+        ));
+    }
+
+    @GetMapping("/results/{evalRunId}")
+    public ResponseEntity<Map<String, Object>> getResults(@PathVariable String evalRunId) {
+        return ResponseEntity.ok(Map.of("code", 0, "data", ragEvalService.listRunResults(evalRunId)));
+    }
+
+    @PostMapping("/cases/{caseId}/diagnose")
+    public ResponseEntity<Map<String, Object>> diagnoseCase(@PathVariable String caseId,
+                                                            @RequestBody(required = false) RagEvalRunRequest request) {
+        Map<String, Object> diagnosis = ragEvalService.diagnoseCase(caseId, request);
+        if (diagnosis == null) {
+            return ResponseEntity.ok(Map.of("code", 1, "message", "not found"));
+        }
+        return ResponseEntity.ok(Map.of("code", 0, "data", diagnosis));
     }
 
     // --- Eval Case CRUD ---

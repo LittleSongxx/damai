@@ -21,8 +21,9 @@ public class SparseSearchChannel {
     public CompletableFuture<SearchChannel.SearchChannelResult> search(SearchContext context) {
         return CompletableFuture.supplyAsync(() -> {
             long start = System.currentTimeMillis();
+            int limit = context.getCandidateTopK() > 0 ? context.getCandidateTopK() : context.getTopK();
             List<RagSourceVo> sources = circuitBreakerService.executeEs(
-                    () -> hybridSearchService.sparseSearch(context.getRewrittenQuery(), context.getTopK()),
+                    () -> hybridSearchService.sparseSearch(context.getRewrittenQuery(), limit),
                     List.of());
             long latency = System.currentTimeMillis() - start;
             return new SearchChannel.SearchChannelResult("sparse", sources, latency);

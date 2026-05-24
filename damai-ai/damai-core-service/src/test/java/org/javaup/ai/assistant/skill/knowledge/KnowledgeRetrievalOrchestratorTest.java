@@ -3,13 +3,18 @@ package org.javaup.ai.assistant.skill.knowledge;
 import org.javaup.ai.rag.channel.SearchContext;
 import org.javaup.ai.rag.engine.MultiChannelRetrievalEngine;
 import org.javaup.ai.service.AdvancedQueryService;
+import org.javaup.ai.service.HybridSearchService;
 import org.javaup.ai.assistant.runtime.AssistantStageTraceService;
 import org.javaup.ai.vo.RagSearchResultVo;
+import org.javaup.ai.vo.RagSourceVo;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.document.Document;
 import org.springframework.ai.chat.client.ChatClient;
 
 import java.util.List;
+import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -28,6 +33,7 @@ class KnowledgeRetrievalOrchestratorTest {
         KnowledgeRetrievalEvaluator evaluator = new KnowledgeRetrievalEvaluator(chatClient);
         KnowledgeRetrievalTraceService retrievalTraceService = mock(KnowledgeRetrievalTraceService.class);
         AssistantStageTraceService stageTraceService = mock(AssistantStageTraceService.class);
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
         when(stageTraceService.startStage(anyString(), anyString(), anyString(), any(), any()))
                 .thenReturn(AssistantStageTraceService.StageSpan.builder().traceId("trace_1").stageKey("TEST").startedAt(System.currentTimeMillis()).build());
 
@@ -53,7 +59,8 @@ class KnowledgeRetrievalOrchestratorTest {
         when(structuredRuleSupportService.lookup("退票规则具体流程是什么怎么查询")).thenReturn(supportBundle);
 
         KnowledgeRetrievalOrchestrator orchestrator = new KnowledgeRetrievalOrchestrator(
-                retrievalEngine, structuredRuleSupportService, planner, evaluator, advancedQueryService, retrievalTraceService, stageTraceService);
+                retrievalEngine, structuredRuleSupportService, planner, evaluator, advancedQueryService,
+                hybridSearchService, retrievalTraceService, stageTraceService);
 
         KnowledgeRetrievalContext context = orchestrator.retrieve(plan);
 
@@ -62,5 +69,49 @@ class KnowledgeRetrievalOrchestratorTest {
                 || "INCORRECT".equals(context.assessment().confidenceLevel())
                 || "CORRECT".equals(context.assessment().confidenceLevel()));
         assertTrue(context.assessment().sources() != null, "sources should not be null");
+    }
+
+    @Test
+    void shouldResolveAnswerDocumentsWhenEngineOnlyReturnsSources() {
+        MultiChannelRetrievalEngine retrievalEngine = mock(MultiChannelRetrievalEngine.class);
+        StructuredRuleSupportService structuredRuleSupportService = mock(StructuredRuleSupportService.class);
+        AdvancedQueryService advancedQueryService = mock(AdvancedQueryService.class);
+        KnowledgeRetrievalPlanner planner = new KnowledgeRetrievalPlanner(advancedQueryService);
+        ChatClient chatClient = mock(ChatClient.class);
+        KnowledgeRetrievalEvaluator evaluator = new KnowledgeRetrievalEvaluator(chatClient);
+        KnowledgeRetrievalTraceService retrievalTraceService = mock(KnowledgeRetrievalTraceService.class);
+        AssistantStageTraceService stageTraceService = mock(AssistantStageTraceService.class);
+        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
+
+        RagSourceVo source = RagSourceVo.builder()
+                .chunkId("chunk-1")
+                .title("title")
+                .source("faq")
+                .section("section")
+                .snippet("snippet")
+                .score(0.9)
+                .build();
+        Document doc = new Document("正文", Map.of("chunkId", "chunk-1"));
+
+        when(retrievalEngine.retrieveSimple(any(SearchContext.class))).thenReturn(RagSearchResultVo.builder()
+                .originalQuery("退票")
+                .normalizedQuery("退票")
+                .rewrittenQuery("退票")
+                .sources(List.of(source))
+                .documents(List.of())
+                .build());
+        when(structuredRuleSupportService.lookup("退票")).thenReturn(new StructuredRuleSupportService.SupportBundle(List.of(), List.of()));
+        when(hybridSearchService.resolveDocuments(List.of(source))).thenReturn(List.of(doc));
+
+        KnowledgeRetrievalOrchestrator orchestrator = new KnowledgeRetrievalOrchestrator(
+                retrievalEngine, structuredRuleSupportService, planner, evaluator, advancedQueryService,
+                hybridSearchService, retrievalTraceService, stageTraceService);
+
+        KnowledgeRetrievalPlan plan = new KnowledgeRetrievalPlan(
+                "退票", "退票", 4, false, 6, 260, 4000, List.of("退票"), KnowledgeRetrievalPlan.Complexity.SIMPLE);
+        KnowledgeRetrievalContext context = orchestrator.retrieve(plan);
+
+        assertEquals(1, context.answerDocuments().size());
+        assertEquals("chunk-1", String.valueOf(context.answerDocuments().get(0).getMetadata().get("chunkId")));
     }
 }

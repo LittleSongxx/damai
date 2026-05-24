@@ -140,6 +140,15 @@ damai:
       enabled: ${DAMAI_AI_PLAYGROUND_ENABLED:false}
     eval:
       degraded-mode: ${DAMAI_AI_EVAL_DEGRADED_MODE:false}
+      recall-at-k-threshold: ${DAMAI_AI_EVAL_RECALL_THRESHOLD:0.85}
+      mrr-threshold: ${DAMAI_AI_EVAL_MRR_THRESHOLD:0.75}
+      ndcg-at-k-threshold: ${DAMAI_AI_EVAL_NDCG_THRESHOLD:0.80}
+      context-precision-threshold: ${DAMAI_AI_EVAL_CONTEXT_PRECISION_THRESHOLD:0.75}
+      context-recall-threshold: ${DAMAI_AI_EVAL_CONTEXT_RECALL_THRESHOLD:0.75}
+      context-relevance-threshold: ${DAMAI_AI_EVAL_CONTEXT_RELEVANCE_THRESHOLD:0.70}
+      faithfulness-threshold: ${DAMAI_AI_EVAL_FAITHFULNESS_THRESHOLD:0.90}
+      answer-relevancy-threshold: ${DAMAI_AI_EVAL_ANSWER_RELEVANCY_THRESHOLD:0.80}
+      answer-correctness-threshold: ${DAMAI_AI_EVAL_ANSWER_CORRECTNESS_THRESHOLD:0.75}
     security:
       admin-user-ids: ${DAMAI_AI_ADMIN_USER_IDS:}
     web-search:

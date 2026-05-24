@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 public class AssistantExecutionPlanner {
@@ -31,6 +32,29 @@ public class AssistantExecutionPlanner {
     }
 
     public AssistantExecutionPlan plan(AiRun run, AiUserContext user, AssistantRunCreateRequest request) {
+        // Sentiment pre-check: strong negative sentiment → reassurance + escalation suggestion
+        SentimentCheckResult sentiment = checkSentiment(request.getMessage());
+        if (sentiment.isStrongNegative()) {
+            return AssistantExecutionPlan.builder()
+                    .runId(run.getRunId())
+                    .conversationId(run.getConversationId())
+                    .originalMessage(request.getMessage())
+                    .clientContext(request.getClientContext())
+                    .executionMode(AssistantExecutionMode.CLARIFICATION)
+                    .routeDecision(AssistantRouteDecision.builder()
+                            .routeType(AssistantRouteType.BUSINESS)
+                            .reason("sentiment_negative")
+                            .fromFallback(false)
+                            .clarificationRequired(true)
+                            .clarificationPrompt(sentiment.responseMessage())
+                            .clarificationOptions(List.of("转人工客服", "继续使用购票助手", "继续咨询规则问题"))
+                            .build())
+                    .responseMessage(sentiment.responseMessage())
+                    .options(List.of("转人工客服", "继续使用购票助手", "继续咨询规则问题"))
+                    .reason("sentiment_negative")
+                    .build();
+        }
+
         AssistantRouteDecision decision = resolveRouteDecision(request.getMessage(), request.getClientContext());
         if (!aiPermissionService.canAccessRoute(user, decision.getRouteType())) {
             decision = AssistantRouteDecision.builder()
@@ -133,5 +157,26 @@ public class AssistantExecutionPlanner {
                     .build();
         }
         return routeService.route(message);
+    }
+
+    // ---- Sentiment-aware routing ----
+
+    private static final Set<String> NEGATIVE_KEYWORDS = Set.of(
+            "投诉", "举报", "骗子", "欺诈", "太过分", "气死", "坑人", "退款不退",
+            "垃圾", "差劲", "没人管", "不管", "不处理", "到底有没有人", "找客服",
+            "转人工", "人工客服", "我要投诉", "我要退款", "什么破平台"
+    );
+
+    private SentimentCheckResult checkSentiment(String message) {
+        if (message == null) return SentimentCheckResult.NEUTRAL;
+        String lower = message.toLowerCase();
+        boolean hit = NEGATIVE_KEYWORDS.stream().anyMatch(lower::contains);
+        if (!hit) return SentimentCheckResult.NEUTRAL;
+        return new SentimentCheckResult(true,
+                "非常抱歉给您带来不好的体验。我理解您目前的心情，建议您转接人工客服获得更直接的帮助。");
+    }
+
+    private record SentimentCheckResult(boolean strongNegative, String responseMessage) {
+        static final SentimentCheckResult NEUTRAL = new SentimentCheckResult(false, null);
     }
 }

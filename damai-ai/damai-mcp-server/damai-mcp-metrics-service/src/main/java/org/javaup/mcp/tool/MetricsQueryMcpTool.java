@@ -48,7 +48,11 @@ public class MetricsQueryMcpTool {
     /**
      * 获取可用的服务列表（指标监控）
      */
-    @Tool(description = "获取大麦系统中所有被 Prometheus 监控的微服务列表")
+    @Tool(description = """
+            获取所有被 Prometheus 监控的微服务列表。这是指标查询工具的入口——其他指标查询工具的
+            serviceName 参数都必须来自此工具返回的服务名列表。
+            何时使用: 排查前先了解系统中有哪些服务、确认服务名拼写。
+            返回: 服务名列表（按字母排序）和数量。""")
     public ToolResult getMetricsServiceList() {
         try {
             // 查询 application 标签的所有值
