@@ -1,6 +1,5 @@
 package org.javaup.ai.service;
 
-import cn.hutool.core.codec.Base64;
 import cn.hutool.core.collection.CollectionUtil;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
@@ -61,17 +60,10 @@ public class HybridSearchService {
     @Value("${damai.ai.qdrant.collection:damai_ai_faq}")
     private String qdrantCollection;
 
+    private final EsClientHelper esClient;
+
     @Value("${damai.ai.faq.alias:damai-ai-faq-current}")
     private String faqAlias;
-
-    @Value("${DAMAI_ES_ADDR:127.0.0.1:19200}")
-    private String esAddress;
-
-    @Value("${DAMAI_ES_USERNAME:elastic}")
-    private String esUsername;
-
-    @Value("${DAMAI_ES_PASSWORD:elastic}")
-    private String esPassword;
 
     @Value("${DAMAI_AI_OPENAI_EMBEDDING_DIMENSIONS:1024}")
     private Integer embeddingDimensions;
@@ -101,7 +93,8 @@ public class HybridSearchService {
                                 RagChunkMapper chunkMapper,
                                 DocumentIngestionService documentIngestionService,
                                 PostRetrievalFilterService postRetrievalFilterService,
-                                SentenceWindowService sentenceWindowService) {
+                                SentenceWindowService sentenceWindowService,
+                                EsClientHelper esClient) {
         this.embeddingModel = embeddingModel;
         this.rerankService = rerankService;
         this.advancedQueryService = advancedQueryService;
@@ -116,6 +109,7 @@ public class HybridSearchService {
         this.documentIngestionService = documentIngestionService;
         this.postRetrievalFilterService = postRetrievalFilterService;
         this.sentenceWindowService = sentenceWindowService;
+        this.esClient = esClient;
     }
 
     // ======================== Ingestion (delegated) ========================
@@ -134,6 +128,7 @@ public class HybridSearchService {
 
     // ======================== Retrieval ========================
 
+    @Deprecated(forRemoval = true)
     public RagSearchResultVo hybridSearchWithTrace(String query, int topK, boolean enableRerank) {
         ensureDocumentsLoaded();
 
@@ -258,6 +253,7 @@ public class HybridSearchService {
         return result;
     }
 
+    @Deprecated(forRemoval = true)
     public RagSearchResultVo hybridSearchWithHyde(String query, int topK, boolean enableRerank) {
         ensureDocumentsLoaded();
 
@@ -525,7 +521,7 @@ public class HybridSearchService {
 
             List<ScoredPoint> scoredPoints = qdrantClient.searchAsync(
                     SearchPoints.newBuilder()
-                            .setCollectionName(qdrantCollection)
+                            .setCollectionName(documentIngestionService.qdrantSearchAlias())
                             .addAllVector(vectorList)
                             .setLimit(topK)
                             .setScoreThreshold((float) minVectorSimilarity)
@@ -560,30 +556,27 @@ public class HybridSearchService {
             multiMatch.put("query", query);
             multiMatch.put("fields", List.of("searchText^4", "question^3", "keywords^2", "text^2", "docTitle^1"));
 
+            JSONObject boolQuery = new JSONObject(Map.of("must", List.of(
+                    Map.of("multi_match", multiMatch)
+            )));
+            // Exclude documents past their valid_until date
+            String now = java.time.LocalDate.now().toString();
+            boolQuery.put("filter", List.of(
+                    Map.of("bool", Map.of("should", List.of(
+                            Map.of("bool", Map.of("must_not", Map.of("exists", Map.of("field", "validUntil")))),
+                            Map.of("range", Map.of("validUntil", Map.of("gte", now)))
+                    ), "minimum_should_match", 1))
+            ));
+
             JSONObject body = new JSONObject();
             body.put("size", topK);
-            body.put("query", new JSONObject(Map.of("multi_match", multiMatch)));
+            body.put("query", boolQuery);
 
-            String requestBody = body.toJSONString();
-            log.debug("[DIAG] ES request url=/{}/_search, body={}", faqAlias, requestBody);
-            JSONObject response = executeEs("/" + faqAlias + "/_search", requestBody, "POST");
-            if (response.isEmpty()) {
-                log.warn("[DIAG] ES returned EMPTY JSONObject (no hits, no error) for query={}", query);
-                return List.of();
-            }
-            log.debug("[DIAG] ES raw response keys={}, totalField={}", response.keySet(),
-                    response.containsKey("hits") ? response.getJSONObject("hits").containsKey("total") : "no-hits");
+            JSONObject response = esClient.execute("/" + faqAlias + "/_search", body.toJSONString(), "POST");
             JSONObject hitsObj = response.getJSONObject("hits");
-            if (hitsObj == null) {
-                log.warn("[DIAG] ES response has no 'hits' object for query={}, response keys={}", query, response.keySet());
-                return List.of();
-            }
+            if (hitsObj == null) return List.of();
             JSONArray hits = hitsObj.getJSONArray("hits");
-            if (hits == null) {
-                log.warn("[DIAG] ES hits is null for query={}", query);
-                return List.of();
-            }
-            log.debug("[DIAG] ES sparseSearch query={}, totalHits={}, returnedHits={}", query, hitsObj.getJSONObject("total") != null ? hitsObj.getJSONObject("total").get("value") : "?", hits.size());
+            if (hits == null) return List.of();
 
             List<RagSourceVo> sources = new ArrayList<>();
             for (int i = 0; i < hits.size(); i++) {
@@ -833,50 +826,5 @@ public class HybridSearchService {
         io.qdrant.client.grpc.JsonWithInt.Value value = map.get(key);
         if (value == null || !value.hasIntegerValue()) return null;
         return (int) value.getIntegerValue();
-    }
-
-    private JSONObject field(String type) {
-        return new JSONObject(Map.of("type", type));
-    }
-
-    private JSONObject executeEs(String path, String body, String method) {
-        String url = "http://" + esAddress + path;
-        log.debug("[DIAG] ES executeEs called: url={}, method={}, bodyBytes={}", url, method, body.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
-        try {
-            java.net.http.HttpRequest.Builder requestBuilder = java.net.http.HttpRequest.newBuilder()
-                    .uri(java.net.URI.create(url))
-                    .header("Authorization", esAuthorization())
-                    .header("Content-Type", "application/json;charset=UTF-8");
-            switch (method) {
-                case "PUT" -> requestBuilder.PUT(java.net.http.HttpRequest.BodyPublishers.ofString(body));
-                case "POST" -> requestBuilder.POST(java.net.http.HttpRequest.BodyPublishers.ofString(body));
-                default -> requestBuilder.GET();
-            }
-            java.net.http.HttpRequest request = requestBuilder.build();
-            java.net.http.HttpResponse<String> response = HTTP_CLIENT.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
-            String responseBody = response.body();
-            if (responseBody == null || responseBody.isEmpty()) {
-                log.warn("ES response empty for url={}", url);
-                return new JSONObject();
-            }
-            log.debug("[DIAG] ES raw response (first 500 chars): {}", responseBody.length() > 500 ? responseBody.substring(0, 500) : responseBody);
-            JSONObject parsed = JSON.parseObject(responseBody);
-            if (parsed.containsKey("error")) {
-                log.warn("ES returned error for url={}: {}", url, parsed.getJSONObject("error"));
-                return new JSONObject();
-            }
-            return parsed;
-        } catch (Exception ex) {
-            log.warn("ES request failed for url={}", url, ex);
-            return new JSONObject();
-        }
-    }
-
-    private static final java.net.http.HttpClient HTTP_CLIENT = java.net.http.HttpClient.newBuilder()
-            .version(java.net.http.HttpClient.Version.HTTP_1_1)
-            .build();
-
-    private String esAuthorization() {
-        return "Basic " + Base64.encode(esUsername + ":" + esPassword);
     }
 }

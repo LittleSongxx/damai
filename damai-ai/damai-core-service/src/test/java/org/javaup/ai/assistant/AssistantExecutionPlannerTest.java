@@ -28,7 +28,7 @@ class AssistantExecutionPlannerTest {
                 .build());
         AiPermissionService permissionService = mock(AiPermissionService.class);
         when(permissionService.canAccessRoute(user(false), AssistantRouteType.BUSINESS)).thenReturn(true);
-        AssistantExecutionPlanner planner = new AssistantExecutionPlanner(routeService, permissionService);
+        AssistantExecutionPlanner planner = new AssistantExecutionPlanner(routeService, permissionService, null, null, null, null);
 
         AssistantExecutionPlan plan = planner.plan(run(), user(false), request("看看这个", null));
 
@@ -42,7 +42,7 @@ class AssistantExecutionPlannerTest {
         AssistantRouteService routeService = mock(AssistantRouteService.class);
         AiPermissionService permissionService = mock(AiPermissionService.class);
         when(permissionService.canAccessRoute(user(true), AssistantRouteType.OPS)).thenReturn(true);
-        AssistantExecutionPlanner planner = new AssistantExecutionPlanner(routeService, permissionService);
+        AssistantExecutionPlanner planner = new AssistantExecutionPlanner(routeService, permissionService, null, null, null, null);
 
         AssistantExecutionPlan plan = planner.plan(run(), user(true), request("随便聊聊", Map.of("routeHint", "ops")));
 
@@ -57,7 +57,7 @@ class AssistantExecutionPlannerTest {
         AssistantRouteService routeService = mock(AssistantRouteService.class);
         AiPermissionService permissionService = mock(AiPermissionService.class);
         when(permissionService.canAccessRoute(user(false), AssistantRouteType.GENERAL)).thenReturn(true);
-        AssistantExecutionPlanner planner = new AssistantExecutionPlanner(routeService, permissionService);
+        AssistantExecutionPlanner planner = new AssistantExecutionPlanner(routeService, permissionService, null, null, null, null);
 
         AssistantExecutionPlan plan = planner.plan(run(), user(false), request("介绍一下这个歌手", Map.of("routeHint", "general")));
 
@@ -72,7 +72,7 @@ class AssistantExecutionPlannerTest {
         AssistantRouteService routeService = mock(AssistantRouteService.class);
         AiPermissionService permissionService = mock(AiPermissionService.class);
         when(permissionService.canAccessRoute(user(false), AssistantRouteType.OPS)).thenReturn(false);
-        AssistantExecutionPlanner planner = new AssistantExecutionPlanner(routeService, permissionService);
+        AssistantExecutionPlanner planner = new AssistantExecutionPlanner(routeService, permissionService, null, null, null, null);
 
         AssistantExecutionPlan plan = planner.plan(run(), user(false), request("查一下 gateway cpu", Map.of("routeHint", "ops")));
 
@@ -110,7 +110,7 @@ class AssistantExecutionPlannerTest {
                         .confidence(1.0)
                         .fromHint(true)
                         .build());
-        AssistantExecutionPlanner planner = new AssistantExecutionPlanner(routeService, permissionService, selector);
+        AssistantExecutionPlanner planner = new AssistantExecutionPlanner(routeService, permissionService, selector, null, null, null);
 
         AssistantExecutionPlan plan = planner.plan(run(), user(false), request("介绍一下这个歌手", Map.of("skillHint", "general.web.search")));
 
@@ -146,7 +146,7 @@ class AssistantExecutionPlannerTest {
                         .confidence(0.55)
                         .fromHint(false)
                         .build());
-        AssistantExecutionPlanner planner = new AssistantExecutionPlanner(routeService, permissionService, selector);
+        AssistantExecutionPlanner planner = new AssistantExecutionPlanner(routeService, permissionService, selector, null, null, null);
 
         AssistantExecutionPlan plan = planner.plan(run(), user(false), request("看看这个", null));
 

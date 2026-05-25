@@ -27,7 +27,6 @@ import org.javaup.ai.entity.AiRun;
 import org.javaup.ai.guardrails.GuardrailAuditService;
 import org.javaup.ai.guardrails.GuardrailResult;
 import org.javaup.ai.guardrails.ResponseGuardrailService;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -55,45 +54,13 @@ public class SkillExecutor implements AssistantExecutor {
                          AssistantMessageEmitter messageEmitter,
                          AssistantMemoryService memoryService,
                          AssistantUserProfileService userProfileService,
-                         AssistantRunCompletedPublisher runCompletedPublisher) {
-        this(runService, skillRegistry, messageEmitter, memoryService, userProfileService, runCompletedPublisher,
-                (AssistantSkillDefinitionService) null, null, null, null, null, null);
-    }
-
-    @Autowired
-    public SkillExecutor(AssistantRunService runService,
-                         AssistantSkillRegistry skillRegistry,
-                         AssistantMessageEmitter messageEmitter,
-                         AssistantMemoryService memoryService,
-                         AssistantUserProfileService userProfileService,
                          AssistantRunCompletedPublisher runCompletedPublisher,
-                         ObjectProvider<AssistantSkillDefinitionService> skillDefinitionServiceProvider,
-                         ObjectProvider<AssistantSkillPolicyGuard> policyGuardProvider,
-                         ObjectProvider<AssistantSkillSchemaValidator> schemaValidatorProvider,
-                         ObjectProvider<AssistantSkillToolRegistry> toolRegistryProvider,
-                         ObjectProvider<ResponseGuardrailService> responseGuardrailServiceProvider,
-                         ObjectProvider<GuardrailAuditService> guardrailAuditServiceProvider) {
-        this(runService, skillRegistry, messageEmitter, memoryService, userProfileService, runCompletedPublisher,
-                skillDefinitionServiceProvider == null ? null : skillDefinitionServiceProvider.getIfAvailable(),
-                policyGuardProvider == null ? null : policyGuardProvider.getIfAvailable(),
-                schemaValidatorProvider == null ? null : schemaValidatorProvider.getIfAvailable(),
-                toolRegistryProvider == null ? null : toolRegistryProvider.getIfAvailable(),
-                responseGuardrailServiceProvider == null ? null : responseGuardrailServiceProvider.getIfAvailable(),
-                guardrailAuditServiceProvider == null ? null : guardrailAuditServiceProvider.getIfAvailable());
-    }
-
-    private SkillExecutor(AssistantRunService runService,
-                          AssistantSkillRegistry skillRegistry,
-                          AssistantMessageEmitter messageEmitter,
-                          AssistantMemoryService memoryService,
-                          AssistantUserProfileService userProfileService,
-                          AssistantRunCompletedPublisher runCompletedPublisher,
-                          AssistantSkillDefinitionService skillDefinitionService,
-                          AssistantSkillPolicyGuard policyGuard,
-                          AssistantSkillSchemaValidator schemaValidator,
-                          AssistantSkillToolRegistry toolRegistry,
-                          ResponseGuardrailService responseGuardrailService,
-                          GuardrailAuditService guardrailAuditService) {
+                         @Autowired(required = false) AssistantSkillDefinitionService skillDefinitionService,
+                         @Autowired(required = false) AssistantSkillPolicyGuard policyGuard,
+                         @Autowired(required = false) AssistantSkillSchemaValidator schemaValidator,
+                         @Autowired(required = false) AssistantSkillToolRegistry toolRegistry,
+                         @Autowired(required = false) ResponseGuardrailService responseGuardrailService,
+                         @Autowired(required = false) GuardrailAuditService guardrailAuditService) {
         this.runService = runService;
         this.skillRegistry = skillRegistry;
         this.messageEmitter = messageEmitter;

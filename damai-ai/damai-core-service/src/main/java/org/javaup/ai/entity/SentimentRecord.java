@@ -11,33 +11,31 @@ import java.util.Date;
 
 @Data
 @EqualsAndHashCode(callSuper = true)
-@TableName("d_ai_feedback_analysis")
-public class FeedbackAnalysis extends BaseTableData {
+@TableName("d_ai_sentiment_record")
+public class SentimentRecord extends BaseTableData {
 
     @TableId(value = "id", type = IdType.AUTO)
     private Long id;
 
-    private String analysisId;
-
-    private String feedbackId;
+    private String recordId;
 
     private String runId;
 
-    private String analysisType;
+    private String conversationId;
 
-    private String issueSummary;
+    private Long userId;
 
-    private String suggestedAction;
+    private String userMessage;
 
-    private String actionTaken;
+    private String sentiment;
 
-    private String actionStatus;
+    private Double intensity;
 
-    private String clusterKey;
+    private Integer isUrgent;
 
-    private Integer affectedFeedbackCount;
+    private String emotionTagsJson;
 
-    private Long resolvedBy;
+    private Integer escalationTriggered;
 
-    private Date resolvedAt;
+    private String escalationReason;
 }

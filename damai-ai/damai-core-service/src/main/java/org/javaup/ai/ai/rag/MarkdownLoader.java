@@ -5,8 +5,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.utils.StringUtil;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.ResourcePatternResolver;
+import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -32,10 +34,10 @@ import java.util.Set;
  * - Structured metadata extraction
  */
 @Slf4j
+@Component
 public class MarkdownLoader {
 
-    private static final String DEFAULT_DOCUMENT_PATTERN = "classpath:datum/*.md";
-    private static final int DEFAULT_CHUNK_SIZE = 200;
+    private static final int DEFAULT_CHUNK_SIZE = 400;
     private static final int DEFAULT_MIN_CHUNK_SIZE_CHARS = 50;
     private static final int DEFAULT_MIN_CHUNK_LENGTH_TO_EMBED = 5;
     private static final int DEFAULT_MAX_NUM_CHUNKS = 10000;
@@ -43,60 +45,38 @@ public class MarkdownLoader {
 
     // Hierarchical chunking: parent blocks for context window
     private static final int PARENT_CHUNK_SIZE = 1024;
-    private static final int PARENT_OVERLAP = 128;
 
     private final ResourcePatternResolver resourcePatternResolver;
-    private final String documentPattern;
-    private final int chunkSize;
-    private final int minChunkSizeChars;
-    private final int minChunkLengthToEmbed;
-    private final int maxNumChunks;
-    private final int minDocLengthForTokenSplit;
-    private final Map<String, String> keywordMap;
-    private static final String INDEX_VERSION_PREFIX = "v";
+    @Value("${damai.ai.rag.document-pattern:classpath:datum/*.md}")
+    private String documentPattern;
+
+    @Value("${damai.ai.rag.chunk-size:400}")
+    private int chunkSize;
+
+    @Value("${damai.ai.rag.min-chunk-size-chars:50}")
+    private int minChunkSizeChars;
+
+    @Value("${damai.ai.rag.min-chunk-length-to-embed:5}")
+    private int minChunkLengthToEmbed;
+
+    @Value("${damai.ai.rag.max-num-chunks:10000}")
+    private int maxNumChunks;
+
+    @Value("${damai.ai.rag.min-doc-length-for-token-split:1000}")
+    private int minDocLengthForTokenSplit;
 
     private volatile LoadStats lastLoadStats = new LoadStats(0, 0, 0, 0, 0);
-    private volatile String currentIndexVersion = INDEX_VERSION_PREFIX + Instant.now().getEpochSecond();
+    private volatile String currentIndexVersion;
 
     public MarkdownLoader(ResourcePatternResolver resourcePatternResolver) {
-        this(resourcePatternResolver,
-                DEFAULT_DOCUMENT_PATTERN,
-                DEFAULT_CHUNK_SIZE,
-                DEFAULT_MIN_CHUNK_SIZE_CHARS,
-                DEFAULT_MIN_CHUNK_LENGTH_TO_EMBED,
-                DEFAULT_MAX_NUM_CHUNKS,
-                DEFAULT_MIN_DOC_LENGTH_FOR_TOKEN_SPLIT,
-                null);
-    }
-
-    public MarkdownLoader(ResourcePatternResolver resourcePatternResolver,
-                          String documentPattern,
-                          int chunkSize,
-                          int minChunkSizeChars,
-                          int minChunkLengthToEmbed,
-                          int maxNumChunks,
-                          int minDocLengthForTokenSplit) {
-        this(resourcePatternResolver, documentPattern, chunkSize, minChunkSizeChars,
-                minChunkLengthToEmbed, maxNumChunks, minDocLengthForTokenSplit, null);
-    }
-
-    public MarkdownLoader(ResourcePatternResolver resourcePatternResolver,
-                          String documentPattern,
-                          int chunkSize,
-                          int minChunkSizeChars,
-                          int minChunkLengthToEmbed,
-                          int maxNumChunks,
-                          int minDocLengthForTokenSplit,
-                          Map<String, String> keywordMap) {
         this.resourcePatternResolver = resourcePatternResolver;
-        this.documentPattern = StringUtil.isEmpty(documentPattern) ? DEFAULT_DOCUMENT_PATTERN : documentPattern;
-        this.chunkSize = positiveOrDefault(chunkSize, DEFAULT_CHUNK_SIZE);
-        this.minChunkSizeChars = positiveOrDefault(minChunkSizeChars, DEFAULT_MIN_CHUNK_SIZE_CHARS);
-        this.minChunkLengthToEmbed = positiveOrDefault(minChunkLengthToEmbed, DEFAULT_MIN_CHUNK_LENGTH_TO_EMBED);
-        this.maxNumChunks = positiveOrDefault(maxNumChunks, DEFAULT_MAX_NUM_CHUNKS);
-        this.minDocLengthForTokenSplit = positiveOrDefault(minDocLengthForTokenSplit, DEFAULT_MIN_DOC_LENGTH_FOR_TOKEN_SPLIT);
-        this.keywordMap = keywordMap != null ? keywordMap : defaultKeywordMap();
     }
+
+    private int effectiveChunkSize() { return positiveOrDefault(chunkSize, DEFAULT_CHUNK_SIZE); }
+    private int effectiveMinChunkSizeChars() { return positiveOrDefault(minChunkSizeChars, DEFAULT_MIN_CHUNK_SIZE_CHARS); }
+    private int effectiveMinChunkLengthToEmbed() { return positiveOrDefault(minChunkLengthToEmbed, DEFAULT_MIN_CHUNK_LENGTH_TO_EMBED); }
+    private int effectiveMaxNumChunks() { return positiveOrDefault(maxNumChunks, DEFAULT_MAX_NUM_CHUNKS); }
+    private int effectiveMinDocLengthForTokenSplit() { return positiveOrDefault(minDocLengthForTokenSplit, DEFAULT_MIN_DOC_LENGTH_FOR_TOKEN_SPLIT); }
 
     /**
      * Load all markdown documents with hierarchical chunking.
@@ -109,8 +89,9 @@ public class MarkdownLoader {
         int skippedCount = 0;
         Resource[] resources = new Resource[0];
 
+        String effectivePattern = StringUtil.isEmpty(documentPattern) ? "classpath:datum/*.md" : documentPattern;
         try {
-            resources = resourcePatternResolver.getResources(documentPattern);
+            resources = resourcePatternResolver.getResources(effectivePattern);
             Arrays.sort(resources, Comparator.comparing(resource ->
                     resource.getFilename() == null ? "" : resource.getFilename()));
             log.info("Found {} Markdown files", resources.length);
@@ -149,11 +130,16 @@ public class MarkdownLoader {
 
         attachSequenceMetadata(flatDocuments);
         setParentBlockIds(flatDocuments);
-        currentIndexVersion = INDEX_VERSION_PREFIX + Instant.now().getEpochSecond();
+        // Content-based index version: hash of all document content hashes, stable when content unchanged
+        String allHashes = documentMetadatas.stream()
+                .map(DocumentMetadata::contentHash)
+                .sorted()
+                .reduce("", (a, b) -> a + b);
+        currentIndexVersion = "v" + DigestUtil.md5Hex(allHashes);
         lastLoadStats = new LoadStats(resources.length, faqCount, flatDocuments.size(), skippedCount,
                 documentMetadatas.size());
-        log.info("Loaded {} FAQ entries, generated {} chunks ({} documents), skipped {} files",
-                faqCount, flatDocuments.size(), documentMetadatas.size(), skippedCount);
+        log.info("Loaded {} FAQ entries, generated {} chunks ({} documents, indexVersion={}), skipped {} files",
+                faqCount, flatDocuments.size(), documentMetadatas.size(), currentIndexVersion, skippedCount);
 
         return new LoadResult(flatDocuments, documentMetadatas);
     }
@@ -275,13 +261,13 @@ public class MarkdownLoader {
         String contextText = contextPrefix + "\n\n" + rawText;
         Map<String, Object> baseMeta = baseMetadata(fileName, section, rawText, docMeta);
 
-        if (rawText.length() <= minDocLengthForTokenSplit) {
+        if (rawText.length() <= effectiveMinDocLengthForTokenSplit()) {
             // Short document: apply overlap-aware splitting for docs near the boundary
-            int overlap = Math.max(50, chunkSize / 5);
-            if (rawText.length() > minDocLengthForTokenSplit * 0.7) {
+            int overlap = Math.max(50, effectiveChunkSize() / 5);
+            if (rawText.length() > effectiveMinDocLengthForTokenSplit() * 0.7) {
                 // Near-boundary docs: use token splitter with overlap to preserve context
                 TokenTextSplitter boundarySplitter = new TokenTextSplitter(
-                        chunkSize, minChunkSizeChars, minChunkLengthToEmbed, maxNumChunks, true);
+                        effectiveChunkSize(), effectiveMinChunkSizeChars(), effectiveMinChunkLengthToEmbed(), effectiveMaxNumChunks(), true);
                 List<Document> boundaryChunks = boundarySplitter.split(List.of(new Document(rawText, new HashMap<>())));
                 if (boundaryChunks.size() > 1) {
                     List<Document> docs = new ArrayList<>();
@@ -300,7 +286,6 @@ public class MarkdownLoader {
                     return docs;
                 }
             }
-            // Genuinely short document: single chunk (well under boundary)
             Map<String, Object> meta = new HashMap<>(baseMeta);
             meta.put("chunkType", "faq");
             meta.put("partIndex", 0);
@@ -316,12 +301,12 @@ public class MarkdownLoader {
         // Long document: hierarchical chunking
         // Parent chunks: larger blocks for final context window
         TokenTextSplitter parentSplitter = new TokenTextSplitter(
-                PARENT_CHUNK_SIZE, minChunkSizeChars, minChunkLengthToEmbed, maxNumChunks, true);
+                PARENT_CHUNK_SIZE, effectiveMinChunkSizeChars(), effectiveMinChunkLengthToEmbed(), effectiveMaxNumChunks(), true);
         List<Document> parentBlocks = parentSplitter.split(List.of(new Document(rawText, new HashMap<>())));
 
         // Child chunks: smaller blocks for embedding/retrieval
         TokenTextSplitter childSplitter = new TokenTextSplitter(
-                chunkSize, minChunkSizeChars, minChunkLengthToEmbed, maxNumChunks, true);
+                effectiveChunkSize(), effectiveMinChunkSizeChars(), effectiveMinChunkLengthToEmbed(), effectiveMaxNumChunks(), true);
         List<Document> childBlocks = childSplitter.split(List.of(new Document(rawText, new HashMap<>())));
 
         // If splitting produced no parent blocks, fall back to single chunk
@@ -439,7 +424,7 @@ public class MarkdownLoader {
         metadata.put("contentHash", DigestUtil.md5Hex(text));
         metadata.put("searchText", buildSearchText(section, keywords, text));
         metadata.put("loadTime", LocalDateTime.now().toString());
-        metadata.put("indexVersion", currentIndexVersion);
+        metadata.put("indexVersion", currentIndexVersion != null ? currentIndexVersion : "loading");
         metadata.put("docVersion", DigestUtil.md5Hex(section.docTitle() + ":" + section.question() + ":" + section.answer()));
 
         // Propagate document validity and version to chunk payload for temporal filtering

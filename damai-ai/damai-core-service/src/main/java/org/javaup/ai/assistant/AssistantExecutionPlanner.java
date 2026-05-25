@@ -4,6 +4,9 @@ import org.javaup.ai.context.AiUserContext;
 import org.javaup.ai.dto.AssistantRunCreateRequest;
 import org.javaup.ai.entity.AiRun;
 import org.javaup.ai.security.AiPermissionService;
+import org.javaup.ai.service.DialogueStateManager;
+import org.javaup.ai.service.EscalationService;
+import org.javaup.ai.service.SentimentAnalysisService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -19,43 +22,55 @@ public class AssistantExecutionPlanner {
     private final AssistantRouteService routeService;
     private final AiPermissionService aiPermissionService;
     private final AssistantSkillSelector skillSelector;
+    private final SentimentAnalysisService sentimentAnalysisService;
+    private final DialogueStateManager dialogueStateManager;
+    private final EscalationService escalationService;
 
-    public AssistantExecutionPlanner(AssistantRouteService routeService, AiPermissionService aiPermissionService) {
-        this(routeService, aiPermissionService, null);
-    }
-
-    @Autowired
-    public AssistantExecutionPlanner(AssistantRouteService routeService, AiPermissionService aiPermissionService, AssistantSkillSelector skillSelector) {
+    public AssistantExecutionPlanner(AssistantRouteService routeService,
+                                     AiPermissionService aiPermissionService,
+                                     @Autowired(required = false) AssistantSkillSelector skillSelector,
+                                     @Autowired(required = false) SentimentAnalysisService sentimentAnalysisService,
+                                     @Autowired(required = false) DialogueStateManager dialogueStateManager,
+                                     @Autowired(required = false) EscalationService escalationService) {
         this.routeService = routeService;
         this.aiPermissionService = aiPermissionService;
         this.skillSelector = skillSelector;
+        this.sentimentAnalysisService = sentimentAnalysisService;
+        this.dialogueStateManager = dialogueStateManager;
+        this.escalationService = escalationService;
     }
 
     public AssistantExecutionPlan plan(AiRun run, AiUserContext user, AssistantRunCreateRequest request) {
-        // Sentiment pre-check: strong negative sentiment → reassurance + escalation suggestion
-        SentimentCheckResult sentiment = checkSentiment(request.getMessage());
-        if (sentiment.isStrongNegative()) {
-            return AssistantExecutionPlan.builder()
-                    .runId(run.getRunId())
-                    .conversationId(run.getConversationId())
-                    .originalMessage(request.getMessage())
-                    .clientContext(request.getClientContext())
-                    .executionMode(AssistantExecutionMode.CLARIFICATION)
-                    .routeDecision(AssistantRouteDecision.builder()
-                            .routeType(AssistantRouteType.BUSINESS)
-                            .reason("sentiment_negative")
-                            .fromFallback(false)
-                            .clarificationRequired(true)
-                            .clarificationPrompt(sentiment.responseMessage())
-                            .clarificationOptions(List.of("转人工客服", "继续使用购票助手", "继续咨询规则问题"))
-                            .build())
-                    .responseMessage(sentiment.responseMessage())
-                    .options(List.of("转人工客服", "继续使用购票助手", "继续咨询规则问题"))
-                    .reason("sentiment_negative")
-                    .build();
+        // Sentiment analysis + escalation check at entry point
+        String sentimentLabel = null;
+        Double sentimentIntensity = null;
+        List<String> emotionTags = null;
+        if (sentimentAnalysisService != null) {
+            SentimentAnalysisService.SentimentResult sentiment = sentimentAnalysisService.analyze(
+                    request.getMessage(), run.getRunId(), run.getConversationId(), run.getUserId());
+            sentimentLabel = sentiment.sentiment();
+            sentimentIntensity = sentiment.intensity();
+            emotionTags = sentiment.emotionTags();
+            if (sentiment.shouldEscalate() && escalationService != null) {
+                escalationService.escalate(run.getRunId(), run.getConversationId(), run.getUserId(),
+                        "SENTIMENT", sentiment.escalationReason(),
+                        "用户情绪:" + sentiment.sentiment() + " 强度:" + sentiment.intensity());
+            }
         }
 
         AssistantRouteDecision decision = resolveRouteDecision(request.getMessage(), request.getClientContext());
+
+        // Negative sentiment: bias toward BUSINESS route for empathetic handling
+        if ("NEGATIVE".equals(sentimentLabel) && sentimentIntensity != null && sentimentIntensity > 0.5
+                && decision.getRouteType() == AssistantRouteType.KNOWLEDGE) {
+            decision = AssistantRouteDecision.builder()
+                    .routeType(AssistantRouteType.BUSINESS)
+                    .reason("sentiment_override:negative")
+                    .fromFallback(false)
+                    .clarificationRequired(false)
+                    .build();
+        }
+
         if (!aiPermissionService.canAccessRoute(user, decision.getRouteType())) {
             decision = AssistantRouteDecision.builder()
                     .routeType(AssistantRouteType.BUSINESS)
@@ -98,6 +113,9 @@ public class AssistantExecutionPlanner {
                 .responseMessage(decision.getClarificationPrompt())
                 .options(decision.getClarificationOptions())
                 .reason(decision.getReason())
+                .sentiment(sentimentLabel)
+                .sentimentIntensity(sentimentIntensity)
+                .emotionTags(emotionTags)
                 .build();
     }
 

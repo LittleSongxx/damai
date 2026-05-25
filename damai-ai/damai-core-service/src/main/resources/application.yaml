@@ -82,14 +82,21 @@ spring:
       chat:
         options:
           model: ${DAMAI_AI_DEEPSEEK_CHAT_MODEL:deepseek-chat}
-##     mcp:
-##       client:
-##         sse:
-##           connections:
-##             damai-log:
-##               url: ${DAMAI_AI_MCP_LOG_URL:http://127.0.0.1:8085/sse}
-##             damai-metrics:
-##               url: ${DAMAI_AI_MCP_METRICS_URL:http://127.0.0.1:8086/sse}
+    mcp:
+      client:
+        sse:
+          connections: {}
+      server:
+        enabled: ${DAMAI_AI_MCP_SERVER_ENABLED:false}
+        stdio: true
+        name: damai-ai
+        version: 1.0.0
+        instructions: |
+          大麦票务平台 AI 运维助手。提供以下工具：
+          - 日志查询：关键词搜索、traceId 链路追踪、错误日志、日志统计
+          - 指标监控：JVM 内存、CPU 使用率、GC 指标、服务健康概览
+          - 数据查询：NL2SQL 自然语言转 SQL 查询数据库
+        tool-change-notification: true
 easy-es:
   #默认为true,若为false则认为不启用本框架
   enable: true
@@ -180,6 +187,7 @@ damai:
       grpc-host: ${DAMAI_AI_QDRANT_GRPC_HOST:127.0.0.1}
       grpc-port: ${DAMAI_AI_QDRANT_GRPC_PORT:16334}
       collection: ${DAMAI_AI_QDRANT_COLLECTION:damai_ai_faq}
+      alias: ${DAMAI_AI_QDRANT_ALIAS:damai-ai-faq-alias}
     nl2sql:
       enabled: ${DAMAI_AI_NL2SQL_ENABLED:false}
       schema-collection: ${DAMAI_AI_NL2SQL_SCHEMA_COLLECTION:damai_ai_nl2sql_schema}
@@ -194,6 +202,9 @@ damai:
         password: ${DAMAI_AI_NL2SQL_PASSWORD:}
     faq:
       alias: ${DAMAI_AI_FAQ_ALIAS:damai-ai-faq-current}
+      match-threshold: ${DAMAI_AI_FAQ_MATCH_THRESHOLD:0.92}
+      keyword-match-enabled: ${DAMAI_AI_FAQ_KEYWORD_MATCH_ENABLED:true}
+      semantic-match-enabled: ${DAMAI_AI_FAQ_SEMANTIC_MATCH_ENABLED:true}
     rag:
       document-pattern: ${DAMAI_AI_RAG_DOCUMENT_PATTERN:classpath:datum/*.md}
       chunk-size: ${DAMAI_AI_RAG_CHUNK_SIZE:200}
@@ -221,6 +232,14 @@ damai:
         enabled: ${DAMAI_AI_SENTENCE_WINDOW_ENABLED:true}
         window-size: ${DAMAI_AI_SENTENCE_WINDOW_SIZE:2}
       parent-elevation-enabled: ${DAMAI_AI_RETRIEVAL_PARENT_ELEVATION_ENABLED:false}
+    notification:
+      mq:
+        exchange: ${DAMAI_AI_NOTIFICATION_EXCHANGE:damai.ai.notification.topic}
+        queue: ${DAMAI_AI_NOTIFICATION_QUEUE:damai.ai.notification.q}
+        routing-key: ${DAMAI_AI_NOTIFICATION_ROUTING_KEY:notification.#}
+    sentiment:
+      negative-escalation-threshold: ${DAMAI_AI_SENTIMENT_NEGATIVE_THRESHOLD:0.7}
+      negative-streak-threshold: ${DAMAI_AI_SENTIMENT_STREAK_THRESHOLD:3}
     memory:
       structured:
         enabled: ${DAMAI_AI_STRUCTURED_MEMORY_ENABLED:true}

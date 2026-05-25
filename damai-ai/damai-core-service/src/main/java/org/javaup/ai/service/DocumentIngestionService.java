@@ -1,9 +1,6 @@
 package org.javaup.ai.service;
 
-import cn.hutool.core.codec.Base64;
 import cn.hutool.crypto.digest.DigestUtil;
-import cn.hutool.http.ContentType;
-import cn.hutool.http.HttpRequest;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -61,23 +58,19 @@ public class DocumentIngestionService {
     @Value("${damai.ai.qdrant.collection:damai_ai_faq}")
     private String qdrantCollection;
 
+    @Value("${damai.ai.qdrant.alias:damai-ai-faq-alias}")
+    private String qdrantAlias;
+
     @Value("${damai.ai.faq.alias:damai-ai-faq-current}")
     private String faqAlias;
-
-    @Value("${DAMAI_ES_ADDR:127.0.0.1:19200}")
-    private String esAddress;
-
-    @Value("${DAMAI_ES_USERNAME:elastic}")
-    private String esUsername;
-
-    @Value("${DAMAI_ES_PASSWORD:elastic}")
-    private String esPassword;
 
     @Value("${DAMAI_AI_OPENAI_EMBEDDING_DIMENSIONS:1024}")
     private Integer embeddingDimensions;
 
     @Value("${damai.ai.ingestion.skip-hypothetical-questions:false}")
     private boolean skipHypotheticalQuestions;
+
+    private final EsClientHelper esClient;
 
     private final Map<String, Document> documentCache = new ConcurrentHashMap<>();
 
@@ -89,7 +82,8 @@ public class DocumentIngestionService {
                                      RagIngestionTaskMapper taskMapper,
                                      CacheManager cacheManager,
                                      HypotheticalQuestionService hypotheticalService,
-                                     @Lazy MultiChannelRetrievalEngine retrievalEngine) {
+                                     @Lazy MultiChannelRetrievalEngine retrievalEngine,
+                                     EsClientHelper esClient) {
         this.markdownLoader = markdownLoader;
         this.embeddingModel = embeddingModel;
         this.qdrantClient = qdrantClient;
@@ -99,6 +93,7 @@ public class DocumentIngestionService {
         this.cacheManager = cacheManager;
         this.hypotheticalService = hypotheticalService;
         this.retrievalEngine = retrievalEngine;
+        this.esClient = esClient;
     }
 
     // ======================== Full Ingestion Pipeline ========================
@@ -135,6 +130,7 @@ public class DocumentIngestionService {
 
             // Batch embed and upsert Qdrant
             int qdrantCount = batchUpsertQdrant(documents, ragChunks);
+            switchQdrantAlias();
             task.setCompletedChunks(qdrantCount);
             taskMapper.updateById(task);
 
@@ -159,7 +155,7 @@ public class DocumentIngestionService {
             result.put("faqCount", stats.faqCount());
             result.put("chunkCount", documents.size());
             result.put("documentCount", ragDocs.size());
-            result.put("qdrantCollection", qdrantCollection);
+            result.put("qdrantAlias", qdrantAlias);
             result.put("qdrantPointCount", qdrantCount);
             result.put("faqAlias", faqAlias);
             result.put("physicalIndex", esResult.physicalIndex());
@@ -460,20 +456,45 @@ public class DocumentIngestionService {
     // ======================== Qdrant Operations ========================
 
     private void recreateQdrantCollection() {
+        String newCollection = qdrantCollection + "_" + System.currentTimeMillis();
         try {
-            qdrantClient.deleteCollectionAsync(qdrantCollection).get();
-        } catch (Exception ignored) {}
-        try {
-            qdrantClient.createCollectionAsync(qdrantCollection,
+            qdrantClient.createCollectionAsync(newCollection,
                     VectorParams.newBuilder()
                             .setSize(embeddingDimensions)
                             .setDistance(Distance.Cosine)
                             .build()
             ).get();
-            log.info("Qdrant collection '{}' created (dim={}, Cosine)", qdrantCollection, embeddingDimensions);
+            log.info("Qdrant collection '{}' created (dim={}, Cosine)", newCollection, embeddingDimensions);
         } catch (Exception ex) {
             log.error("Qdrant collection creation failed", ex);
+            return;
         }
+        // Record the new collection name for upserts
+        this.currentQdrantCollection = newCollection;
+    }
+
+    private volatile String currentQdrantCollection;
+
+    private void switchQdrantAlias() {
+        if (currentQdrantCollection == null) return;
+        try {
+            // Update alias to point to new collection
+            qdrantClient.createAliasAsync(qdrantAlias, currentQdrantCollection).get();
+            // Delete old collections (keep only the new one)
+            var collections = qdrantClient.listCollectionsAsync().get();
+            for (String name : collections) {
+                if (name.startsWith(qdrantCollection + "_") && !name.equals(currentQdrantCollection)) {
+                    qdrantClient.deleteCollectionAsync(name).get();
+                }
+            }
+            log.info("Qdrant alias '{}' switched to collection '{}'", qdrantAlias, currentQdrantCollection);
+        } catch (Exception ex) {
+            log.error("Qdrant alias switch failed", ex);
+        }
+    }
+
+    private String qdrantCollection() {
+        return currentQdrantCollection != null ? currentQdrantCollection : qdrantCollection;
     }
 
     private int batchUpsertQdrant(List<Document> documents, List<RagChunk> chunks) {
@@ -484,6 +505,7 @@ public class DocumentIngestionService {
 
         // Collect valid documents for batch embedding
         List<Document> validDocs = new ArrayList<>();
+        String targetCollection = qdrantCollection();
         for (Document doc : documents) {
             String cid = chunkId(doc);
             if (StringUtils.hasText(cid) && StringUtils.hasText(doc.getText())) {
@@ -513,6 +535,13 @@ public class DocumentIngestionService {
             String title = doc.getMetadata().getOrDefault("title",
                     doc.getMetadata().getOrDefault("name", "FAQ")).toString();
             payloadMap.put("title", io.qdrant.client.ValueFactory.value(title));
+            // Propagate temporal validity for retrieval-time filtering
+            Object validFrom = doc.getMetadata().get("fm_valid_from");
+            Object validUntil = doc.getMetadata().get("fm_valid_until");
+            if (validFrom != null) payloadMap.put("validFrom",
+                    io.qdrant.client.ValueFactory.value(String.valueOf(validFrom)));
+            if (validUntil != null) payloadMap.put("validUntil",
+                    io.qdrant.client.ValueFactory.value(String.valueOf(validUntil)));
 
             long pointId = cid.hashCode() & 0xFFFFFFFFL;
             points.add(PointStruct.newBuilder()
@@ -535,7 +564,7 @@ public class DocumentIngestionService {
 
         if (points.isEmpty()) return 0;
         try {
-            qdrantClient.upsertAsync(qdrantCollection, points).get();
+            qdrantClient.upsertAsync(targetCollection, points).get();
         } catch (Exception ex) {
             log.error("Qdrant bulk upsert failed", ex);
         }
@@ -548,22 +577,24 @@ public class DocumentIngestionService {
         String physicalIndex = "damai-ai-faq-" + System.currentTimeMillis();
         JSONObject mapping = new JSONObject();
         JSONObject properties = new JSONObject();
-        properties.put("chunkId", field("keyword"));
-        properties.put("source", field("keyword"));
-        properties.put("sourceFile", field("keyword"));
-        properties.put("chunkType", field("keyword"));
-        properties.put("label", field("keyword"));
-        properties.put("indexVersion", field("keyword"));
-        properties.put("docVersion", field("keyword"));
-        properties.put("contentHash", field("keyword"));
-        properties.put("title", field("text"));
-        properties.put("docTitle", field("text"));
-        properties.put("question", field("text"));
-        properties.put("keywords", field("text"));
-        properties.put("searchText", field("text"));
-        properties.put("text", field("text"));
+        properties.put("chunkId", esClient.fieldMapping("keyword"));
+        properties.put("source", esClient.fieldMapping("keyword"));
+        properties.put("sourceFile", esClient.fieldMapping("keyword"));
+        properties.put("chunkType", esClient.fieldMapping("keyword"));
+        properties.put("label", esClient.fieldMapping("keyword"));
+        properties.put("indexVersion", esClient.fieldMapping("keyword"));
+        properties.put("docVersion", esClient.fieldMapping("keyword"));
+        properties.put("contentHash", esClient.fieldMapping("keyword"));
+        properties.put("validFrom", esClient.fieldMapping("date"));
+        properties.put("validUntil", esClient.fieldMapping("date"));
+        properties.put("title", esClient.fieldMapping("text"));
+        properties.put("docTitle", esClient.fieldMapping("text"));
+        properties.put("question", esClient.fieldMapping("text"));
+        properties.put("keywords", esClient.fieldMapping("text"));
+        properties.put("searchText", esClient.fieldMapping("text"));
+        properties.put("text", esClient.fieldMapping("text"));
         mapping.put("properties", properties);
-        executeEs("/" + physicalIndex, new JSONObject(Map.of("mappings", mapping)).toJSONString(), "PUT");
+        esClient.execute("/" + physicalIndex, new JSONObject(Map.of("mappings", mapping)).toJSONString(), "PUT");
 
         StringBuilder bulk = new StringBuilder();
         int docCount = 0;
@@ -576,6 +607,11 @@ public class DocumentIngestionService {
             source.put("title", source.getOrDefault("title", source.getOrDefault("name", "FAQ")));
             source.put("text", doc.getText());
             source.putIfAbsent("searchText", doc.getText());
+            // Propagate temporal validity fields for retrieval-time filtering
+            Object validFrom = doc.getMetadata().get("fm_valid_from");
+            Object validUntil = doc.getMetadata().get("fm_valid_until");
+            if (validFrom != null) source.put("validFrom", validFrom);
+            if (validUntil != null) source.put("validUntil", validUntil);
             bulk.append(JSON.toJSONString(source)).append('\n');
             docCount++;
 
@@ -587,11 +623,7 @@ public class DocumentIngestionService {
             }
         }
         if (docCount > 0) {
-            HttpRequest.post("http://" + esAddress + "/_bulk")
-                    .header("Authorization", esAuthorization())
-                    .header("Content-Type", "application/x-ndjson")
-                    .body(bulk.toString())
-                    .execute().body();
+            esClient.bulkPost(bulk.toString());
         }
 
         // Atomic alias swap
@@ -600,7 +632,7 @@ public class DocumentIngestionService {
         actions.add(new JSONObject(Map.of("remove", Map.of("index", "*", "alias", faqAlias, "ignore_unavailable", true))));
         actions.add(new JSONObject(Map.of("add", Map.of("index", physicalIndex, "alias", faqAlias))));
         aliasBody.put("actions", actions);
-        executeEs("/_aliases", aliasBody.toJSONString(), "POST");
+        esClient.execute("/_aliases", aliasBody.toJSONString(), "POST");
 
         return new EsReindexResult(physicalIndex, docCount);
     }
@@ -618,15 +650,15 @@ public class DocumentIngestionService {
             source.put("title", source.getOrDefault("title", source.getOrDefault("name", "FAQ")));
             source.put("text", doc.getText());
             source.putIfAbsent("searchText", doc.getText());
+            Object validFrom = doc.getMetadata().get("fm_valid_from");
+            Object validUntil = doc.getMetadata().get("fm_valid_until");
+            if (validFrom != null) source.put("validFrom", validFrom);
+            if (validUntil != null) source.put("validUntil", validUntil);
             bulk.append(JSON.toJSONString(source)).append('\n');
             count++;
         }
         if (count > 0) {
-            HttpRequest.post("http://" + esAddress + "/_bulk")
-                    .header("Authorization", esAuthorization())
-                    .header("Content-Type", "application/x-ndjson")
-                    .body(bulk.toString())
-                    .execute().body();
+            esClient.bulkPost(bulk.toString());
         }
         return count;
     }
@@ -682,6 +714,11 @@ public class DocumentIngestionService {
         return documentCache;
     }
 
+    /** The Qdrant collection alias to use for retrieval queries. */
+    public String qdrantSearchAlias() {
+        return qdrantAlias;
+    }
+
     /** Exposed for HybridSearchService to lazy-load cache using the Spring-injected MarkdownLoader. */
     public List<Document> loadMarkdownsForCache() {
         return markdownLoader.loadMarkdownsFlat();
@@ -692,31 +729,6 @@ public class DocumentIngestionService {
     private String chunkId(Document doc) {
         Object value = doc.getMetadata().get("chunkId");
         return value == null ? null : String.valueOf(value);
-    }
-
-    private JSONObject field(String type) {
-        return new JSONObject(Map.of("type", type));
-    }
-
-    private JSONObject executeEs(String path, String body, String method) {
-        String url = "http://" + esAddress + path;
-        HttpRequest request = buildEsRequest(url, method, body)
-                .header("Authorization", esAuthorization());
-        String response = request.execute().body();
-        return JSON.parseObject(response == null ? "{}" : response);
-    }
-
-    private HttpRequest buildEsRequest(String url, String method, String body) {
-        HttpRequest request = switch (method) {
-            case "PUT" -> HttpRequest.put(url);
-            case "POST" -> HttpRequest.post(url);
-            default -> HttpRequest.get(url);
-        };
-        return request.contentType(ContentType.JSON.getValue()).body(body);
-    }
-
-    private String esAuthorization() {
-        return "Basic " + Base64.encode(esUsername + ":" + esPassword);
     }
 
     private record EsReindexResult(String physicalIndex, int documentCount) {}

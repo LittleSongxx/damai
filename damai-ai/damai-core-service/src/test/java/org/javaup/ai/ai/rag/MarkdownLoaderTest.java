@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.ai.document.Document;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -34,7 +35,8 @@ class MarkdownLoaderTest {
 
                 若项目明确展示不支持退，通常不支持因个人原因申请退票。
                 """, StandardCharsets.UTF_8);
-        MarkdownLoader loader = new MarkdownLoader(new PathMatchingResourcePatternResolver(), file.toUri().toString(), 400, 50, 5, 10000, 1000);
+        MarkdownLoader loader = new MarkdownLoader(new PathMatchingResourcePatternResolver());
+        ReflectionTestUtils.setField(loader, "documentPattern", file.toUri().toString());
 
         List<Document> documents = loader.loadMarkdowns();
 
@@ -86,8 +88,10 @@ class MarkdownLoaderTest {
 
                 电子票是非纸质票。
                 """.formatted(targetFaq), StandardCharsets.UTF_8);
-        MarkdownLoader firstLoader = new MarkdownLoader(new PathMatchingResourcePatternResolver(), firstFile.toUri().toString(), 400, 50, 5, 10000, 1000);
-        MarkdownLoader secondLoader = new MarkdownLoader(new PathMatchingResourcePatternResolver(), secondFile.toUri().toString(), 400, 50, 5, 10000, 1000);
+        MarkdownLoader firstLoader = new MarkdownLoader(new PathMatchingResourcePatternResolver());
+        ReflectionTestUtils.setField(firstLoader, "documentPattern", firstFile.toUri().toString());
+        MarkdownLoader secondLoader = new MarkdownLoader(new PathMatchingResourcePatternResolver());
+        ReflectionTestUtils.setField(secondLoader, "documentPattern", secondFile.toUri().toString());
 
         String firstChunkId = findChunkId(firstLoader.loadMarkdowns(), "电子票可以直接入场吗？");
         String secondChunkId = findChunkId(secondLoader.loadMarkdowns(), "电子票可以直接入场吗？");
@@ -107,13 +111,17 @@ class MarkdownLoaderTest {
 
                 %s
                 """.formatted(longAnswer), StandardCharsets.UTF_8);
-        MarkdownLoader loader = new MarkdownLoader(new PathMatchingResourcePatternResolver(), file.toUri().toString(), 120, 20, 5, 10000, 100);
+        MarkdownLoader loader = new MarkdownLoader(new PathMatchingResourcePatternResolver());
+        ReflectionTestUtils.setField(loader, "documentPattern", file.toUri().toString());
+        ReflectionTestUtils.setField(loader, "chunkSize", 120);
+        ReflectionTestUtils.setField(loader, "minChunkSizeChars", 20);
+        ReflectionTestUtils.setField(loader, "minDocLengthForTokenSplit", 100);
 
         List<Document> documents = loader.loadMarkdowns();
 
         assertTrue(documents.size() > 1);
         assertTrue(documents.stream().allMatch(document -> "入场需要注意什么？".equals(document.getMetadata().get("question"))));
-        // Hierarchical chunking creates both parent and child chunks; verify at least one child exists
+        assertTrue(documents.stream().anyMatch(document -> "parent".equals(document.getMetadata().get("chunkType"))));
         assertTrue(documents.stream().anyMatch(document -> "faq_part".equals(document.getMetadata().get("chunkType"))));
         assertTrue(documents.stream().allMatch(document -> String.valueOf(document.getMetadata().get("searchText")).contains("入场需要注意什么？")));
         assertEquals(documents.size(), loader.getLastLoadStats().chunkCount());
@@ -131,7 +139,8 @@ class MarkdownLoaderTest {
 
                 这里有答案。
                 """, StandardCharsets.UTF_8);
-        MarkdownLoader loader = new MarkdownLoader(new PathMatchingResourcePatternResolver(), file.toUri().toString(), 400, 50, 5, 10000, 1000);
+        MarkdownLoader loader = new MarkdownLoader(new PathMatchingResourcePatternResolver());
+        ReflectionTestUtils.setField(loader, "documentPattern", file.toUri().toString());
 
         List<Document> documents = loader.loadMarkdowns();
 

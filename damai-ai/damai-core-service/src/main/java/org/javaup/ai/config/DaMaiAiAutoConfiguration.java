@@ -11,7 +11,6 @@ import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.ai.vectorstore.SimpleVectorStore;
 import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.io.support.ResourcePatternResolver;
 
@@ -46,15 +45,8 @@ public class DaMaiAiAutoConfiguration {
     }
 
     @Bean
-    public MarkdownLoader markdownLoader(ResourcePatternResolver resourcePatternResolver,
-                                         @Value("${damai.ai.rag.document-pattern:classpath:datum/*.md}") String documentPattern,
-                                         @Value("${damai.ai.rag.chunk-size:400}") int chunkSize,
-                                         @Value("${damai.ai.rag.min-chunk-size-chars:50}") int minChunkSizeChars,
-                                         @Value("${damai.ai.rag.min-chunk-length-to-embed:5}") int minChunkLengthToEmbed,
-                                         @Value("${damai.ai.rag.max-num-chunks:10000}") int maxNumChunks,
-                                         @Value("${damai.ai.rag.min-doc-length-for-token-split:1000}") int minDocLengthForTokenSplit) {
-        return new MarkdownLoader(resourcePatternResolver, documentPattern, chunkSize,
-                minChunkSizeChars, minChunkLengthToEmbed, maxNumChunks, minDocLengthForTokenSplit);
+    public MarkdownLoader markdownLoader(ResourcePatternResolver resourcePatternResolver) {
+        return new MarkdownLoader(resourcePatternResolver);
     }
 
     @Bean

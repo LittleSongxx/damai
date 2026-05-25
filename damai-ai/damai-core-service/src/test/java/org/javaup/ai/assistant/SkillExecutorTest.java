@@ -42,7 +42,7 @@ class SkillExecutorTest {
         AiRun latestRun = run();
         latestRun.setRunStatus(AssistantRunStatus.COMPLETED.name());
         when(runService.getRun("run_1")).thenReturn(latestRun);
-        SkillExecutor executor = new SkillExecutor(runService, skillRegistry, messageEmitter, memoryService, userProfileService, runCompletedPublisher);
+        SkillExecutor executor = new SkillExecutor(runService, skillRegistry, messageEmitter, memoryService, userProfileService, runCompletedPublisher, null, null, null, null, null, null);
 
         executor.execute(context());
 

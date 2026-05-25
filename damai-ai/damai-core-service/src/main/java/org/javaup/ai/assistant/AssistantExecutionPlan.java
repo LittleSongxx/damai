@@ -29,4 +29,10 @@ public class AssistantExecutionPlan {
     private List<String> options;
 
     private String reason;
+
+    private String sentiment;
+
+    private Double sentimentIntensity;
+
+    private List<String> emotionTags;
 }

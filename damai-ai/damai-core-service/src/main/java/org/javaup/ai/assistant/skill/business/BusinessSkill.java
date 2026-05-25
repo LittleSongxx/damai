@@ -7,9 +7,9 @@ import org.javaup.ai.assistant.AssistantSkillContext;
 import org.javaup.ai.assistant.AssistantSkillDescriptor;
 import org.javaup.ai.assistant.AssistantSkillRiskLevel;
 import org.javaup.ai.assistant.AssistantSkillResult;
-import org.javaup.ai.assistant.executor.SkillAgentLoopService;
 import org.javaup.ai.assistant.memory.AssistantMemoryKeyService;
 import org.javaup.ai.entity.AiAction;
+import org.javaup.ai.service.DialogueStateManager;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -17,6 +17,7 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Set;
 
 @Component
 public class BusinessSkill implements AssistantSkill {
@@ -24,16 +25,16 @@ public class BusinessSkill implements AssistantSkill {
     private final ChatClient unifiedBusinessChatClient;
     private final AssistantRunService assistantRunService;
     private final AssistantMemoryKeyService memoryKeyService;
-    private final SkillAgentLoopService agentLoopService;
+    private final DialogueStateManager dialogueStateManager;
 
     public BusinessSkill(@Lazy @Qualifier("unifiedBusinessChatClient") ChatClient unifiedBusinessChatClient,
                          AssistantRunService assistantRunService,
                          AssistantMemoryKeyService memoryKeyService,
-                         @Lazy SkillAgentLoopService agentLoopService) {
+                         DialogueStateManager dialogueStateManager) {
         this.unifiedBusinessChatClient = unifiedBusinessChatClient;
         this.assistantRunService = assistantRunService;
         this.memoryKeyService = memoryKeyService;
-        this.agentLoopService = agentLoopService;
+        this.dialogueStateManager = dialogueStateManager;
     }
 
     @Override
@@ -78,21 +79,46 @@ public class BusinessSkill implements AssistantSkill {
 
     @Override
     public AssistantSkillResult execute(AssistantSkillContext context) {
-        // Agentic 决策循环: 遵循 Anthropic "Building Effective Agents" Agent 模式
-        // 当 Tool Calling 未产生满意结果时自动进入替代策略重试
-        List<String> alternativeHints = List.of(
-                "扩大搜索城市范围，搜索全国所有城市的该类型演出",
-                "尝试搜索该艺人/类型的其他场次或巡演",
-                "降低筛选条件（如不限制价格区间），展示更多选项",
-                "如果多次尝试仍无结果，诚实告知并建议用户关注大麦APP最新上架信息"
-        );
+        // Dialogue state machine: maintain and update multi-turn state
+        DialogueStateManager.DialogueContext dialogueCtx = dialogueStateManager.getOrCreate(
+                context.getRun().getConversationId(),
+                context.getRun().getUserId(),
+                context.getMessage());
 
-        String content = agentLoopService.executeWithRetry(
-                unifiedBusinessChatClient,
-                context.getRun().getRunId(),
-                context.buildUserPrompt(),
-                descriptor(),
-                alternativeHints);
+        if (!dialogueCtx.isPhase("CONFIRMATION") && !dialogueCtx.isResolved()) {
+            String intent = detectIntent(context.getMessage());
+            DialogueStateManager.StateTransitionResult stateResult = dialogueStateManager.updateState(
+                    dialogueCtx, context.getMessage(), intent);
+
+            if (!stateResult.allSlotsFilled()) {
+                return AssistantSkillResult.builder()
+                        .message(stateResult.responseMessage())
+                        .responseSummary(stateResult.responseMessage())
+                        .build();
+            }
+            // Slots filled: return confirmation message and let user confirm
+            return AssistantSkillResult.builder()
+                    .message(stateResult.responseMessage())
+                    .responseSummary(stateResult.responseMessage())
+                    .build();
+        }
+
+        // Confirmation phase or resolved: inject collected slots into prompt
+        String userPrompt = context.buildUserPrompt();
+        if (!dialogueCtx.slots().isEmpty()) {
+            StringBuilder slotInfo = new StringBuilder("\n\n已确认的信息：\n");
+            dialogueCtx.slots().forEach((k, v) -> slotInfo.append("- ").append(k).append("：").append(v).append("\n"));
+            userPrompt = userPrompt + slotInfo.toString();
+        }
+
+        String content = unifiedBusinessChatClient.prompt()
+                .user(userPrompt)
+                .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, memoryKeyService.userConversationKey(context.getRun().getUserId(), context.getRun().getConversationId())))
+                .call()
+                .content();
+
+        // Mark dialogue as resolved after successful execution
+        dialogueStateManager.markResolved(dialogueCtx);
 
         AiAction pendingAction = assistantRunService.getPendingAction(context.getRun().getRunId());
 
@@ -102,6 +128,27 @@ public class BusinessSkill implements AssistantSkill {
                 .responseSummary(content)
                 .pendingAction(pendingAction)
                 .build();
+    }
+
+    private static final Set<String> BUY_INTENT_KEYWORDS = Set.of(
+            "买", "购票", "下单", "抢票", "订票", "购买", "票价", "座位", "票档",
+            "多少钱", "价格", "选座", "支付", "付款");
+
+    private static final Set<String> QUERY_INTENT_KEYWORDS = Set.of(
+            "搜索", "找", "推荐", "有什么", "有哪些", "最近", "热门", "排行",
+            "演唱会", "脱口秀", "话剧", "音乐节", "演出", "节目", "艺人",
+            "什么时候", "在哪", "详情", "介绍", "城市");
+
+    private String detectIntent(String message) {
+        if (message == null) return "QUERY_PROGRAM";
+        String lower = message.toLowerCase();
+        for (String kw : BUY_INTENT_KEYWORDS) {
+            if (lower.contains(kw)) return "BUY_TICKET";
+        }
+        for (String kw : QUERY_INTENT_KEYWORDS) {
+            if (lower.contains(kw)) return "QUERY_PROGRAM";
+        }
+        return "QUERY_PROGRAM";
     }
 
 }

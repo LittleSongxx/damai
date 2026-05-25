@@ -14,7 +14,6 @@
     
     <modules>
         <module>damai-core-service</module>
-        <module>damai-mcp-server</module>
     </modules>
     
     <properties>

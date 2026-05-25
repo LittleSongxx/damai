@@ -7,6 +7,8 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import org.javaup.ai.entity.base.BaseTableData;
 
+import java.util.Date;
+
 @Data
 @EqualsAndHashCode(callSuper = true)
 @TableName("d_ai_faq_entry")
@@ -19,11 +21,17 @@ public class FaqEntry extends BaseTableData {
 
     private String question;
 
+    private String similarQuestionsJson;
+
     private String answer;
+
+    private String category;
+
+    private String tags;
 
     private String keywords;
 
-    private String category;
+    private Integer embeddingCached;
 
     private Integer priority;
 
@@ -31,9 +39,15 @@ public class FaqEntry extends BaseTableData {
 
     private Integer enabled;
 
-    private Integer embeddingCached;
+    private Date validFrom;
 
-    private String similarQuestionsJson;
+    private Date validUntil;
 
-    private String embeddingJson;
+    private String region;
+
+    private String audience;
+
+    private Long createdBy;
+
+    private Long updatedBy;
 }

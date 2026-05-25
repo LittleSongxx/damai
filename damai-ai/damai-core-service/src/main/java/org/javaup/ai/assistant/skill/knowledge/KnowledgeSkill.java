@@ -19,6 +19,7 @@ import org.javaup.ai.entity.AiRetrieval;
 import org.javaup.ai.entity.AiRun;
 import org.javaup.ai.mapper.AiRunMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import org.javaup.ai.service.FaqMatchService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -48,6 +49,7 @@ public class KnowledgeSkill implements AssistantSkill {
     private final AssistantObservedChatService observedChatService;
     private final TokenBudgetManager tokenBudgetManager;
     private final AiRunMapper runMapper;
+    private final FaqMatchService faqMatchService;
 
     public KnowledgeSkill(@Qualifier("unifiedKnowledgeChatClient") ChatClient unifiedKnowledgeChatClient,
                           KnowledgeRetrievalPlanner retrievalPlanner,
@@ -60,7 +62,8 @@ public class KnowledgeSkill implements AssistantSkill {
                           KnowledgeRetrievalTraceService retrievalTraceService,
                           AssistantObservedChatService observedChatService,
                           TokenBudgetManager tokenBudgetManager,
-                          AiRunMapper runMapper) {
+                          AiRunMapper runMapper,
+                          FaqMatchService faqMatchService) {
         this.unifiedKnowledgeChatClient = unifiedKnowledgeChatClient;
         this.retrievalPlanner = retrievalPlanner;
         this.retrievalOrchestrator = retrievalOrchestrator;
@@ -73,6 +76,7 @@ public class KnowledgeSkill implements AssistantSkill {
         this.observedChatService = observedChatService;
         this.tokenBudgetManager = tokenBudgetManager;
         this.runMapper = runMapper;
+        this.faqMatchService = faqMatchService;
     }
 
     @Override
@@ -114,6 +118,35 @@ public class KnowledgeSkill implements AssistantSkill {
 
     @Override
     public AssistantSkillResult execute(AssistantSkillContext context) {
+        // FAQ精确匹配层：命中则直接返回，未命中继续完整RAG管线
+        FaqMatchService.FaqMatchResult faqMatch = faqMatchService.match(context.getMessage());
+        if (faqMatch != null) {
+            log.info("FAQ match hit: faqId={}, method={}, score={}", faqMatch.faqId(), faqMatch.matchMethod(), faqMatch.matchScore());
+            assistantRunService.appendEvent(context.getRun().getRunId(), AssistantEventTypes.RETRIEVAL_STARTED, Map.of(
+                    "runId", context.getRun().getRunId(),
+                    "query", context.getMessage(),
+                    "faqMatched", true,
+                    "faqId", faqMatch.faqId(),
+                    "matchMethod", faqMatch.matchMethod(),
+                    "matchScore", faqMatch.matchScore()
+            ));
+            String answer = faqMatch.answer();
+            assistantRunService.appendEvent(context.getRun().getRunId(), AssistantEventTypes.RETRIEVAL_COMPLETED, Map.of(
+                    "runId", context.getRun().getRunId(),
+                    "faqMatched", true,
+                    "faqId", faqMatch.faqId(),
+                    "matchMethod", faqMatch.matchMethod(),
+                    "matchScore", faqMatch.matchScore(),
+                    "confidenceLevel", "HIGH",
+                    "sources", List.of()
+            ));
+            return AssistantSkillResult.builder()
+                    .message(answer)
+                    .responseSummary(answer)
+                    .sourceRefs(List.of())
+                    .build();
+        }
+
         KnowledgeRetrievalPlan plan = retrievalPlanner.plan(context.getMessage());
         KnowledgeShadowRouteResult shadowRoute = shadowRoutingService.shadowRoute(plan.normalizedQuery());
         retrievalTraceService.saveStageTrace(

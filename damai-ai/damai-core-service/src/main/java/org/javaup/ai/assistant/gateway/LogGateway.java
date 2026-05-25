@@ -12,7 +12,6 @@ import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,7 +35,9 @@ public class LogGateway {
     public Map<String, Object> searchLogsByKeyword(String keyword, String serviceName, String level, Integer size) {
         int limit = (size != null && size > 0) ? Math.min(size, 100) : 20;
         LambdaEsQueryWrapper<LogDocument> wrapper = new LambdaEsQueryWrapper<>();
-        wrapper.match(LogDocument::getMessage, keyword);
+        if (StringUtils.hasText(keyword)) {
+            wrapper.match(LogDocument::getMessage, keyword);
+        }
         if (StringUtils.hasText(serviceName)) {
             wrapper.match(LogDocument::getProjectName, serviceName);
         }
@@ -52,6 +53,24 @@ public class LogGateway {
                 "serviceName", serviceName == null ? "" : serviceName,
                 "level", level == null ? "" : level.toUpperCase()
         ));
+        result.put("logs", formatLogs(logs));
+        result.put("count", logs.size());
+        return result;
+    }
+
+    public Map<String, Object> searchLogsByClass(String className, String methodName, Integer size) {
+        int limit = (size != null && size > 0) ? Math.min(size, 100) : 20;
+        LambdaEsQueryWrapper<LogDocument> wrapper = new LambdaEsQueryWrapper<>();
+        wrapper.match(LogDocument::getSourceClass, className);
+        if (StringUtils.hasText(methodName)) {
+            wrapper.match(LogDocument::getSourceMethod, methodName);
+        }
+        wrapper.orderByDesc(LogDocument::getTimestamp);
+        wrapper.limit(limit);
+        List<LogDocument> logs = logMapper.selectList(wrapper);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("className", className);
+        result.put("methodName", methodName == null ? "" : methodName);
         result.put("logs", formatLogs(logs));
         result.put("count", logs.size());
         return result;
