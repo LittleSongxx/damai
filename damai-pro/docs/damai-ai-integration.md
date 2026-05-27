@@ -6,19 +6,15 @@
 graph LR
     subgraph Pro["damai-pro"]
         Docker[Docker 基础设施]
-        Backend[9 个微服务]
+        Backend[10 个微服务]
         Vue3[用户端 :15173]
     end
     subgraph AI["damai-ai"]
-        Core[核心服务 :6089]
-        MCP1[日志 MCP :8085]
-        MCP2[指标 MCP :8086]
+        Core[核心服务 :6089<br/>含 MCP 工具]
         VueAI[AI 前端 :15174]
     end
     VueAI --> Core
     Core --> Backend
-    MCP1 --> Docker
-    MCP2 --> Docker
     Vue3 --> Backend
 ```
 
@@ -79,8 +75,6 @@ Linux 环境可直接使用 `sql/` 目录下的 SQL 文件手动导入。
 ```bash
 # 加载环境变量后启动
 mvn -f damai-ai/pom.xml -pl damai-core-service spring-boot:run
-mvn -f damai-ai/pom.xml -pl damai-mcp-server/damai-mcp-log-service spring-boot:run
-mvn -f damai-ai/pom.xml -pl damai-mcp-server/damai-mcp-metrics-service spring-boot:run
 ```
 
 3. **前端**：
@@ -103,8 +97,6 @@ cd damai-ai/vue && npm install && npm run dev -- --port 15174 --strictPort
 | damai-pro 用户端 | `http://127.0.0.1:15173` |
 | damai-ai 核心服务 | `http://127.0.0.1:6089` |
 | damai-ai 前端 | `http://127.0.0.1:15174` |
-| MCP 日志 SSE | `http://127.0.0.1:8085/sse` |
-| MCP 指标 SSE | `http://127.0.0.1:8086/sse` |
 | Prometheus | `http://127.0.0.1:9090` |
 
 ## 6) 常见问题
@@ -115,4 +107,3 @@ cd damai-ai/vue && npm install && npm run dev -- --port 15174 --strictPort
 | AI 无法下单 | `DAMAI_AI_*_URL` 是否指向 `damai-pro` 网关 |
 | 指标查询为空 | `docker compose --profile ai ps` 中 prometheus 状态 |
 | ES 查询失败 | `DAMAI_ES_ADDR` / 账号密码与 `damai-pro/.env` 一致性 |
-| MCP 连接超时 | 8085/8086 服务是否启动、SSE 地址配置 |

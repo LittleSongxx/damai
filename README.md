@@ -16,9 +16,7 @@ graph TB
     end
 
     subgraph AI["damai-ai · 智能助手"]
-        AICore[Core Service :6089<br/>Skill 引擎 / RAG / Tool Calling]
-        MCPLog[日志 MCP :8085]
-        MCPMetrics[指标 MCP :8086]
+        AICore[Core Service :6089<br/>Skill 引擎 / RAG / Tool Calling<br/>MCP 日志/指标/运维工具]
     end
 
     subgraph Pro["damai-pro · 票务微服务"]
@@ -43,14 +41,11 @@ graph TB
     ProVue --> Gateway
     AIVue --> AICore
     AICore --> Gateway
-    AICore --> MCPLog
-    AICore --> MCPMetrics
     Gateway --> Pro
     Pro --> Infra
     AICore --> Qdrant
     AICore --> ES
-    MCPLog --> ES
-    MCPMetrics --> Prometheus
+    AICore --> Prometheus
 ```
 
 ## 项目结构
@@ -58,13 +53,12 @@ graph TB
 ```
 damai/
 ├── damai-pro/          # 高并发票务微服务系统
-│   ├── damai-server/   #   9 个可启动微服务
+│   ├── damai-server/   #   10 个可启动微服务
 │   ├── damai-*-framework/  # 公共框架模块
 │   ├── vue3/           #   用户端前端
 │   └── docker-compose.yml
-├── damai-ai/           # AI 智能助手平台 (全面重构)
-│   ├── damai-core-service/   # AI 核心服务
-│   ├── damai-mcp-server/     # MCP Server (日志 + 指标)
+├── damai-ai/           # AI 智能助手平台
+│   ├── damai-core-service/   # AI 核心服务 (含 MCP 工具)
 │   └── vue/            #   AI 前端
 ├── scripts/            # 工作区级启动脚本
 └── pom.xml             # Maven 聚合
@@ -85,7 +79,7 @@ damai/
 
 ### [damai-ai](damai-ai/) — 票务智能助手平台
 
-基于 Spring AI 全面重构的智能助手平台（281+ 源文件，91 单元测试），五大核心能力：
+基于 Spring AI 构建的智能助手平台（483+ 源文件，40 单元测试），五大核心能力：
 - **Hybrid RAG** — Corrective RAG 流水线，Qdrant + ES BM25 + RRF 融合 + Rerank
 - **Tool Calling** — LLM 自主编排购票工具，人在环审批
 - **联网搜索** — Tavily/博查联网证据 + LLM 生成
@@ -131,6 +125,7 @@ bash scripts/damai-stack.sh start --skip-frontend   # 跳过前端
 | Nacos | `http://127.0.0.1:18848/nacos` |
 | Prometheus | `http://127.0.0.1:9090` |
 | Elasticsearch | `http://127.0.0.1:19200` |
+| Qdrant | `http://127.0.0.1:16333` |
 | Spring Boot Admin | `http://127.0.0.1:10082` |
 
 ## 环境要求
@@ -148,7 +143,7 @@ bash scripts/damai-stack.sh start --skip-frontend   # 跳过前端
 | [damai-ai/README.md](damai-ai/README.md) | AI 智能助手架构与能力说明 |
 | [damai-pro/docs/local-dev.md](damai-pro/docs/local-dev.md) | 本地开发环境搭建 |
 | [damai-pro/docs/damai-ai-integration.md](damai-pro/docs/damai-ai-integration.md) | AI + Pro 联调指南 |
-| [damai-ai/docs/resume-project-section.md](damai-ai/docs/resume-project-section.md) | AI 项目技术亮点 |
+| [damai-ai/RESUME.md](damai-ai/RESUME.md) | AI 项目技术亮点总结 |
 
 ## License
 

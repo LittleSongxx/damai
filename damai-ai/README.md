@@ -1,6 +1,6 @@
 # damai-ai — 票务智能助手平台
 
-面向票务领域的 AI 智能助手，围绕 **Assistant Run → Skill → Tool** 工作流，将大模型能力与传统票务系统深度整合。基于 Spring AI 全面重构，实现了 Hybrid RAG 知识问答、LLM Tool Calling 购票、联网搜索、NL2SQL 运维查询、MCP 日志/指标监控等五大核心能力。
+面向票务领域的 AI 智能助手，围绕 **Assistant Run → Skill → Tool** 工作流，将大模型能力与传统票务系统深度整合。基于 Spring AI 构建，实现了 Hybrid RAG 知识问答、LLM Tool Calling 购票、联网搜索、NL2SQL 运维查询、MCP 日志/指标/运维工具等五大核心能力。
 
 > **Author**: Song &lt;2212565023@qq.com&gt; · [GitHub](https://github.com/LittleSongxx/damai)
 
@@ -21,11 +21,7 @@ graph TB
         Tools[业务工具调用]
         Memory[记忆与画像]
         NL2SQL[NL2SQL 引擎]
-    end
-
-    subgraph MCP["MCP Server 集群"]
-        LogMCP["日志 MCP :8085"]
-        MetricsMCP["指标 MCP :8086"]
+        MCP[MCP 工具<br/>日志/指标/运维]
     end
 
     subgraph Models["模型层"]
@@ -57,9 +53,8 @@ graph TB
     Tools --> Gateway
     Gateway --> BizServices
     Core --> Models
-    Core --> MCP
-    LogMCP --> ES
-    MetricsMCP --> Prometheus
+    MCP --> ES
+    MCP --> Prometheus
     Memory --> MySQL
     Memory --> RabbitMQ
 ```
@@ -73,7 +68,7 @@ graph TB
 | **LLM Tool Calling** | 业务技能通过 Spring AI ChatClient 自主选择工具完成购票全链路，支持人在环审批 |
 | **联网搜索** | 开放域问答时通过 Tavily/博查 获取联网证据，LLM 基于证据生成回答 |
 | **NL2SQL 运维** | 自然语言 → SQL 生成 → AST 七层安全校验 → 执行 → 失败自动修复重试 |
-| **MCP 监控** | 日志 MCP（7 个工具）+ 指标 MCP（8 个工具），LLM 汇总证据输出诊断建议 |
+| **MCP 运维工具** | 日志检索（7 工具）+ 指标诊断（8 工具）+ NL2SQL 查询，内置于核心服务，LLM 汇总证据输出诊断建议 |
 
 ## Assistant Run 执行流程
 
@@ -124,21 +119,20 @@ sequenceDiagram
 
 ```
 damai-ai/
-├── damai-core-service/          # AI 核心服务 (281+ 源文件, 91 单元测试)
+├── damai-core-service/          # AI 核心服务 (483+ 源文件, 40 单元测试)
 │   └── src/main/java/org/javaup/ai/
 │       ├── assistant/           # Skill 引擎、路由、执行器、记忆、画像
-│       ├── service/             # RAG、Rerank、Hybrid Search、NL2SQL
+│       │   └── mcp/tool/        # MCP 工具 (日志/指标/NL2SQL)
+│       ├── rag/                 # RAG、多路检索、Rerank
 │       ├── guardrails/          # 安全守卫与输入过滤
 │       ├── security/            # 认证、权限、RBAC
 │       ├── structured/          # 结构化输出
-│       ├── workflow/            # 工作流编排
+│       ├── resilience/          # 熔断与韧性
+│       ├── metrics/             # 可观测指标
 │       └── ...
-├── damai-mcp-server/
-│   ├── damai-mcp-log-service/   # 日志 MCP (ES 查询, 7 个工具)
-│   └── damai-mcp-metrics-service/ # 指标 MCP (Prometheus, 8 个工具)
 ├── vue/                         # AI 助手前端
 ├── sql/                         # 数据库初始化脚本
-└── docs/                        # 项目文档
+└── RESUME.md                    # 项目技术亮点总结
 ```
 
 ## 服务与端口
@@ -146,8 +140,6 @@ damai-ai/
 | 服务 | 端口 | 入口类 |
 | --- | --- | --- |
 | damai-core-service | `6089` | `org.javaup.ai.DaMaiAiCoreApplication` |
-| damai-mcp-log-service | `8085` | `org.javaup.mcp.DaMaiMcpLogApplication` |
-| damai-mcp-metrics-service | `8086` | `org.javaup.mcp.DaMaiMcpMetricsApplication` |
 | AI 前端 (Vite) | `15174` | — |
 
 ## 环境变量
@@ -164,8 +156,8 @@ cp .env.example .env
 | `DAMAI_AI_DEEPSEEK_API_KEY` | DeepSeek API Key |
 | `DAMAI_AI_OLLAMA_BASE_URL` | 本地 Ollama 地址 |
 | `DAMAI_AI_QDRANT_URL` | Qdrant 向量库地址 |
-| `DAMAI_AI_MCP_LOG_URL` | 日志 MCP SSE 地址 |
-| `DAMAI_AI_MCP_METRICS_URL` | 指标 MCP SSE 地址 |
+| `DAMAI_AI_MCP_LOG_URL` | MCP 日志端点地址 |
+| `DAMAI_AI_MCP_METRICS_URL` | MCP 指标端点地址 |
 | `DAMAI_INTERNAL_ACCESS_TOKEN` | 与 `damai-pro/.env` 中相同的内部调用令牌 |
 | `DAMAI_ALLOW_UNSAFE_NO_VERIFY_FALLBACK` | 是否允许退回旧 `no_verify` 鉴权，建议固定为 `false` |
 | `DAMAI_AI_*_URL` | 指向 `damai-pro` 网关的业务接口 |
@@ -189,8 +181,6 @@ bash scripts/damai-stack.sh start
 # 1. 确保 damai-pro Docker 依赖已启动
 # 2. 启动后端
 mvn -f damai-ai/pom.xml -pl damai-core-service spring-boot:run
-mvn -f damai-ai/pom.xml -pl damai-mcp-server/damai-mcp-log-service spring-boot:run
-mvn -f damai-ai/pom.xml -pl damai-mcp-server/damai-mcp-metrics-service spring-boot:run
 
 # 3. 启动前端
 cd damai-ai/vue && npm install && npm run dev -- --host 127.0.0.1 --port 15174 --strictPort
@@ -256,13 +246,13 @@ flowchart LR
 | 模型鉴权失败 | 检查 `DAMAI_AI_ALIBABA_API_KEY` / `DAMAI_AI_DEEPSEEK_API_KEY` |
 | 本地模型不可用 | 确认 Ollama 已启动且模型名匹配 `DAMAI_AI_OLLAMA_CHAT_MODEL` |
 | RAG 返回为空 | 检查 Qdrant 地址、集合名、文档加载路径和向量维度 |
-| MCP 连接失败 | 确认 8085/8086 服务已启动，SSE 地址正确 |
+| MCP 工具不可用 | 检查 ES/Prometheus 连接与 MCP 端点配置 |
 | 无法调用业务接口 | 确认 `damai-pro` 网关可达、登录态有效 |
 | 日志/指标为空 | 确认 ES 和 Prometheus 中有数据 |
 
 ## 相关文档
 
 - [`vue/README.md`](vue/README.md) — AI 前端说明
-- [`docs/resume-project-section.md`](docs/resume-project-section.md) — 项目技术亮点总结
+- [`RESUME.md`](RESUME.md) — 项目技术亮点总结
 - [`../damai-pro/docs/damai-ai-integration.md`](../damai-pro/docs/damai-ai-integration.md) — AI + Pro 联调指南
 - [`../README.md`](../README.md) — 工作区总览

@@ -106,6 +106,7 @@ damai-pro/
 │   ├── damai-base-data-service/
 │   ├── damai-customize-service/
 │   ├── damai-migrate-service/
+│   ├── damai-mybatis-plus-service/
 │   └── damai-admin-service/
 ├── vue3/                            # 用户端前端 (Vue 3 + Element Plus)
 ├── docker-compose.yml               # 本地基础设施编排
@@ -126,6 +127,7 @@ damai-pro/
 | damai-base-data-service | `6083` | 渠道、地区、字典基础数据 |
 | damai-customize-service | `6084` | API 采集、后台查询 |
 | damai-migrate-service | `6088` | 分片迁移、扩容 |
+| damai-mybatis-plus-service | `—` | MyBatis Plus 代码生成器 |
 | damai-admin-service | `10082` | Spring Boot Admin |
 
 ## 基础设施 (Docker Compose)
