@@ -76,13 +76,25 @@ public class PromptVersionService {
     }
 
     public void invalidateCache(String promptKey) {
-        cache.invalidate(promptKey);
+        invalidateCacheLocal(promptKey);
         broadcastInvalidation(promptKey);
     }
 
     public void invalidateAll() {
-        cache.invalidateAll();
+        invalidateAllLocal();
         broadcastInvalidation("ALL");
+    }
+
+    public void invalidateCacheLocal(String promptKey) {
+        if ("ALL".equalsIgnoreCase(promptKey)) {
+            invalidateAllLocal();
+            return;
+        }
+        cache.invalidate(promptKey);
+    }
+
+    public void invalidateAllLocal() {
+        cache.invalidateAll();
     }
 
     private void broadcastInvalidation(String promptKey) {

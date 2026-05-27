@@ -38,7 +38,7 @@ public class AiAuthenticationService {
         if (cached != null) {
             return cached;
         }
-        UserDetailVo user = circuitBreakerService.executeWebSearch(
+        UserDetailVo user = circuitBreakerService.executeUserService(
                 () -> userCall.currentUser(token),
                 null);
         if (user == null) {

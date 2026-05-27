@@ -22,7 +22,7 @@ public class CacheInvalidationHandler {
             cacheManager.invalidateNl2sqlSchema("default");
         } else if (message.startsWith("prompt:")) {
             String promptKey = message.substring("prompt:".length());
-            promptVersionService.invalidateCache(promptKey);
+            promptVersionService.invalidateCacheLocal(promptKey);
         }
     }
 }

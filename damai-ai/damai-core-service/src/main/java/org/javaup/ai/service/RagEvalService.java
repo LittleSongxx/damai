@@ -1,5 +1,6 @@
 package org.javaup.ai.service;
 
+import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.assistant.eval.RagEvalScorer;
@@ -50,6 +51,9 @@ import java.util.stream.Collectors;
 @Service
 public class RagEvalService {
 
+    private static final String DEFAULT_DATASET_ID = "default-golden";
+    private static final String DEFAULT_DATASET_VERSION = "v1";
+    private static final List<Integer> DEFAULT_K_VALUES = List.of(1, 3, 5, 10);
     private static final ExecutorService EVAL_WORKER_POOL = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "eval-case-worker");
         t.setDaemon(true);
@@ -113,6 +117,15 @@ public class RagEvalService {
         evalRun.setEvalRunId(UUID.randomUUID().toString().replace("-", ""));
         evalRun.setTotalCases(cases.size());
         evalRun.setCompletedCases(0);
+        evalRun.setDatasetId(normalizedRequest.getDatasetId());
+        evalRun.setDatasetVersion(normalizedRequest.getDatasetVersion());
+        evalRun.setRetrievalConfigId(normalizedRequest.getRetrievalConfigId());
+        evalRun.setJudgeConfigId(normalizedRequest.getJudgeConfigId());
+        evalRun.setBaselineRunId(normalizedRequest.getBaselineRunId());
+        evalRun.setRequestJson(JSON.toJSONString(buildRequestSummary(normalizedRequest)));
+        evalRun.setGitCommit(normalizedRequest.getGitCommit());
+        evalRun.setModelVersion(normalizedRequest.getModelVersion());
+        evalRun.setPromptVersion(normalizedRequest.getPromptVersion());
         evalRun.setRunStatus("RUNNING");
         evalRun.setCreateTime(new Date());
         evalRun.setEditTime(new Date());
@@ -153,6 +166,11 @@ public class RagEvalService {
                         evalCase -> StringUtils.hasText(evalCase.getDifficulty()) ? evalCase.getDifficulty() : "UNSPECIFIED",
                         LinkedHashMap::new,
                         Collectors.counting()));
+        Map<String, Long> caseTypeBreakdown = selectedCases.stream()
+                .collect(Collectors.groupingBy(
+                        evalCase -> StringUtils.hasText(evalCase.getCaseType()) ? evalCase.getCaseType() : "UNSPECIFIED",
+                        LinkedHashMap::new,
+                        Collectors.counting()));
 
         List<String> warnings = new ArrayList<>();
         if (selectedCases.isEmpty()) {
@@ -177,10 +195,13 @@ public class RagEvalService {
         preview.put("selectedCases", selectedCases.size());
         preview.put("matchedCasesBeforeLimit", matchedCases.size());
         preview.put("estimatedLlmCalls", selectedCases.size() * 3L);
+        preview.put("datasetId", normalizedRequest.getDatasetId());
+        preview.put("datasetVersion", normalizedRequest.getDatasetVersion());
         preview.put("request", buildRequestSummary(normalizedRequest));
         preview.put("missingCaseIds", missingCaseIds);
         preview.put("categoryBreakdown", categoryBreakdown);
         preview.put("difficultyBreakdown", difficultyBreakdown);
+        preview.put("caseTypeBreakdown", caseTypeBreakdown);
         preview.put("warnings", warnings);
         preview.put("sampleCases", selectedCases.stream().limit(5).map(this::buildCasePreview).toList());
         return preview;
@@ -264,12 +285,27 @@ public class RagEvalService {
 
     private Map<String, Object> buildRequestSummary(RagEvalRunRequest request) {
         Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("datasetId", request.getDatasetId());
+        summary.put("datasetVersion", request.getDatasetVersion());
         summary.put("category", request.getCategory());
         summary.put("difficulty", request.getDifficulty());
+        summary.put("caseTypes", request.getCaseTypes());
+        summary.put("tags", request.getTags());
         summary.put("caseIds", request.getCaseIds());
         summary.put("limit", request.getLimit());
         summary.put("topK", request.getTopK());
+        summary.put("kValues", request.getKValues());
         summary.put("enableRerank", request.getEnableRerank());
+        summary.put("retrievalConfigId", request.getRetrievalConfigId());
+        summary.put("judgeConfigId", request.getJudgeConfigId());
+        summary.put("baselineRunId", request.getBaselineRunId());
+        summary.put("enableGenerationEval", request.getEnableGenerationEval());
+        summary.put("enableRetrieverEval", request.getEnableRetrieverEval());
+        summary.put("enableLatencyEval", request.getEnableLatencyEval());
+        summary.put("enableCostEval", request.getEnableCostEval());
+        summary.put("gitCommit", request.getGitCommit());
+        summary.put("modelVersion", request.getModelVersion());
+        summary.put("promptVersion", request.getPromptVersion());
         return summary;
     }
 
@@ -277,11 +313,37 @@ public class RagEvalService {
         Map<String, Object> preview = new LinkedHashMap<>();
         preview.put("caseId", evalCase.getCaseId());
         preview.put("question", evalCase.getQuestion());
+        preview.put("datasetId", evalCase.getDatasetId());
+        preview.put("datasetVersion", evalCase.getDatasetVersion());
         preview.put("category", evalCase.getCategory());
         preview.put("difficulty", evalCase.getDifficulty());
+        preview.put("caseType", evalCase.getCaseType());
+        preview.put("tags", evalCase.getTags());
         preview.put("hasExpectedChunks", StringUtils.hasText(evalCase.getExpectedChunks()));
         preview.put("hasExpectedAnswer", StringUtils.hasText(evalCase.getExpectedAnswer()));
         return preview;
+    }
+
+    private List<String> normalizeStringList(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return List.of();
+        }
+        return values.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .toList();
+    }
+
+    private boolean containsAnyTag(String rawTags, List<String> requestedTags) {
+        if (!StringUtils.hasText(rawTags) || requestedTags == null || requestedTags.isEmpty()) {
+            return false;
+        }
+        Set<String> caseTags = java.util.Arrays.stream(rawTags.split(","))
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .collect(Collectors.toSet());
+        return requestedTags.stream().anyMatch(caseTags::contains);
     }
 
     private List<String> normalizeChunkIds(List<String> chunkIds) {
@@ -381,14 +443,27 @@ public class RagEvalService {
     private RagEvalRunRequest normalizeRequest(RagEvalRunRequest request) {
         RagEvalRunRequest normalized = new RagEvalRunRequest();
         if (request == null) {
+            normalized.setDatasetId(DEFAULT_DATASET_ID);
+            normalized.setDatasetVersion(DEFAULT_DATASET_VERSION);
+            normalized.setCaseTypes(List.of());
+            normalized.setTags(List.of());
             normalized.setCaseIds(List.of());
             normalized.setTopK(DEFAULT_EVAL_TOP_K);
+            normalized.setKValues(DEFAULT_K_VALUES);
             normalized.setEnableRerank(DEFAULT_ENABLE_RERANK);
+            normalized.setEnableGenerationEval(true);
+            normalized.setEnableRetrieverEval(true);
+            normalized.setEnableLatencyEval(true);
+            normalized.setEnableCostEval(true);
             return normalized;
         }
 
+        normalized.setDatasetId(StringUtils.hasText(request.getDatasetId()) ? request.getDatasetId().trim() : DEFAULT_DATASET_ID);
+        normalized.setDatasetVersion(StringUtils.hasText(request.getDatasetVersion()) ? request.getDatasetVersion().trim() : DEFAULT_DATASET_VERSION);
         normalized.setCategory(StringUtils.hasText(request.getCategory()) ? request.getCategory().trim() : null);
         normalized.setDifficulty(StringUtils.hasText(request.getDifficulty()) ? request.getDifficulty().trim() : null);
+        normalized.setCaseTypes(normalizeStringList(request.getCaseTypes()));
+        normalized.setTags(normalizeStringList(request.getTags()));
         normalized.setCaseIds(request.getCaseIds() == null ? List.of() : request.getCaseIds().stream()
                 .filter(StringUtils::hasText)
                 .map(String::trim)
@@ -396,7 +471,30 @@ public class RagEvalService {
                 .toList());
         normalized.setLimit(request.getLimit() != null && request.getLimit() > 0 ? request.getLimit() : null);
         normalized.setTopK(request.getTopK() != null && request.getTopK() > 0 ? request.getTopK() : DEFAULT_EVAL_TOP_K);
+        List<Integer> normalizedKValues = request.getKValues() == null ? new ArrayList<>() : request.getKValues().stream()
+                .filter(v -> v != null && v > 0)
+                .distinct()
+                .sorted()
+                .collect(Collectors.toCollection(ArrayList::new));
+        if (normalizedKValues.isEmpty()) {
+            normalizedKValues.addAll(DEFAULT_K_VALUES);
+        }
+        if (!normalizedKValues.contains(normalized.getTopK())) {
+            normalizedKValues.add(normalized.getTopK());
+            normalizedKValues.sort(Integer::compareTo);
+        }
+        normalized.setKValues(List.copyOf(normalizedKValues));
         normalized.setEnableRerank(request.getEnableRerank() != null ? request.getEnableRerank() : DEFAULT_ENABLE_RERANK);
+        normalized.setRetrievalConfigId(StringUtils.hasText(request.getRetrievalConfigId()) ? request.getRetrievalConfigId().trim() : null);
+        normalized.setJudgeConfigId(StringUtils.hasText(request.getJudgeConfigId()) ? request.getJudgeConfigId().trim() : null);
+        normalized.setBaselineRunId(StringUtils.hasText(request.getBaselineRunId()) ? request.getBaselineRunId().trim() : null);
+        normalized.setEnableGenerationEval(request.getEnableGenerationEval() != null ? request.getEnableGenerationEval() : true);
+        normalized.setEnableRetrieverEval(request.getEnableRetrieverEval() != null ? request.getEnableRetrieverEval() : true);
+        normalized.setEnableLatencyEval(request.getEnableLatencyEval() != null ? request.getEnableLatencyEval() : true);
+        normalized.setEnableCostEval(request.getEnableCostEval() != null ? request.getEnableCostEval() : true);
+        normalized.setGitCommit(StringUtils.hasText(request.getGitCommit()) ? request.getGitCommit().trim() : null);
+        normalized.setModelVersion(StringUtils.hasText(request.getModelVersion()) ? request.getModelVersion().trim() : null);
+        normalized.setPromptVersion(StringUtils.hasText(request.getPromptVersion()) ? request.getPromptVersion().trim() : null);
         return normalized;
     }
 
@@ -414,17 +512,52 @@ public class RagEvalService {
     private List<AiRagEvalCase> queryEvalCases(RagEvalRunRequest request) {
         LambdaQueryWrapper<AiRagEvalCase> wrapper = new LambdaQueryWrapper<AiRagEvalCase>()
                 .eq(AiRagEvalCase::getStatus, 1);
+        if (StringUtils.hasText(request.getDatasetId())) {
+            wrapper.eq(AiRagEvalCase::getDatasetId, request.getDatasetId());
+        }
+        if (StringUtils.hasText(request.getDatasetVersion())) {
+            wrapper.eq(AiRagEvalCase::getDatasetVersion, request.getDatasetVersion());
+        }
         if (StringUtils.hasText(request.getCategory())) {
             wrapper.eq(AiRagEvalCase::getCategory, request.getCategory());
         }
         if (StringUtils.hasText(request.getDifficulty())) {
             wrapper.eq(AiRagEvalCase::getDifficulty, request.getDifficulty());
         }
+        if (request.getCaseTypes() != null && !request.getCaseTypes().isEmpty()) {
+            wrapper.in(AiRagEvalCase::getCaseType, request.getCaseTypes());
+        }
         if (request.getCaseIds() != null && !request.getCaseIds().isEmpty()) {
             wrapper.in(AiRagEvalCase::getCaseId, request.getCaseIds());
         }
         wrapper.orderByDesc(AiRagEvalCase::getCreateTime);
-        return caseMapper.selectList(wrapper);
+        List<AiRagEvalCase> cases = caseMapper.selectList(wrapper);
+        if (cases.isEmpty()
+                && DEFAULT_DATASET_ID.equals(request.getDatasetId())
+                && DEFAULT_DATASET_VERSION.equals(request.getDatasetVersion())) {
+            LambdaQueryWrapper<AiRagEvalCase> fallbackWrapper = new LambdaQueryWrapper<AiRagEvalCase>()
+                    .eq(AiRagEvalCase::getStatus, 1);
+            if (StringUtils.hasText(request.getCategory())) {
+                fallbackWrapper.eq(AiRagEvalCase::getCategory, request.getCategory());
+            }
+            if (StringUtils.hasText(request.getDifficulty())) {
+                fallbackWrapper.eq(AiRagEvalCase::getDifficulty, request.getDifficulty());
+            }
+            if (request.getCaseTypes() != null && !request.getCaseTypes().isEmpty()) {
+                fallbackWrapper.in(AiRagEvalCase::getCaseType, request.getCaseTypes());
+            }
+            if (request.getCaseIds() != null && !request.getCaseIds().isEmpty()) {
+                fallbackWrapper.in(AiRagEvalCase::getCaseId, request.getCaseIds());
+            }
+            fallbackWrapper.orderByDesc(AiRagEvalCase::getCreateTime);
+            cases = caseMapper.selectList(fallbackWrapper);
+        }
+        if (request.getTags() != null && !request.getTags().isEmpty()) {
+            return cases.stream()
+                    .filter(evalCase -> containsAnyTag(evalCase.getTags(), request.getTags()))
+                    .toList();
+        }
+        return cases;
     }
 
     @Async("aiTraceExecutor")
@@ -531,9 +664,11 @@ public class RagEvalService {
             evalRun.setErrorMessage(null);
             evalRun.setRunStatus("COMPLETED");
         }
+        Map<String, Object> qualityGate = buildQualityGate(evalRun);
+        evalRun.setQualityGateJson(JSON.toJSONString(qualityGate));
+        evalRun.setReportJson(JSON.toJSONString(buildRunReport(evalRun, cases.size(), request, qualityGate)));
         evalRun.setEditTime(new Date());
         runMapper.updateById(evalRun);
-        Map<String, Object> qualityGate = buildQualityGate(evalRun);
         log.info("RAG eval finished: evalRunId={}, status={}, cases={}, avgRecall={}, avgPrecision={}, avgHitRate={}, avgMRR={}, avgNDCG={}, " +
                         "avgCtxPrecision={}, avgCtxRecall={}, avgCtxRelevance={}, " +
                         "avgFaithfulness={}, avgAnswerRelevancy={}, avgAnswerCorrectness={}, qualityGate={}, errorMessage={}",
@@ -572,22 +707,60 @@ public class RagEvalService {
         // ---- Step 2: 传统检索指标 ----
         List<String> expectedChunks = parseChunkIds(evalCase.getExpectedChunks());
         Map<String, Integer> chunkWeights = parseChunkWeights(evalCase.getExpectedChunks());
+        double recallAt1 = calculateRecallAtK(retrievedChunks, expectedChunks, 1);
+        double recallAt3 = calculateRecallAtK(retrievedChunks, expectedChunks, 3);
         double recall = calculateRecallAtK(retrievedChunks, expectedChunks, 5);
+        double recallAt10 = calculateRecallAtK(retrievedChunks, expectedChunks, 10);
+        double precisionAt1 = calculatePrecisionAtK(retrievedChunks, expectedChunks, 1);
+        double precisionAt3 = calculatePrecisionAtK(retrievedChunks, expectedChunks, 3);
         double precision = calculatePrecisionAtK(retrievedChunks, expectedChunks, 5);
+        double precisionAt10 = calculatePrecisionAtK(retrievedChunks, expectedChunks, 10);
         double mrr = calculateMrr(retrievedChunks, expectedChunks);
+        double ndcgAt1 = calculateNdcgGraded(retrievedChunks, chunkWeights, 1);
+        double ndcgAt3 = calculateNdcgGraded(retrievedChunks, chunkWeights, 3);
         double ndcg = calculateNdcgGraded(retrievedChunks, chunkWeights, 5);
+        double ndcgAt10 = calculateNdcgGraded(retrievedChunks, chunkWeights, 10);
+        double hitRateAt1 = expectedChunks.isEmpty() ? 1.0 :
+                (retrievedChunks.stream().limit(1).anyMatch(expectedChunks::contains) ? 1.0 : 0.0);
+        double hitRateAt3 = expectedChunks.isEmpty() ? 1.0 :
+                (retrievedChunks.stream().limit(3).anyMatch(expectedChunks::contains) ? 1.0 : 0.0);
         double hitRate = expectedChunks.isEmpty() ? 1.0 :
                 (retrievedChunks.stream().limit(5).anyMatch(expectedChunks::contains) ? 1.0 : 0.0);
+        double hitRateAt10 = expectedChunks.isEmpty() ? 1.0 :
+                (retrievedChunks.stream().limit(10).anyMatch(expectedChunks::contains) ? 1.0 : 0.0);
 
         AiRagEvalResult result = new AiRagEvalResult();
         result.setEvalRunId(evalRun.getEvalRunId());
         result.setCaseId(evalCase.getCaseId());
         result.setQuestion(evalCase.getQuestion());
         result.setRetrievedChunks(String.join(",", retrievedChunks));
+        result.setDatasetId(evalRun.getDatasetId());
+        result.setDatasetVersion(evalRun.getDatasetVersion());
+        result.setRetrievalConfigId(evalRun.getRetrievalConfigId());
+        result.setJudgeConfigId(evalRun.getJudgeConfigId());
+        result.setCaseType(evalCase.getCaseType());
+        result.setTags(evalCase.getTags());
+        result.setRecallAt1(recallAt1);
+        result.setRecallAt3(recallAt3);
         result.setRecallAt5(recall);
+        result.setRecallAt10(recallAt10);
+        result.setPrecisionAt1(precisionAt1);
+        result.setPrecisionAt3(precisionAt3);
+        result.setPrecisionAt5(precision);
+        result.setPrecisionAt10(precisionAt10);
+        result.setHitRateAt1(hitRateAt1);
+        result.setHitRateAt3(hitRateAt3);
+        result.setHitRateAt5(hitRate);
+        result.setHitRateAt10(hitRateAt10);
         result.setMrr(mrr);
+        result.setNdcgAt1(ndcgAt1);
+        result.setNdcgAt3(ndcgAt3);
         result.setNdcgAt5(ndcg);
+        result.setNdcgAt10(ndcgAt10);
         result.setLatencyMs(latency);
+        result.setRetrievalLatencyMs(latency);
+        result.setTotalLatencyMs(latency);
+        result.setRetrievalPath(retrievalSnapshot.retrievalPath());
         double contextPrecision = 0;
         double contextRecall = 0;
         double contextRelevance = 0;
@@ -614,7 +787,7 @@ public class RagEvalService {
         Future<Map<Integer, Integer>> chunkRelFuture = EVAL_INNER_POOL.submit(() -> {
             try {
                 List<String> chunkTexts = retrievedDocs.stream()
-                        .map(d -> d.getContent() != null ? d.getContent() : "")
+                        .map(d -> d.getText() != null ? d.getText() : "")
                         .toList();
                 return ragEvalScorer.evaluateChunkRelevance(
                         evalCase.getQuestion(), evalCase.getExpectedAnswer(), chunkTexts);
@@ -646,6 +819,9 @@ public class RagEvalService {
             result.setContextPrecision(contextPrecision);
             result.setContextRecall(contextRecall);
             result.setContextRelevance(contextRelevance);
+            if (StringUtils.hasText(ctxResult.rawOutput())) {
+                result.setJudgeRawOutput(ctxResult.rawOutput());
+            }
             hasContextEvaluation = true;
         } catch (TimeoutException e) {
             log.error("Context eval TIMEOUT for caseId={}", evalCase.getCaseId());
@@ -669,6 +845,9 @@ public class RagEvalService {
                 }
                 ndcg = calculateNdcgGraded(retrievedChunks, mergedWeights, 5);
                 result.setNdcgAt5(ndcg);
+                result.setNdcgAt1(calculateNdcgGraded(retrievedChunks, mergedWeights, 1));
+                result.setNdcgAt3(calculateNdcgGraded(retrievedChunks, mergedWeights, 3));
+                result.setNdcgAt10(calculateNdcgGraded(retrievedChunks, mergedWeights, 10));
             }
         } catch (TimeoutException e) {
             log.warn("Chunk relevance grading TIMEOUT for caseId={}", evalCase.getCaseId());
@@ -690,27 +869,46 @@ public class RagEvalService {
             result.setFaithfulnessScore(faithfulness);
             result.setAnswerRelevancyScore(answerRelevancy);
             result.setAnswerCorrectnessScore(answerCorrectness);
+            result.setUnsupportedClaimRate(genResult.unsupportedClaimRate());
+            result.setSupportedClaimCount(genResult.supportedClaimCount());
+            result.setUnsupportedClaimCount(genResult.unsupportedClaimCount());
+            result.setRequiredFactCoverage(genResult.requiredFactCoverage());
+            result.setCitationPrecision(genResult.citationPrecision());
+            result.setCitationRecall(genResult.citationRecall());
+            result.setCitationCoverage(genResult.citationCoverage());
+            result.setRefusalCorrectness(genResult.refusalCorrectness());
+            result.setSafetyScore(genResult.safetyScore());
+            if (StringUtils.hasText(genResult.rawOutput())) {
+                result.setJudgeRawOutput(mergeJudgeOutputs(result.getJudgeRawOutput(), genResult.rawOutput()));
+            }
             hasGenerationEvaluation = true;
         } catch (Exception e) {
             log.warn("Generation evaluation failed for caseId={}: {}", evalCase.getCaseId(), e.getMessage());
         }
 
+        result.setDenseHitsJson(JSON.toJSONString(toSourceMaps(retrievedChunks, retrievedDocs)));
+        result.setFinalHitsJson(JSON.toJSONString(toSourceMaps(retrievedChunks, retrievedDocs)));
         result.setEvalMethod(buildEvalMethod(request));
         result.setCreateTime(new Date());
         result.setEditTime(new Date());
         result.setStatus(1);
         resultMapper.insert(result);
+        final double persistedRecall = recall;
+        final double persistedPrecision = precision;
+        final double persistedMrr = mrr;
+        final double persistedNdcg = ndcg;
+        final double persistedHitRate = hitRate;
         final double persistedContextPrecision = contextPrecision;
         final double persistedContextRecall = contextRecall;
         final double persistedContextRelevance = contextRelevance;
         final double persistedFaithfulness = faithfulness;
         final double persistedAnswerRelevancy = answerRelevancy;
         final double persistedAnswerCorrectness = answerCorrectness;
-        totalRecall.updateAndGet(v -> v + recall);
-        totalPrecision.updateAndGet(v -> v + precision);
-        totalMrr.updateAndGet(v -> v + mrr);
-        totalNdcg.updateAndGet(v -> v + ndcg);
-        totalHitRate.updateAndGet(v -> v + hitRate);
+        totalRecall.updateAndGet(v -> v + persistedRecall);
+        totalPrecision.updateAndGet(v -> v + persistedPrecision);
+        totalMrr.updateAndGet(v -> v + persistedMrr);
+        totalNdcg.updateAndGet(v -> v + persistedNdcg);
+        totalHitRate.updateAndGet(v -> v + persistedHitRate);
         if (hasContextEvaluation) {
             totalCtxPrecision.updateAndGet(v -> v + persistedContextPrecision);
             totalCtxRecall.updateAndGet(v -> v + persistedContextRecall);
@@ -752,6 +950,63 @@ public class RagEvalService {
             message = message.substring(0, 180);
         }
         return "caseId=" + caseId + ", error=" + message;
+    }
+
+    private String mergeJudgeOutputs(String existing, String next) {
+        if (!StringUtils.hasText(existing)) {
+            return next;
+        }
+        if (!StringUtils.hasText(next)) {
+            return existing;
+        }
+        return existing + "\n---\n" + next;
+    }
+
+    private List<Map<String, Object>> toSourceMaps(List<String> chunkIds, List<Document> documents) {
+        List<Map<String, Object>> sources = new ArrayList<>();
+        for (int i = 0; i < chunkIds.size(); i++) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("chunkId", chunkIds.get(i));
+            if (documents != null && i < documents.size()) {
+                Document document = documents.get(i);
+                item.put("text", document.getText());
+                item.put("metadata", document.getMetadata());
+            }
+            sources.add(item);
+        }
+        return sources;
+    }
+
+    private Map<String, Object> buildRunReport(AiRagEvalRun run, int totalCases,
+                                               RagEvalRunRequest request,
+                                               Map<String, Object> qualityGate) {
+        Map<String, Object> report = new LinkedHashMap<>();
+        report.put("evalRunId", run.getEvalRunId());
+        report.put("datasetId", run.getDatasetId());
+        report.put("datasetVersion", run.getDatasetVersion());
+        report.put("retrievalConfigId", run.getRetrievalConfigId());
+        report.put("judgeConfigId", run.getJudgeConfigId());
+        report.put("baselineRunId", run.getBaselineRunId());
+        report.put("request", buildRequestSummary(request));
+        report.put("totalCases", totalCases);
+        report.put("completedCases", run.getCompletedCases());
+        report.put("status", run.getRunStatus());
+        report.put("qualityGate", qualityGate);
+        Map<String, Object> metrics = new LinkedHashMap<>();
+        metrics.put("avgRecall", run.getAvgRecall());
+        metrics.put("avgPrecision", run.getAvgPrecision());
+        metrics.put("avgHitRate", run.getAvgHitRate());
+        metrics.put("avgMrr", run.getAvgMrr());
+        metrics.put("avgNdcg", run.getAvgNdcg());
+        metrics.put("avgCtxPrecision", run.getAvgCtxPrecision());
+        metrics.put("avgCtxRecall", run.getAvgCtxRecall());
+        metrics.put("avgContextRelevance", run.getAvgContextRelevance());
+        metrics.put("avgFaithfulness", run.getAvgFaithfulness());
+        metrics.put("avgAnswerRelevancy", run.getAvgAnswerRelevancy());
+        metrics.put("avgAnswerCorrectness", run.getAvgAnswerCorrectness());
+        report.put("metrics", metrics);
+        report.put("errorMessage", run.getErrorMessage());
+        return report;
     }
 
     private String buildRunErrorMessage(int totalCases, int completedCases, ConcurrentLinkedQueue<String> caseErrors) {

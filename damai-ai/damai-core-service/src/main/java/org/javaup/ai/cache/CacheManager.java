@@ -31,12 +31,19 @@ public class CacheManager {
     private final RedisTemplate<String, Object> redisTemplate;
 
     private static final String FAQ_SEARCH_PREFIX = "damai:cache:faq:";
+    private static final String FAQ_SEARCH_VERSION_KEY = "damai:cache:version:faq";
     private static final String WEB_SEARCH_PREFIX = "damai:cache:web:";
     private static final String USER_CTX_PREFIX = "damai:cache:user:";
     private static final String NL2SQL_RESULT_PREFIX = "damai:cache:nl2sql:";
 
     @Value("${spring.ai.openai.chat.options.model:unknown}")
     private String chatModel;
+
+    @Value("${spring.ai.openai.embedding.options.model:unknown}")
+    private String embeddingModel;
+
+    @Value("${spring.ai.openai.embedding.options.dimensions:0}")
+    private Integer embeddingDimensions;
 
     public CacheManager(CacheProperties properties, CacheMetrics metrics,
                          @Qualifier("cacheRedisTemplate") RedisTemplate<String, Object> redisTemplate) {
@@ -59,7 +66,8 @@ public class CacheManager {
 
     public float[] getEmbedding(String text) {
         if (!properties.getEmbedding().isEnabled()) return null;
-        float[] result = embeddingCache.getIfPresent(text);
+        String key = embeddingCacheKey(text);
+        float[] result = embeddingCache.getIfPresent(key);
         if (result != null) {
             metrics.recordEmbedding(true);
             return result;
@@ -68,7 +76,7 @@ public class CacheManager {
         if (properties.getEmbedding().isRedisPersistenceEnabled()) {
             result = getEmbeddingFromRedis(text);
             if (result != null) {
-                embeddingCache.put(text, result);
+                embeddingCache.put(key, result);
                 metrics.recordEmbedding(true);
                 return result;
             }
@@ -79,7 +87,7 @@ public class CacheManager {
 
     public void putEmbedding(String text, float[] vector) {
         if (properties.getEmbedding().isEnabled() && text != null && vector != null) {
-            embeddingCache.put(text, vector);
+            embeddingCache.put(embeddingCacheKey(text), vector);
             if (properties.getEmbedding().isRedisPersistenceEnabled()) {
                 putEmbeddingToRedis(text, vector);
             }
@@ -88,7 +96,7 @@ public class CacheManager {
 
     private float[] getEmbeddingFromRedis(String text) {
         try {
-            String key = properties.getEmbedding().getRedisKeyPrefix() + sha256(text);
+            String key = embeddingRedisKey(text);
             Object value = redisTemplate.opsForValue().get(key);
             if (value instanceof String base64) {
                 byte[] bytes = Base64.getDecoder().decode(base64);
@@ -107,7 +115,7 @@ public class CacheManager {
 
     private void putEmbeddingToRedis(String text, float[] vector) {
         try {
-            String key = properties.getEmbedding().getRedisKeyPrefix() + sha256(text);
+            String key = embeddingRedisKey(text);
             ByteBuffer buf = ByteBuffer.allocate(vector.length * Float.BYTES);
             for (float v : vector) {
                 buf.putFloat(v);
@@ -138,6 +146,7 @@ public class CacheManager {
     }
 
     public void invalidateFaqSearch() {
+        refreshFaqSearchVersion();
         var connectionFactory = redisTemplate.getConnectionFactory();
         if (connectionFactory == null) return;
         try (var connection = connectionFactory.getConnection()) {
@@ -254,11 +263,45 @@ public class CacheManager {
     }
 
     private String faqSearchKey(String query) {
-        return FAQ_SEARCH_PREFIX + sha256(query + "|" + chatModel);
+        return FAQ_SEARCH_PREFIX + faqSearchVersion() + ":" + sha256(query + "|" + chatModel);
     }
 
     private String webSearchKey(String query) {
         return WEB_SEARCH_PREFIX + sha256(query + "|" + chatModel);
+    }
+
+    private String embeddingCacheKey(String text) {
+        return embeddingFingerprint() + "|" + text;
+    }
+
+    private String embeddingRedisKey(String text) {
+        return properties.getEmbedding().getRedisKeyPrefix() + sha256(embeddingFingerprint() + "|" + text);
+    }
+
+    private String embeddingFingerprint() {
+        return nullToUnknown(embeddingModel) + ":" + (embeddingDimensions == null ? 0 : embeddingDimensions);
+    }
+
+    private String faqSearchVersion() {
+        try {
+            Object version = redisTemplate.opsForValue().get(FAQ_SEARCH_VERSION_KEY);
+            return version != null ? String.valueOf(version) : "0";
+        } catch (Exception e) {
+            log.warn("Failed to load FAQ cache version: {}", e.getMessage());
+            return "0";
+        }
+    }
+
+    private void refreshFaqSearchVersion() {
+        try {
+            redisTemplate.opsForValue().set(FAQ_SEARCH_VERSION_KEY, String.valueOf(System.currentTimeMillis()));
+        } catch (Exception e) {
+            log.warn("Failed to refresh FAQ cache version: {}", e.getMessage());
+        }
+    }
+
+    private String nullToUnknown(String value) {
+        return StringUtils.hasText(value) ? value : "unknown";
     }
 
     private static String sha256(String input) {
