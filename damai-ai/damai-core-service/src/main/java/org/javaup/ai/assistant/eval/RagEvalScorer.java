@@ -227,14 +227,19 @@ public class RagEvalScorer {
             double cr = json.getDoubleValue("context_recall_score");
             double crel = json.getDoubleValue("context_relevance_score");
 
-            return new ContextEvalResult(clamp(cp), clamp(cr), clamp(crel));
+            return new ContextEvalResult(clamp(cp), clamp(cr), clamp(crel), jsonStr);
         } catch (Exception e) {
             log.warn("Context evaluation failed: {}", e.getMessage());
             return new ContextEvalResult(0, 0, 0);
         }
     }
 
-    public record ContextEvalResult(double contextPrecision, double contextRecall, double contextRelevance) {}
+    public record ContextEvalResult(double contextPrecision, double contextRecall, double contextRelevance,
+                                    String rawOutput) {
+        public ContextEvalResult(double contextPrecision, double contextRecall, double contextRelevance) {
+            this(contextPrecision, contextRecall, contextRelevance, null);
+        }
+    }
 
     // ==================== Step 3: 生成质量评估（Faithfulness + Answer Relevancy + Answer Correctness） ====================
 
@@ -304,14 +309,51 @@ public class RagEvalScorer {
                 }
             }
 
-            return new GenEvalResult(clamp(faith), clamp(ar), clamp(ac));
+            JSONArray claims = json.getJSONArray("claims");
+            JSONArray claimsSupported = json.getJSONArray("claims_supported");
+            int totalClaims = claims != null ? claims.size() : 0;
+            int supportedClaims = 0;
+            int unsupportedClaims = 0;
+            if (claimsSupported != null) {
+                for (int i = 0; i < claimsSupported.size(); i++) {
+                    if (Boolean.TRUE.equals(claimsSupported.getBoolean(i))) {
+                        supportedClaims++;
+                    } else {
+                        unsupportedClaims++;
+                    }
+                }
+                totalClaims = Math.max(totalClaims, claimsSupported.size());
+            }
+            Double unsupportedRate = totalClaims > 0 ? unsupportedClaims * 1.0 / totalClaims : null;
+            Double completeness = json.containsKey("semantic_completeness")
+                    ? clamp(json.getDoubleValue("semantic_completeness"))
+                    : null;
+            Double citationPrecision = json.containsKey("citation_precision") ? clamp(json.getDoubleValue("citation_precision")) : null;
+            Double citationRecall = json.containsKey("citation_recall") ? clamp(json.getDoubleValue("citation_recall")) : null;
+            Double citationCoverage = json.containsKey("citation_coverage") ? clamp(json.getDoubleValue("citation_coverage")) : null;
+            Double refusalCorrectness = json.containsKey("refusal_correctness") ? clamp(json.getDoubleValue("refusal_correctness")) : null;
+            Double safetyScore = json.containsKey("safety_score") ? clamp(json.getDoubleValue("safety_score")) : null;
+
+            return new GenEvalResult(clamp(faith), clamp(ar), clamp(ac),
+                    unsupportedRate, supportedClaims, unsupportedClaims,
+                    completeness, citationPrecision, citationRecall, citationCoverage,
+                    refusalCorrectness, safetyScore, jsonStr);
         } catch (Exception e) {
             log.warn("Generation evaluation failed: {}", e.getMessage());
             return new GenEvalResult(0, 0, 0);
         }
     }
 
-    public record GenEvalResult(double faithfulness, double answerRelevancy, double answerCorrectness) {}
+    public record GenEvalResult(double faithfulness, double answerRelevancy, double answerCorrectness,
+                                Double unsupportedClaimRate, Integer supportedClaimCount,
+                                Integer unsupportedClaimCount, Double requiredFactCoverage,
+                                Double citationPrecision, Double citationRecall, Double citationCoverage,
+                                Double refusalCorrectness, Double safetyScore, String rawOutput) {
+        public GenEvalResult(double faithfulness, double answerRelevancy, double answerCorrectness) {
+            this(faithfulness, answerRelevancy, answerCorrectness,
+                    null, null, null, null, null, null, null, null, null, null);
+        }
+    }
 
     // ==================== 快速启发式评分（降级方案） ====================
 

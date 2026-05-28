@@ -1,6 +1,5 @@
 package org.javaup.ai.config;
 
-import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import org.javaup.ai.ai.rag.MarkdownLoader;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
@@ -47,10 +46,5 @@ public class DaMaiAiAutoConfiguration {
     @Bean
     public MarkdownLoader markdownLoader(ResourcePatternResolver resourcePatternResolver) {
         return new MarkdownLoader(resourcePatternResolver);
-    }
-
-    @Bean
-    public CircuitBreakerRegistry circuitBreakerRegistry() {
-        return CircuitBreakerRegistry.ofDefaults();
     }
 }

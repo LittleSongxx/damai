@@ -27,6 +27,17 @@ public class AiRagEvalRun extends BaseTableData {
     private Double avgCtxRecall;
     private Double avgContextRelevance;
     private Double avgAnswerCorrectness;
+    private String datasetId;
+    private String datasetVersion;
+    private String retrievalConfigId;
+    private String judgeConfigId;
+    private String baselineRunId;
+    private String requestJson;
+    private String reportJson;
+    private String qualityGateJson;
+    private String gitCommit;
+    private String modelVersion;
+    private String promptVersion;
     private String runStatus;
     private String errorMessage;
 }

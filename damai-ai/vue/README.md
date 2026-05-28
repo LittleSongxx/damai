@@ -5,9 +5,9 @@
 ```mermaid
 graph LR
     User[用户] --> Vue[Vue 3 前端 :15174]
-    Vue -->|SSE /damai-ai-dev| Core[damai-core-service :6089]
+    Vue -->|SSE /damai-ai-dev| Core[damai-core-service :6089<br/>含 MCP 工具]
     Core --> Models[大模型]
-    Core --> RAG[RAG / MCP / 工具]
+    Core --> RAG[RAG / 业务工具]
     Vue -->|登录跳转| Pro[damai-pro 用户端 :15173]
 ```
 
@@ -60,10 +60,10 @@ npm run test:watch
 
 | 服务 | 用途 |
 | --- | --- |
-| `damai-core-service:6089` | 必须 — AI 核心服务 |
+| `damai-core-service:6089` | 必须 — AI 核心服务 (含 MCP 运维工具) |
 | `damai-pro` 网关 `:6085` | 业务助手所需 |
-| MCP 服务 `:8085` / `:8086` | 运维助手所需 |
 | Qdrant + Embedding 模型 | RAG 知识问答所需 |
+| ES + Prometheus | MCP 运维工具数据源 |
 
 ## 常见问题
 

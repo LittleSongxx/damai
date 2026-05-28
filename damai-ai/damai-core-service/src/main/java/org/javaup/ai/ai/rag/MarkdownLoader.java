@@ -47,6 +47,7 @@ public class MarkdownLoader {
     private static final int PARENT_CHUNK_SIZE = 1024;
 
     private final ResourcePatternResolver resourcePatternResolver;
+    private final Map<String, String> keywordMap = defaultKeywordMap();
     @Value("${damai.ai.rag.document-pattern:classpath:datum/*.md}")
     private String documentPattern;
 

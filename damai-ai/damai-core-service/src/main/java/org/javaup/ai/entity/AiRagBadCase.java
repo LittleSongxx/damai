@@ -7,23 +7,25 @@ import lombok.Data;
 import org.javaup.ai.entity.base.BaseTableData;
 
 @Data
-@TableName("d_ai_rag_eval_case")
-public class AiRagEvalCase extends BaseTableData {
+@TableName("d_ai_rag_bad_case")
+public class AiRagBadCase extends BaseTableData {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    private String caseId;
+    private String badCaseId;
+    private String traceId;
     private String question;
+    private String generatedAnswer;
+    private String retrievedChunksJson;
     private String expectedAnswer;
     private String expectedChunks;
+    private String feedbackType;
+    private String failureType;
     private String category;
     private String difficulty;
-    private String datasetId;
-    private String datasetVersion;
     private String caseType;
-    private String tags;
-    private String requiredFacts;
-    private String forbiddenFacts;
-    private String expectedCitations;
+    private String operatorNote;
+    private Integer convertedToEvalCase;
+    private String convertedCaseId;
     private String reviewStatus;
 }

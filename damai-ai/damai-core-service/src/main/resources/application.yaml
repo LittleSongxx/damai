@@ -195,6 +195,8 @@ damai:
       schema-top-k: ${DAMAI_AI_NL2SQL_SCHEMA_TOP_K:5}
       query-timeout-ms: ${DAMAI_AI_NL2SQL_QUERY_TIMEOUT_MS:5000}
       repair-attempts: ${DAMAI_AI_NL2SQL_REPAIR_ATTEMPTS:1}
+      context-ttl-minutes: ${DAMAI_AI_NL2SQL_CONTEXT_TTL_MINUTES:60}
+      context-max-sessions: ${DAMAI_AI_NL2SQL_CONTEXT_MAX_SESSIONS:10000}
       datasource:
         driver-class-name: ${DAMAI_AI_NL2SQL_DRIVER:com.mysql.cj.jdbc.Driver}
         url: ${DAMAI_AI_NL2SQL_URL:}
@@ -324,6 +326,9 @@ damai:
         enabled: true
         max-size: 100
         ttl-minutes: 60
+      nl2sql-result:
+        enabled: true
+        ttl-minutes: 3
     rate-limit:
       enabled: true
       endpoints:
@@ -343,29 +348,78 @@ damai:
           limit: 50
           window-seconds: 60
           key-type: user
-    resilience:
+    sentinel:
       llm:
         enabled: true
-        failure-rate-threshold: 50
-        sliding-window-size: 20
-        wait-duration-seconds: 30
-        permitted-calls-in-half-open: 3
-        timeout-ms: 15000
+        resource-name: ai.llm.primary
+        degrade:
+          enabled: true
+          grade: slow_request_ratio
+          slow-request-threshold-ms: 15000
+          slow-ratio-threshold: 0.8
+          min-request-amount: 20
+          stat-interval-ms: 10000
+          time-window-seconds: 30
+        flow:
+          enabled: true
+          grade: qps
+          count: 100
       qdrant:
         enabled: true
-        failure-rate-threshold: 50
-        sliding-window-size: 10
-        wait-duration-seconds: 15
+        resource-name: ai.rag.qdrant
+        degrade:
+          enabled: true
+          grade: exception_ratio
+          exception-ratio: 0.5
+          min-request-amount: 10
+          stat-interval-ms: 10000
+          time-window-seconds: 15
+        flow:
+          enabled: true
+          grade: qps
+          count: 120
       es:
         enabled: true
-        failure-rate-threshold: 50
-        sliding-window-size: 10
-        wait-duration-seconds: 15
+        resource-name: ai.rag.elasticsearch
+        degrade:
+          enabled: true
+          grade: exception_ratio
+          exception-ratio: 0.5
+          min-request-amount: 10
+          stat-interval-ms: 10000
+          time-window-seconds: 15
+        flow:
+          enabled: true
+          grade: qps
+          count: 120
       web-search:
         enabled: true
-        failure-rate-threshold: 50
-        sliding-window-size: 10
-        wait-duration-seconds: 30
+        resource-name: ai.web-search
+        degrade:
+          enabled: true
+          grade: exception_ratio
+          exception-ratio: 0.5
+          min-request-amount: 10
+          stat-interval-ms: 10000
+          time-window-seconds: 30
+        flow:
+          enabled: true
+          grade: qps
+          count: 50
+      user-service:
+        enabled: true
+        resource-name: ai.user-service
+        degrade:
+          enabled: true
+          grade: exception_ratio
+          exception-ratio: 0.5
+          min-request-amount: 10
+          stat-interval-ms: 10000
+          time-window-seconds: 30
+        flow:
+          enabled: true
+          grade: qps
+          count: 100
     thread-pool:
       assistant:
         core-pool-size: 16

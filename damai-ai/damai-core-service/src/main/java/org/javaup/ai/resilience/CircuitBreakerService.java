@@ -1,100 +1,68 @@
 package org.javaup.ai.resilience;
 
-import io.github.resilience4j.circuitbreaker.CircuitBreaker;
-import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
-import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import com.alibaba.csp.sentinel.Entry;
+import com.alibaba.csp.sentinel.SphU;
+import com.alibaba.csp.sentinel.Tracer;
+import com.alibaba.csp.sentinel.slots.block.BlockException;
 import lombok.extern.slf4j.Slf4j;
-import org.javaup.ai.config.ResilienceProperties;
+import org.javaup.ai.config.SentinelProperties;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
 import java.util.function.Supplier;
 
 @Slf4j
 @Service
 public class CircuitBreakerService {
 
-    private final CircuitBreakerRegistry registry;
-    private final ResilienceProperties properties;
+    private final SentinelProperties properties;
 
-    public CircuitBreakerService(ResilienceProperties properties, CircuitBreakerRegistry registry) {
+    public CircuitBreakerService(SentinelProperties properties) {
         this.properties = properties;
-        this.registry = registry;
     }
 
     // --- LLM ---
 
     public <T> T executeLlm(Supplier<T> callable, T fallback) {
-        if (!properties.getLlm().isEnabled()) return callable.get();
-        return execute("llm-primary", buildLlmConfig(), callable, fallback);
-    }
-
-    private CircuitBreakerConfig buildLlmConfig() {
-        var llm = properties.getLlm();
-        return CircuitBreakerConfig.custom()
-                .failureRateThreshold(llm.getFailureRateThreshold())
-                .slidingWindowSize(llm.getSlidingWindowSize())
-                .waitDurationInOpenState(Duration.ofSeconds(llm.getWaitDurationSeconds()))
-                .permittedNumberOfCallsInHalfOpenState(llm.getPermittedCallsInHalfOpen())
-                .slowCallDurationThreshold(Duration.ofMillis(llm.getTimeoutMs()))
-                .slowCallRateThreshold(80)
-                .build();
+        return execute(properties.getLlm(), callable, fallback);
     }
 
     // --- Qdrant ---
 
     public <T> T executeQdrant(Supplier<T> callable, T fallback) {
-        if (!properties.getQdrant().isEnabled()) return callable.get();
-        return execute("qdrant", buildConfig(properties.getQdrant()), callable, fallback);
+        return execute(properties.getQdrant(), callable, fallback);
     }
 
     // --- Elasticsearch ---
 
     public <T> T executeEs(Supplier<T> callable, T fallback) {
-        if (!properties.getEs().isEnabled()) return callable.get();
-        return execute("elasticsearch", buildConfig(properties.getEs()), callable, fallback);
+        return execute(properties.getEs(), callable, fallback);
     }
 
     // --- Web search ---
 
     public <T> T executeWebSearch(Supplier<T> callable, T fallback) {
-        if (!properties.getWebSearch().isEnabled()) return callable.get();
-        return execute("web-search", buildConfig(properties.getWebSearch()), callable, fallback);
+        return execute(properties.getWebSearch(), callable, fallback);
+    }
+
+    public <T> T executeUserService(Supplier<T> callable, T fallback) {
+        return execute(properties.getUserService(), callable, fallback);
     }
 
     // --- generic ---
 
-    private <T> T execute(String name, CircuitBreakerConfig config, Supplier<T> callable, T fallback) {
-        CircuitBreaker cb = registry.circuitBreaker(name, config);
-        try {
-            return CircuitBreaker.decorateSupplier(cb, callable).get();
-        } catch (Exception e) {
-            log.warn("Circuit breaker {} triggered: {}", name, e.getMessage());
+    private <T> T execute(SentinelProperties.ResourceRule rule, Supplier<T> callable, T fallback) {
+        if (rule == null || !rule.isEnabled()) {
+            return callable.get();
+        }
+        try (Entry ignored = SphU.entry(rule.getResourceName())) {
+            return callable.get();
+        } catch (BlockException ex) {
+            log.warn("Sentinel blocked resource {}: {}", rule.getResourceName(), ex.getClass().getSimpleName());
+            return fallback;
+        } catch (Exception ex) {
+            Tracer.trace(ex);
+            log.warn("Sentinel protected resource {} failed: {}", rule.getResourceName(), ex.getMessage());
             return fallback;
         }
-    }
-
-    private CircuitBreakerConfig buildConfig(ResilienceProperties.QdrantCircuitBreaker props) {
-        return CircuitBreakerConfig.custom()
-                .failureRateThreshold(props.getFailureRateThreshold())
-                .slidingWindowSize(props.getSlidingWindowSize())
-                .waitDurationInOpenState(Duration.ofSeconds(props.getWaitDurationSeconds()))
-                .build();
-    }
-
-    private CircuitBreakerConfig buildConfig(ResilienceProperties.EsCircuitBreaker props) {
-        return CircuitBreakerConfig.custom()
-                .failureRateThreshold(props.getFailureRateThreshold())
-                .slidingWindowSize(props.getSlidingWindowSize())
-                .waitDurationInOpenState(Duration.ofSeconds(props.getWaitDurationSeconds()))
-                .build();
-    }
-
-    private CircuitBreakerConfig buildConfig(ResilienceProperties.WebSearchCircuitBreaker props) {
-        return CircuitBreakerConfig.custom()
-                .failureRateThreshold(props.getFailureRateThreshold())
-                .slidingWindowSize(props.getSlidingWindowSize())
-                .waitDurationInOpenState(Duration.ofSeconds(props.getWaitDurationSeconds()))
-                .build();
     }
 }
