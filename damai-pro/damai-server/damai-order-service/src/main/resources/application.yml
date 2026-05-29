@@ -149,7 +149,7 @@ seata:
   enabled: true                                 # 启动事务中间件
   application-id: order-service
   data-source-proxy-mode: AT                    # 事务模式，默认AT
-  enable-auto-data-source-proxy: true           # 开启数据源自动代理
+  enable-auto-data-source-proxy: false          # 关闭自动数据源代理，交由 ShardingSphere Seata 事务规则接管
   transport:
     enable-client-batch-send-request: true      # 客户端事务消息请求是否批量合并发送，默认true，false单条发送
     enable-rm-client-batch-send-request: true   # RM(资源管理器)客户端会将多个分支事务的请求批量发送给 TC（Transaction Coordinator，事务协调器），提高事务处理效率

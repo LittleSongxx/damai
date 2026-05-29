@@ -17,6 +17,9 @@ dataSources:
       max-lifetime: 60000
 
 rules:
+  - !TRANSACTION
+    defaultType: BASE
+    providerType: Seata
   - !SHARDING
     tables:
       d_order:

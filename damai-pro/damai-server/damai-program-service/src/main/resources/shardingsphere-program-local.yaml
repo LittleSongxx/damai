@@ -15,6 +15,9 @@ dataSources:
     password: root
 
 rules:
+  - !TRANSACTION
+    defaultType: BASE
+    providerType: Seata
   - !SHARDING
     tables:
       # 对d_program表进行分库分表

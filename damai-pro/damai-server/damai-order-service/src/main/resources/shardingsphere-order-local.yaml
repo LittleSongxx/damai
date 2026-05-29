@@ -31,6 +31,9 @@ dataSources:
       leak-detection-threshold: 60000     # 连接泄漏检测阈值(60秒)
 
 rules:
+  - !TRANSACTION
+    defaultType: BASE
+    providerType: Seata
   - !SHARDING
     tables:
       # 对d_order表进行分库分表

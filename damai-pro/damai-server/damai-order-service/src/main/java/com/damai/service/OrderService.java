@@ -79,6 +79,7 @@ import com.damai.vo.TradeCheckVo;
 import com.damai.vo.UserAndTicketUserInfoVo;
 import com.damai.vo.UserGetAndTicketUserListVo;
 import com.damai.vo.UserInfoVo;
+import io.seata.spring.annotation.GlobalTransactional;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
@@ -726,6 +727,7 @@ public class OrderService extends ServiceImpl<OrderMapper, Order> {
     
     
     @RepeatExecuteLimit(name = CREATE_PROGRAM_ORDER_MQ,keys = {"#orderCreateMq.orderNumber"})
+    @GlobalTransactional(name = "create-program-order-mq", rollbackFor = Exception.class)
     @Transactional(rollbackFor = Exception.class)
     public String createMq(OrderCreateMq orderCreateMq){
         List<OrderTicketUserCreateDto> orderTicketUserCreateDtoList = orderCreateMq.getOrderTicketUserCreateDtoList();
