@@ -17,3 +17,7 @@ logs/
 **/.env.*.local
 *.log
 .DS_Store
+
+# Local interview documents
+面试深度问答手册-damai-ai.md
+面试深度问答手册-damai-pro.md
