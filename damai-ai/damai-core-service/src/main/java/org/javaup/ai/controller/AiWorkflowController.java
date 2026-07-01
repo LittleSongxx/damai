@@ -54,7 +54,7 @@ public class AiWorkflowController {
         if (detail == null || detail.getRun() == null) {
             return ApiResponse.error("工作流不存在");
         }
-        return ApiResponse.ok(detail);
+        return ApiResponse.deprecatedOk(detail, "/assistant/runs/{runId}");
     }
 
     @PostMapping("/workflows/{runId}/approve")
@@ -68,7 +68,7 @@ public class AiWorkflowController {
         CreateOrderVo result = new CreateOrderVo();
         result.setOrderNumber(resultVo.getOrderNumber());
         result.setOrderListAddress(ORDER_LIST_ADDRESS);
-        return ApiResponse.ok(result);
+        return ApiResponse.deprecatedOk(result, "/assistant/runs/{runId}/actions/{actionId}/approve");
     }
 
     @PostMapping("/workflows/{runId}/reject")
@@ -78,7 +78,7 @@ public class AiWorkflowController {
             return ApiResponse.error("没有待审批的操作");
         }
         assistantRuntimeService.rejectAction(runId, detail.getPendingAction().getActionId());
-        return ApiResponse.ok();
+        return ApiResponse.deprecatedOk(null, "/assistant/runs/{runId}/actions/{actionId}/reject");
     }
 
     // ======================== RAG Ingestion Endpoints ========================
@@ -86,7 +86,7 @@ public class AiWorkflowController {
     /** Full reindex — synchronous */
     @PostMapping("/rag/reindex")
     public ApiResponse<Map<String, Object>> reindexFaq() {
-        return ApiResponse.ok(hybridSearchService.reindexAll());
+        return ApiResponse.deprecatedOk(hybridSearchService.reindexAll(), "/assistant/admin/knowledge/reindex");
     }
 
     /** Full reindex — async via MQ */
@@ -100,7 +100,7 @@ public class AiWorkflowController {
                         .build();
         documentLifecycleService.createSubmittedTask(taskId, "full");
         ragIngestionPublisher.publish(msg);
-        return ApiResponse.ok(Map.of("taskId", taskId, "status", "submitted"));
+        return ApiResponse.deprecatedOk(Map.of("taskId", taskId, "status", "submitted"), "/assistant/admin/knowledge/reindex-jobs");
     }
 
     @PostMapping("/rag/reindex-jobs")
@@ -113,50 +113,50 @@ public class AiWorkflowController {
                 .taskId(taskId)
                 .taskType(normalizedType)
                 .build());
-        return ApiResponse.ok(Map.of("taskId", taskId, "status", "submitted", "taskType", normalizedType));
+        return ApiResponse.deprecatedOk(Map.of("taskId", taskId, "status", "submitted", "taskType", normalizedType), "/assistant/admin/knowledge/reindex-jobs");
     }
 
     @GetMapping("/rag/reindex-jobs/{taskId}")
     public ApiResponse<RagIngestionTask> getReindexJob(@PathVariable("taskId") String taskId) {
         RagIngestionTask task = documentLifecycleService.getTask(taskId);
-        return task == null ? ApiResponse.error("任务不存在或尚未被消费者领取") : ApiResponse.ok(task);
+        return task == null ? ApiResponse.error("任务不存在或尚未被消费者领取") : ApiResponse.deprecatedOk(task, "/assistant/admin/knowledge/reindex-jobs/{taskId}");
     }
 
     /** Incremental reindex */
     @PostMapping("/rag/reindex/incremental")
     public ApiResponse<Map<String, Object>> incrementalReindex() {
-        return ApiResponse.ok(hybridSearchService.incrementalReindex());
+        return ApiResponse.deprecatedOk(hybridSearchService.incrementalReindex(), "/assistant/admin/knowledge/reindex-jobs?taskType=incremental");
     }
 
     /** Get ingestion task status */
     @GetMapping("/rag/ingestion/tasks")
     public ApiResponse<?> getIngestionTasks() {
-        return ApiResponse.ok(documentLifecycleService.getRecentTasks());
+        return ApiResponse.deprecatedOk(documentLifecycleService.getRecentTasks(), "/assistant/admin/knowledge/ingestion/tasks");
     }
 
     /** Run quality report */
     @PostMapping("/rag/quality-report")
     public ApiResponse<Map<String, Object>> runQualityReport() {
-        return ApiResponse.ok(ingestionQualityService.runQualityReport());
+        return ApiResponse.deprecatedOk(ingestionQualityService.runQualityReport(), "/assistant/admin/knowledge/quality-report");
     }
 
     /** Get document statistics */
     @GetMapping("/rag/stats")
     public ApiResponse<Map<String, Object>> getRagStats() {
-        return ApiResponse.ok(documentLifecycleService.getDocumentStats());
+        return ApiResponse.deprecatedOk(documentLifecycleService.getDocumentStats(), "/assistant/admin/knowledge/stats");
     }
 
     /** Publish a document */
     @PostMapping("/rag/documents/{docId}/publish")
     public ApiResponse<?> publishDocument(@PathVariable Long docId) {
         var doc = documentLifecycleService.publishDocument(docId);
-        return doc != null ? ApiResponse.ok(doc) : ApiResponse.error("文档不存在");
+        return doc != null ? ApiResponse.deprecatedOk(doc, "/assistant/admin/knowledge/documents/{docId}/publish") : ApiResponse.error("文档不存在");
     }
 
     /** Archive a document */
     @PostMapping("/rag/documents/{docId}/archive")
     public ApiResponse<?> archiveDocument(@PathVariable Long docId) {
         var doc = documentLifecycleService.archiveDocument(docId);
-        return doc != null ? ApiResponse.ok(doc) : ApiResponse.error("文档不存在");
+        return doc != null ? ApiResponse.deprecatedOk(doc, "/assistant/admin/knowledge/documents/{docId}/archive") : ApiResponse.error("文档不存在");
     }
 }

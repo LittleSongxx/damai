@@ -18,8 +18,9 @@ class AiAuthenticationInterceptorTest {
 
     private final AiAuthenticationService authenticationService = mock(AiAuthenticationService.class);
     private final AiPermissionService permissionService = mock(AiPermissionService.class);
+    private final AccessDomainPolicyService accessDomainPolicyService = new AccessDomainPolicyService();
     private final AiAuthenticationInterceptor interceptor =
-            new AiAuthenticationInterceptor(authenticationService, permissionService);
+            new AiAuthenticationInterceptor(authenticationService, permissionService, accessDomainPolicyService);
 
     @AfterEach
     void tearDown() {
@@ -58,6 +59,33 @@ class AiAuthenticationInterceptorTest {
         when(authenticationService.authenticate("token-user")).thenReturn(user);
         when(permissionService.isAdmin(user)).thenReturn(false);
         MockHttpServletRequest request = request("/assistant/evals/rag/run", "token-user");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        assertFalse(interceptor.preHandle(request, response, new Object()));
+
+        assertEquals(403, response.getStatus());
+        assertNull(AiRequestContextHolder.get());
+    }
+
+    @Test
+    void shouldRejectNonAdminForFeedbackKnowledgeGaps() throws Exception {
+        AiUserContext user = AiUserContext.builder().userId(2L).admin(false).build();
+        when(authenticationService.authenticate("token-user")).thenReturn(user);
+        when(permissionService.isAdmin(user)).thenReturn(false);
+        MockHttpServletRequest request = request("/api/feedback/knowledge-gaps", "token-user");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        assertFalse(interceptor.preHandle(request, response, new Object()));
+
+        assertEquals(403, response.getStatus());
+        assertNull(AiRequestContextHolder.get());
+    }
+
+    @Test
+    void shouldRejectStructuredDemoWhenPlaygroundDisabled() throws Exception {
+        AiUserContext admin = AiUserContext.builder().userId(1L).admin(true).build();
+        when(authenticationService.authenticate("token-admin")).thenReturn(admin);
+        MockHttpServletRequest request = request("/ai/enhance/structured/intent", "token-admin");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         assertFalse(interceptor.preHandle(request, response, new Object()));

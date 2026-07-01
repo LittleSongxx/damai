@@ -31,11 +31,14 @@ public class AiAuthenticationInterceptor implements HandlerInterceptor {
 
     private final AiAuthenticationService authenticationService;
     private final AiPermissionService permissionService;
+    private final AccessDomainPolicyService accessDomainPolicyService;
 
     public AiAuthenticationInterceptor(AiAuthenticationService authenticationService,
-                                       AiPermissionService permissionService) {
+                                       AiPermissionService permissionService,
+                                       AccessDomainPolicyService accessDomainPolicyService) {
         this.authenticationService = authenticationService;
         this.permissionService = permissionService;
+        this.accessDomainPolicyService = accessDomainPolicyService;
     }
 
     @Override
@@ -54,7 +57,12 @@ public class AiAuthenticationInterceptor implements HandlerInterceptor {
             String token = request.getHeader("token");
             AiUserContext userContext = authenticationService.authenticate(token);
             AiRequestContextHolder.set(AiRequestContext.builder().user(userContext).build());
-            if (requiresAdmin(uri) && !permissionService.isAdmin(userContext)) {
+            if (accessDomainPolicyService.isInternalDev(uri) && !playgroundEnabled) {
+                writeError(response, HttpServletResponse.SC_FORBIDDEN, "当前接口仅用于内部调试，未开启 playground");
+                AiRequestContextHolder.clear();
+                return false;
+            }
+            if (accessDomainPolicyService.requiresAdmin(uri) && !permissionService.isAdmin(userContext)) {
                 writeError(response, HttpServletResponse.SC_FORBIDDEN, "当前账号无权访问 AI 管理、评测、运维或索引治理接口");
                 AiRequestContextHolder.clear();
                 return false;
@@ -69,18 +77,6 @@ public class AiAuthenticationInterceptor implements HandlerInterceptor {
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
         AiRequestContextHolder.clear();
-    }
-
-    private boolean requiresAdmin(String uri) {
-        return uri.startsWith("/admin/")
-                || uri.startsWith("/actuator")
-                || uri.startsWith("/api/rag-eval")
-                || uri.startsWith("/api/nl2sql-eval")
-                || uri.startsWith("/api/prompt-versions")
-                || uri.startsWith("/ai/rag/")
-                || uri.startsWith("/ai/enhance/observability")
-                || uri.startsWith("/assistant/evals/")
-                || uri.startsWith("/assistant/admin/");
     }
 
     private void writeError(HttpServletResponse response, int status, String message) throws java.io.IOException {

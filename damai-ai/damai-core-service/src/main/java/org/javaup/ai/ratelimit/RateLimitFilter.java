@@ -9,6 +9,7 @@ import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.javaup.ai.security.AccessDomainPolicyService;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -23,6 +24,7 @@ import java.util.Map;
 public class RateLimitFilter implements Filter {
 
     private final RateLimiter rateLimiter;
+    private final AccessDomainPolicyService accessDomainPolicyService;
 
     private static final Map<String, String> PATH_ENDPOINT_MAP = Map.of(
             "/assistant/runs", "assistant.runs.create",
@@ -58,7 +60,7 @@ public class RateLimitFilter implements Filter {
         if ("GET".equalsIgnoreCase(method) && uri.contains("/runs/") && uri.contains("/events")) {
             return "assistant.runs.stream";
         }
-        if (uri.startsWith("/assistant/admin/")) {
+        if (accessDomainPolicyService.isAdminRateLimited(uri)) {
             return "admin";
         }
         for (var entry : PATH_ENDPOINT_MAP.entrySet()) {

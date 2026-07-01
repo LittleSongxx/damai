@@ -50,6 +50,10 @@ public class AssistantController {
     private final McpToolGovernanceService mcpToolGovernanceService;
     private final McpBoundaryService mcpBoundaryService;
     private final AssistantEvalRunService assistantEvalRunService;
+    private final org.javaup.ai.service.DocumentLifecycleService documentLifecycleService;
+    private final org.javaup.ai.service.HybridSearchService hybridSearchService;
+    private final org.javaup.ai.service.IngestionQualityService ingestionQualityService;
+    private final org.javaup.ai.assistant.mq.RagIngestionPublisher ragIngestionPublisher;
 
     @GetMapping("/capabilities")
     public ApiResponse<AiUserCapabilitiesVo> getCapabilities() {
@@ -110,6 +114,58 @@ public class AssistantController {
     public ApiResponse<java.util.Map<String, Object>> renderMcpPrompt(@RequestBody java.util.Map<String, Object> body) {
         String promptName = body == null ? "" : String.valueOf(body.getOrDefault("promptName", ""));
         return ApiResponse.ok(mcpBoundaryService.renderPrompt(promptName, body == null ? java.util.Map.of() : body));
+    }
+
+    @GetMapping("/admin/knowledge/reindex-jobs/{taskId}")
+    public ApiResponse<org.javaup.ai.entity.RagIngestionTask> getKnowledgeReindexJob(@PathVariable("taskId") String taskId) {
+        org.javaup.ai.entity.RagIngestionTask task = documentLifecycleService.getTask(taskId);
+        return task == null ? ApiResponse.error("任务不存在或尚未被消费者领取") : ApiResponse.ok(task);
+    }
+
+    @PostMapping("/admin/knowledge/reindex")
+    public ApiResponse<java.util.Map<String, Object>> reindexKnowledge() {
+        return ApiResponse.ok(hybridSearchService.reindexAll());
+    }
+
+    @PostMapping("/admin/knowledge/reindex-jobs")
+    public ApiResponse<java.util.Map<String, String>> createKnowledgeReindexJob(
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "full") String taskType) {
+        String normalizedType = "incremental".equalsIgnoreCase(taskType) ? "incremental" : "full";
+        String prefix = "incremental".equals(normalizedType) ? "incr_" : "ingest_";
+        String taskId = prefix + java.util.UUID.randomUUID().toString().replace("-", "");
+        documentLifecycleService.createSubmittedTask(taskId, normalizedType);
+        ragIngestionPublisher.publish(org.javaup.ai.assistant.mq.RagIngestionMessage.builder()
+                .taskId(taskId)
+                .taskType(normalizedType)
+                .build());
+        return ApiResponse.ok(java.util.Map.of("taskId", taskId, "status", "submitted", "taskType", normalizedType));
+    }
+
+    @GetMapping("/admin/knowledge/ingestion/tasks")
+    public ApiResponse<?> getKnowledgeIngestionTasks() {
+        return ApiResponse.ok(documentLifecycleService.getRecentTasks());
+    }
+
+    @PostMapping("/admin/knowledge/quality-report")
+    public ApiResponse<java.util.Map<String, Object>> runKnowledgeQualityReport() {
+        return ApiResponse.ok(ingestionQualityService.runQualityReport());
+    }
+
+    @GetMapping("/admin/knowledge/stats")
+    public ApiResponse<java.util.Map<String, Object>> getKnowledgeStats() {
+        return ApiResponse.ok(documentLifecycleService.getDocumentStats());
+    }
+
+    @PostMapping("/admin/knowledge/documents/{docId}/publish")
+    public ApiResponse<?> publishKnowledgeDocument(@PathVariable Long docId) {
+        var doc = documentLifecycleService.publishDocument(docId);
+        return doc != null ? ApiResponse.ok(doc) : ApiResponse.error("文档不存在");
+    }
+
+    @PostMapping("/admin/knowledge/documents/{docId}/archive")
+    public ApiResponse<?> archiveKnowledgeDocument(@PathVariable Long docId) {
+        var doc = documentLifecycleService.archiveDocument(docId);
+        return doc != null ? ApiResponse.ok(doc) : ApiResponse.error("文档不存在");
     }
 
     @PostMapping("/runs")

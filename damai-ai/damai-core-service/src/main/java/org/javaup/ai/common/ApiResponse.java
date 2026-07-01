@@ -82,4 +82,10 @@ public class ApiResponse<T> implements Serializable {
         apiResponse.setData(t);
         return apiResponse;
     }
+
+    public static <T> ApiResponse<T> deprecatedOk(T t, String replacement) {
+        ApiResponse<T> apiResponse = ok(t);
+        apiResponse.message = "Deprecated API; use " + replacement;
+        return apiResponse;
+    }
 }
