@@ -58,9 +58,6 @@ public class RateLimitFilter implements Filter {
         if ("GET".equalsIgnoreCase(method) && uri.contains("/runs/") && uri.contains("/events")) {
             return "assistant.runs.stream";
         }
-        if (uri.startsWith("/simple/chat") || uri.startsWith("/simple/chat/mcp")) {
-            return "simple.chat";
-        }
         if (uri.startsWith("/assistant/admin/")) {
             return "admin";
         }

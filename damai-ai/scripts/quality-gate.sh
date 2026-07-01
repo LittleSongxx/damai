@@ -9,10 +9,13 @@ LOG_DIR="$REPORT_DIR/quality-gate-logs"
 
 BACKEND_TESTS="${DAMAI_AI_BACKEND_TESTS:-}"
 FRONTEND_TESTS="${DAMAI_AI_FRONTEND_TESTS:-}"
+STARTUP_SMOKE_PORT="${DAMAI_AI_STARTUP_SMOKE_PORT:-18089}"
+STARTUP_SMOKE_TIMEOUT_SECONDS="${DAMAI_AI_STARTUP_SMOKE_TIMEOUT_SECONDS:-120}"
 BACKEND_TEST_SCOPE="all"
 FRONTEND_TEST_SCOPE="all"
 BACKEND_TEST_SELECTION_COUNT="null"
 FRONTEND_TEST_SELECTION_COUNT="null"
+SMOKE_PID=""
 
 if [[ -n "$BACKEND_TESTS" ]]; then
   BACKEND_TEST_SCOPE="env-selected"
@@ -49,9 +52,40 @@ PY
 fi
 backend_tests_status="NOT_RUN"
 backend_compile_status="NOT_RUN"
+backend_startup_smoke_status="NOT_RUN"
 frontend_tests_status="NOT_RUN"
+frontend_build_status="NOT_RUN"
 overall_status="PASS"
 CHECK_RESULTS=()
+
+load_env_file() {
+  local file="$1" line key value
+  [[ -f "$file" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "$line" || ${line:0:1} == "#" || $line != *=* ]] && continue
+    key="${line%%=*}"
+    value="${line#*=}"
+    [[ $key =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    printf -v "$key" '%s' "$value"
+    export "$key"
+  done < "$file"
+}
+
+stop_startup_smoke() {
+  local pid="${SMOKE_PID:-}"
+  [[ -n "$pid" ]] || return 0
+  kill -TERM "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+  for _ in {1..20}; do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 1
+  done
+  kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  SMOKE_PID=""
+}
+
+trap stop_startup_smoke EXIT
 
 run_backend_tests() {
   if [[ -n "$BACKEND_TESTS" ]]; then
@@ -63,10 +97,53 @@ run_backend_tests() {
 
 run_frontend_tests() {
   if [[ -n "$FRONTEND_TESTS" ]]; then
-    npm test -- $FRONTEND_TESTS
+    npm test -- --run $FRONTEND_TESTS
     return
   fi
-  npm test
+  npm test -- --run
+}
+
+run_frontend_build() {
+  local build_log="$LOG_DIR/frontend-build-npm.log"
+  rm -f "$build_log"
+  if ! npm run build >"$build_log" 2>&1; then
+    cat "$build_log" >&2
+    return 1
+  fi
+  cat "$build_log"
+  if grep -Eq 'Some chunks are larger than 500 kB|chunk size limit' "$build_log"; then
+    echo "Vite build emitted an oversized chunk warning; split or lazy-load the affected dependency." >&2
+    return 1
+  fi
+}
+
+run_startup_smoke() {
+  local app_log="$LOG_DIR/backend-startup-smoke-app.log"
+  local end code
+  rm -f "$app_log"
+  load_env_file "$ROOT_DIR/.env"
+  setsid mvn -pl damai-core-service -DskipTests spring-boot:run \
+    -Dspring-boot.run.arguments="--server.port=$STARTUP_SMOKE_PORT --management.server.port=$STARTUP_SMOKE_PORT" \
+    >"$app_log" 2>&1 &
+  SMOKE_PID=$!
+  end=$((SECONDS + STARTUP_SMOKE_TIMEOUT_SECONDS))
+  while (( SECONDS < end )); do
+    if ! kill -0 "$SMOKE_PID" 2>/dev/null; then
+      cat "$app_log" >&2
+      stop_startup_smoke
+      return 1
+    fi
+    code="$(curl --noproxy '*' -sS -H 'Connection: close' --connect-timeout 2 --max-time 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$STARTUP_SMOKE_PORT/actuator/health" 2>/dev/null || true)"
+    if [[ "$code" =~ ^[23][0-9][0-9]$ ]]; then
+      tail -n 80 "$app_log" || true
+      stop_startup_smoke
+      return 0
+    fi
+    sleep 2
+  done
+  cat "$app_log" >&2
+  stop_startup_smoke
+  return 1
 }
 
 run_step() {
@@ -112,12 +189,26 @@ else
   backend_compile_status="FAIL"
 fi
 
+if run_step "backend startup smoke" "backendStartupSmoke" "$LOG_DIR/backend-startup-smoke.log" \
+  run_startup_smoke; then
+  backend_startup_smoke_status="PASS"
+else
+  backend_startup_smoke_status="FAIL"
+fi
+
 cd "$ROOT_DIR/vue"
 if run_step "frontend $FRONTEND_TEST_SCOPE test suite" "frontendTests" "$LOG_DIR/frontend-tests.log" \
   run_frontend_tests; then
   frontend_tests_status="PASS"
 else
   frontend_tests_status="FAIL"
+fi
+
+if run_step "frontend production build" "frontendBuild" "$LOG_DIR/frontend-build.log" \
+  run_frontend_build; then
+  frontend_build_status="PASS"
+else
+  frontend_build_status="FAIL"
 fi
 
 completed_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -147,7 +238,9 @@ cat > "$REPORT_FILE" <<JSON
   "completedAt": "$completed_at",
   "backendTests": "$backend_tests_status",
   "backendCompile": "$backend_compile_status",
+  "backendStartupSmoke": "$backend_startup_smoke_status",
   "frontendTests": "$frontend_tests_status",
+  "frontendBuild": "$frontend_build_status",
   "backendTestScope": "$BACKEND_TEST_SCOPE",
   "frontendTestScope": "$FRONTEND_TEST_SCOPE",
   "backendTestClasses": $backend_test_classes_json,

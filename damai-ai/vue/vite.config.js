@@ -28,5 +28,22 @@ export default defineConfig(() => ({
   },
   optimizeDeps: {
     exclude: ['@pdftron/webviewer']
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/highlight.js')) {
+            return 'syntax-highlight'
+          }
+          if (id.includes('node_modules/marked') || id.includes('node_modules/dompurify')) {
+            return 'markdown-rendering'
+          }
+          if (id.includes('node_modules/@pdftron/webviewer')) {
+            return 'webviewer'
+          }
+        }
+      }
+    }
   }
 }))

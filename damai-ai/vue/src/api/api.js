@@ -181,15 +181,6 @@ async function requestJson(path, options = {}) {
 }
 
 export const chatAPI = {
-  async simpleChat(data, chatId) {
-    const url = buildUrl('/simple/chat', { chatId })
-    const response = await fetchWithTimeout(url, {
-      method: 'POST',
-      body: data instanceof FormData ? data : new URLSearchParams({ prompt: data })
-    })
-    return response.body.getReader()
-  },
-
   async chatTypeHistoryList(type = 1) {
     const url = buildUrl('/chat/type/history/list', { type })
     const response = await fetchWithTimeout(url)
@@ -210,10 +201,6 @@ export const chatAPI = {
       ...msg,
       timestamp: new Date()
     }))
-  },
-
-  async sendAnalysisMessage(prompt, chatId) {
-    return streamRequest('/program/chat/mcp', { prompt, chatId })
   },
 
   async deleteChat(chatId, type = 1) {

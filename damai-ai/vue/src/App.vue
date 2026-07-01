@@ -12,8 +12,7 @@ const capabilities = ref({ admin: false, allowedRoutes: ['business', 'knowledge'
 
 const navItems = [
   { label: '统一助手', to: '/assistant' },
-  { label: '可观测性', to: '/ai-observability', adminOnly: true },
-  { label: '旧版入口', to: '/legacy' }
+  { label: '可观测性', to: '/ai-observability', adminOnly: true }
 ]
 
 const activePath = computed(() => route.path)

@@ -60,7 +60,7 @@ graph TB
 | **数据一致性** | Redis + MySQL + RabbitMQ + Seata + 补偿任务 + 后台核对 |
 | **分库分表** | ShardingSphere · 基因法 · 虚拟分片 · 平滑扩容迁移 |
 | **服务治理** | Nacos · Gateway · OpenFeign · Sentinel · Spring Boot Admin |
-| **可观测性** | API 采集 · Elasticsearch · Prometheus · AI MCP 诊断 |
+| **可观测性** | API 采集 · Elasticsearch · Prometheus · damai-ai 内置 MCP 诊断 |
 
 ## 下单链路
 

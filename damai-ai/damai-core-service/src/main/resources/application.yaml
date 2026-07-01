@@ -45,14 +45,6 @@ spring:
       password: ${DAMAI_REDIS_PASSWORD:}
       database: ${DAMAI_REDIS_DATABASE:0}
       timeout: ${DAMAI_REDIS_TIMEOUT:3000ms}
-      redisson:
-        config: |
-          singleServerConfig:
-            address: redis://${DAMAI_REDIS_HOST:127.0.0.1}:${DAMAI_REDIS_PORT:16379}
-            password: ${DAMAI_REDIS_PASSWORD:}
-            database: ${DAMAI_REDIS_DATABASE:0}
-            connectTimeout: 3000
-            timeout: 3000
   ai:
     chat:
       memory:
@@ -143,8 +135,6 @@ damai:
     internal-token: ${DAMAI_INTERNAL_ACCESS_TOKEN:}
     allow-unsafe-no-verify-fallback: ${DAMAI_ALLOW_UNSAFE_NO_VERIFY_FALLBACK:false}
   ai:
-    playground:
-      enabled: ${DAMAI_AI_PLAYGROUND_ENABLED:false}
     eval:
       degraded-mode: ${DAMAI_AI_EVAL_DEGRADED_MODE:false}
       recall-at-k-threshold: ${DAMAI_AI_EVAL_RECALL_THRESHOLD:0.85}
@@ -360,10 +350,6 @@ damai:
           limit: 10
           window-seconds: 0
           key-type: user
-        "simple.chat":
-          limit: 10
-          window-seconds: 1
-          key-type: ip
         admin:
           limit: 50
           window-seconds: 60

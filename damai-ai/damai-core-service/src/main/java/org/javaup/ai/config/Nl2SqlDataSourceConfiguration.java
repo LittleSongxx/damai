@@ -25,11 +25,7 @@ public class Nl2SqlDataSourceConfiguration {
     public DataSource nl2sqlDataSource() {
         Nl2SqlProperties.DataSource ds = nl2sqlProperties.getDatasource();
         if (!StringUtils.hasText(ds.getUrl())) {
-            log.info("NL2SQL datasource URL not configured, skipping connection pool creation");
-            HikariConfig config = new HikariConfig();
-            config.setJdbcUrl("jdbc:h2:mem:nl2sql_placeholder;DB_CLOSE_DELAY=-1");
-            config.setMaximumPoolSize(1);
-            return new HikariDataSource(config);
+            throw new IllegalStateException("NL2SQL is enabled but damai.ai.nl2sql.datasource.url is empty; configure a read-only datasource or disable damai.ai.nl2sql.enabled");
         }
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl(ds.getUrl());

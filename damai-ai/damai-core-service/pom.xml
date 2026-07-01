@@ -121,12 +121,12 @@
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-advisors-vector-store</artifactId>
         </dependency>
-        <!-- MCP Client - 用于调用外部MCP服务 -->
+        <!-- MCP Client - 默认不配置外部连接，仅保留协议兼容能力 -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-starter-mcp-client</artifactId>
         </dependency>
-        <!-- MCP Server STDIO - 在进程内通过标准输入输出暴露 MCP 工具 -->
+        <!-- MCP Server STDIO - 在核心服务进程内暴露受治理的 MCP 工具 -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-autoconfigure-mcp-server</artifactId>

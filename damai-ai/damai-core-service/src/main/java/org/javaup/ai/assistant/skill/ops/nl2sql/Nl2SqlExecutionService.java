@@ -1,8 +1,10 @@
 package org.javaup.ai.assistant.skill.ops.nl2sql;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.metrics.BusinessMetrics;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -24,7 +26,6 @@ import java.util.regex.Pattern;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class Nl2SqlExecutionService {
 
     private static final Pattern JSON_ROWS_PATTERN = Pattern.compile("\"rows_examined_per_scan\"\\s*:\\s*([0-9]+)");
@@ -34,8 +35,25 @@ public class Nl2SqlExecutionService {
     private final DataSource nl2sqlDataSource;
     private final BusinessMetrics businessMetrics;
 
+    @Autowired
+    public Nl2SqlExecutionService(Nl2SqlProperties properties,
+                                  @Qualifier("nl2sqlDataSource") ObjectProvider<DataSource> nl2sqlDataSourceProvider,
+                                  BusinessMetrics businessMetrics) {
+        this(properties, nl2sqlDataSourceProvider.getIfAvailable(), businessMetrics);
+    }
+
+    public Nl2SqlExecutionService(Nl2SqlProperties properties,
+                                  DataSource nl2sqlDataSource,
+                                  BusinessMetrics businessMetrics) {
+        this.properties = properties;
+        this.nl2sqlDataSource = nl2sqlDataSource;
+        this.businessMetrics = businessMetrics;
+    }
+
     public boolean isConfigured() {
-        return StringUtils.hasText(properties.getDatasource().getUrl());
+        return properties.isEnabled()
+                && StringUtils.hasText(properties.getDatasource().getUrl())
+                && nl2sqlDataSource != null;
     }
 
     public Nl2SqlExecutionResult execute(String sql) {

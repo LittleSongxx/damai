@@ -28,6 +28,7 @@ class Nl2SqlExecutionServiceTest {
     @BeforeEach
     void setUp() {
         properties = new Nl2SqlProperties();
+        properties.setEnabled(true);
         properties.getDatasource().setUrl("jdbc:mysql://localhost:3306/damai_readonly");
         properties.setMaxRows(10);
         properties.getCostGuard().setMaxEstimatedRows(100);

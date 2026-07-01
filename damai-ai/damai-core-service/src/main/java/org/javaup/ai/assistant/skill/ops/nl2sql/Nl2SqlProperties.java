@@ -12,7 +12,7 @@ import java.util.List;
 @ConfigurationProperties(prefix = "damai.ai.nl2sql")
 public class Nl2SqlProperties {
 
-    private boolean enabled = true;
+    private boolean enabled = false;
 
     private int maxRows = 100;
 

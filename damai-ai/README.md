@@ -1,6 +1,6 @@
 # damai-ai — 票务智能助手平台
 
-面向票务领域的 AI 智能助手，围绕 **Assistant Run → Skill → Tool** 工作流，将大模型能力与传统票务系统深度整合。基于 Spring AI 构建，实现了 Hybrid RAG 知识问答、LLM Tool Calling 购票、联网搜索、NL2SQL 运维查询、MCP 日志/指标/运维工具等五大核心能力。
+面向票务领域的 AI 智能助手，围绕 **Assistant Run → Skill → Tool** 工作流，将大模型能力与传统票务系统深度整合。基于 Spring AI 构建，实现了 Hybrid RAG 知识问答、LLM Tool Calling 购票、联网搜索、NL2SQL 运维查询、内置 MCP 日志/指标/运维工具等核心能力。
 
 > **Author**: Song &lt;2212565023@qq.com&gt; · [GitHub](https://github.com/LittleSongxx/damai)
 
@@ -108,7 +108,7 @@ sequenceDiagram
 | 模型接入 | 阿里百炼 (Qwen) · DeepSeek · Ollama 本地部署 |
 | RAG | Qdrant (gRPC) · Elasticsearch BM25 · qwen3-rerank · 上下文压缩 |
 | 记忆与画像 | JDBC Chat Memory · RabbitMQ 异步刷新 · 情景记忆 · 用户画像提取 |
-| 工具调用 | Spring AI @Tool · MCP Client/Server (WebFlux SSE) |
+| 工具调用 | Spring AI @Tool · 内置 MCP 工具治理 |
 | 数据与消息 | MySQL · RabbitMQ · Elasticsearch · Easy-ES |
 | 安全 | RBAC · 工具沙箱白名单 · NL2SQL AST 校验 · 风险等级守卫 |
 | 可观测性 | Actuator · Prometheus · Token/耗时统计 · 全链路追溯 |
@@ -119,7 +119,7 @@ sequenceDiagram
 
 ```
 damai-ai/
-├── damai-core-service/          # AI 核心服务 (483+ 源文件, 40 单元测试)
+├── damai-core-service/          # AI 核心服务
 │   └── src/main/java/org/javaup/ai/
 │       ├── assistant/           # Skill 引擎、路由、执行器、记忆、画像
 │       │   └── mcp/tool/        # MCP 工具 (日志/指标/NL2SQL)
@@ -131,8 +131,7 @@ damai-ai/
 │       ├── metrics/             # 可观测指标
 │       └── ...
 ├── vue/                         # AI 助手前端
-├── sql/                         # 数据库初始化脚本
-└── RESUME.md                    # 项目技术亮点总结
+└── sql/                         # 数据库初始化脚本
 ```
 
 ## 服务与端口
@@ -152,12 +151,14 @@ cp .env.example .env
 | --- | --- |
 | `DAMAI_AI_PORT` | 核心服务端口，默认 `6089` |
 | `DAMAI_AI_MYSQL_URL` | `damai_ai` 数据库连接 |
+| `DAMAI_REDIS_PASSWORD` | Redis 密码；本地 Docker Redis 默认留空 |
 | `DAMAI_AI_ALIBABA_API_KEY` | 阿里百炼 API Key |
 | `DAMAI_AI_DEEPSEEK_API_KEY` | DeepSeek API Key |
 | `DAMAI_AI_OLLAMA_BASE_URL` | 本地 Ollama 地址 |
 | `DAMAI_AI_QDRANT_URL` | Qdrant 向量库地址 |
-| `DAMAI_AI_MCP_LOG_URL` | MCP 日志端点地址 |
-| `DAMAI_AI_MCP_METRICS_URL` | MCP 指标端点地址 |
+| `DAMAI_AI_PROMETHEUS_URL` | Prometheus 指标地址，供内置运维工具读取 |
+| `DAMAI_AI_NL2SQL_ENABLED` | NL2SQL 默认 `false`；启用前必须配置只读 `DAMAI_AI_NL2SQL_URL` |
+| `DAMAI_AI_NL2SQL_URL` | 只读分析库或只暴露审批视图的 ShardingSphere 数据源 |
 | `DAMAI_INTERNAL_ACCESS_TOKEN` | 与 `damai-pro/.env` 中相同的内部调用令牌 |
 | `DAMAI_ALLOW_UNSAFE_NO_VERIFY_FALLBACK` | 是否允许退回旧 `no_verify` 鉴权，建议固定为 `false` |
 | `DAMAI_AI_*_URL` | 指向 `damai-pro` 网关的业务接口 |
@@ -174,6 +175,8 @@ bash scripts/damai-stack.sh start
 ```
 
 脚本自动完成 Docker 依赖 → 数据库初始化 → Maven 构建 → 后端启动 → 前端启动。
+
+用户侧 AI 主入口统一为 `/assistant`；历史对话入口不再维护。
 
 ### 手动启动
 
@@ -246,13 +249,12 @@ flowchart LR
 | 模型鉴权失败 | 检查 `DAMAI_AI_ALIBABA_API_KEY` / `DAMAI_AI_DEEPSEEK_API_KEY` |
 | 本地模型不可用 | 确认 Ollama 已启动且模型名匹配 `DAMAI_AI_OLLAMA_CHAT_MODEL` |
 | RAG 返回为空 | 检查 Qdrant 地址、集合名、文档加载路径和向量维度 |
-| MCP 工具不可用 | 检查 ES/Prometheus 连接与 MCP 端点配置 |
+| MCP 工具不可用 | 检查 ES/Prometheus 连接，以及 `damai-core-service` 内置 MCP 治理开关 |
 | 无法调用业务接口 | 确认 `damai-pro` 网关可达、登录态有效 |
 | 日志/指标为空 | 确认 ES 和 Prometheus 中有数据 |
 
 ## 相关文档
 
 - [`vue/README.md`](vue/README.md) — AI 前端说明
-- [`RESUME.md`](RESUME.md) — 项目技术亮点总结
 - [`../damai-pro/docs/damai-ai-integration.md`](../damai-pro/docs/damai-ai-integration.md) — AI + Pro 联调指南
 - [`../README.md`](../README.md) — 工作区总览

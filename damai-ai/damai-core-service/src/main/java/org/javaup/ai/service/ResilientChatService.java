@@ -20,6 +20,7 @@ import java.time.Duration;
 public class ResilientChatService {
 
     private static final String BUDGET_EXHAUSTED_MSG = "您今日的AI调用额度已用完，请明日再试或联系管理员提升额度。";
+    private static final String AI_UNAVAILABLE_MSG = "抱歉，当前 AI 服务暂时不可用，请稍后重试。";
 
     private final ChatClient primaryClient;
     private final ChatClient fallbackClient;
@@ -52,31 +53,13 @@ public class ResilientChatService {
         if (isBudgetExhausted()) {
             return BUDGET_EXHAUSTED_MSG;
         }
-        return circuitBreakerService.executeLlm(() -> {
-            try {
-                ChatResponse response = primaryClient.prompt()
-                        .user(userPrompt)
-                        .call()
-                        .chatResponse();
-                if (response != null && response.getResult() != null && response.getResult().getOutput() != null) {
-                    String text = response.getResult().getOutput().getText();
-                    var usage = response.getMetadata() != null && response.getMetadata().getUsage() != null
-                            ? response.getMetadata().getUsage() : null;
-                    if (usage != null) {
-                        int promptTokens = usage.getPromptTokens() != null ? usage.getPromptTokens() : 0;
-                        int completionTokens = usage.getCompletionTokens() != null ? usage.getCompletionTokens() : 0;
-                        businessMetrics.recordModelCall(properties.getPrimaryModel(), promptTokens, completionTokens);
-                        recordQuotaUsage(promptTokens + (long) completionTokens);
-                    }
-                    return text;
-                }
-                throw new RuntimeException("Primary model returned empty response");
-            } catch (Exception e) {
-                log.warn("Primary model ({}) failed, switching to fallback ({}): {}",
-                        properties.getPrimaryModel(), properties.getFallbackModel(), e.getMessage());
-                return callFallback(userPrompt);
-            }
-        }, callFallback(userPrompt));
+        return circuitBreakerService.executeLlmLazy(
+                () -> callPrimary(userPrompt),
+                () -> {
+                    log.warn("Primary model ({}) failed or was blocked, switching to fallback ({})",
+                            properties.getPrimaryModel(), properties.getFallbackModel());
+                    return callFallback(userPrompt);
+                });
     }
 
     public Flux<String> stream(String userPrompt) {
@@ -99,8 +82,30 @@ public class ResilientChatService {
                 });
     }
 
+    private String callPrimary(String userPrompt) {
+        ChatResponse response = primaryClient.prompt()
+                .user(userPrompt)
+                .call()
+                .chatResponse();
+        if (response != null && response.getResult() != null && response.getResult().getOutput() != null) {
+            String text = response.getResult().getOutput().getText();
+            var usage = response.getMetadata() != null && response.getMetadata().getUsage() != null
+                    ? response.getMetadata().getUsage() : null;
+            if (usage != null) {
+                int promptTokens = usage.getPromptTokens() != null ? usage.getPromptTokens() : 0;
+                int completionTokens = usage.getCompletionTokens() != null ? usage.getCompletionTokens() : 0;
+                businessMetrics.recordModelCall(properties.getPrimaryModel(), promptTokens, completionTokens);
+                recordQuotaUsage(promptTokens + (long) completionTokens);
+            }
+            return text;
+        }
+        throw new IllegalStateException("Primary model returned empty response");
+    }
+
     private boolean checkStreamingBudget(long dailyBudget) {
-        if (dailyBudget <= 0) return false;
+        if (dailyBudget <= 0) {
+            return false;
+        }
         try {
             Long userId = AiRequestContextHolder.getRequiredUser().getUserId();
             if (quotaTracker.isBudgetExhausted(userId, dailyBudget)) {
@@ -112,12 +117,6 @@ public class ResilientChatService {
         return false;
     }
 
-    /**
-     * QuotaTracker 实时记录 + DB 持久化双重写入。
-     *
-     * <p>QuotaTracker 用于实时检查和流式中止（低延迟），
-     * DB (AiObservabilityService) 用于持久化和跨实例同步。
-     */
     private void recordQuotaUsage(long tokens) {
         try {
             Long userId = AiRequestContextHolder.getRequiredUser().getUserId();
@@ -129,10 +128,11 @@ public class ResilientChatService {
 
     private boolean isBudgetExhausted() {
         long budget = securityProperties.getDailyTokenBudget();
-        if (budget <= 0) return false;
+        if (budget <= 0) {
+            return false;
+        }
         try {
             Long userId = AiRequestContextHolder.getRequiredUser().getUserId();
-            // 优先 QuotaTracker 实时检查，回退到 DB 查询
             if (quotaTracker.isBudgetExhausted(userId, budget)) {
                 return true;
             }
@@ -149,12 +149,21 @@ public class ResilientChatService {
                     .call()
                     .chatResponse();
             if (response != null && response.getResult() != null && response.getResult().getOutput() != null) {
-                return response.getResult().getOutput().getText();
+                String text = response.getResult().getOutput().getText();
+                var usage = response.getMetadata() != null && response.getMetadata().getUsage() != null
+                        ? response.getMetadata().getUsage() : null;
+                if (usage != null) {
+                    int promptTokens = usage.getPromptTokens() != null ? usage.getPromptTokens() : 0;
+                    int completionTokens = usage.getCompletionTokens() != null ? usage.getCompletionTokens() : 0;
+                    businessMetrics.recordModelCall(properties.getFallbackModel(), promptTokens, completionTokens);
+                    recordQuotaUsage(promptTokens + (long) completionTokens);
+                }
+                return text;
             }
-            return "抱歉，当前 AI 服务暂时不可用，请稍后重试。";
+            return AI_UNAVAILABLE_MSG;
         } catch (Exception fallbackError) {
             log.error("Fallback model also failed: {}", fallbackError.getMessage());
-            return "抱歉，当前 AI 服务暂时不可用，请稍后重试。";
+            return AI_UNAVAILABLE_MSG;
         }
     }
 }

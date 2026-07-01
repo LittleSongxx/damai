@@ -18,7 +18,6 @@ import org.javaup.ai.vo.result.ProgramDetailResultVo;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
@@ -26,7 +25,6 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Deprecated(since = "2.0.0", forRemoval = true)
-@Component
 public class AiProgram {
 
     @Autowired

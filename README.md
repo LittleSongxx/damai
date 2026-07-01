@@ -84,7 +84,7 @@ damai/
 - **Tool Calling** — LLM 自主编排购票工具，人在环审批
 - **联网搜索** — Tavily/博查联网证据 + LLM 生成
 - **NL2SQL** — 自然语言运维查询，AST 七层安全校验
-- **MCP 监控** — 日志/指标 MCP Server，LLM 诊断建议
+- **内置 MCP 运维** — 日志/指标工具治理，LLM 汇总诊断建议
 
 **技术栈**: Java 17 · Spring Boot 3.5 · Spring AI 1.0 · Qdrant · Vue 3 · Naive UI
 
