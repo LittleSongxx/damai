@@ -18,8 +18,10 @@ public class EscalationController {
     private final EscalationService escalationService;
 
     @GetMapping
-    public ApiResponse<List<EscalationTicket>> listPending() {
-        return ApiResponse.ok(escalationService.getPendingTickets());
+    public ApiResponse<List<EscalationTicket>> listPending(@RequestParam(required = false) String priority,
+                                                           @RequestParam(required = false) String sentiment,
+                                                           @RequestParam(required = false) String intentCode) {
+        return ApiResponse.ok(escalationService.getPendingTickets(priority, sentiment, intentCode));
     }
 
     @GetMapping("/user/{userId}")

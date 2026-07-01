@@ -99,7 +99,10 @@ public class DocumentIngestionService {
     // ======================== Full Ingestion Pipeline ========================
 
     public Map<String, Object> reindexAll() {
-        String taskId = "ingest_" + UUID.randomUUID().toString().replace("-", "");
+        return reindexAll("ingest_" + UUID.randomUUID().toString().replace("-", ""));
+    }
+
+    public Map<String, Object> reindexAll(String taskId) {
         RagIngestionTask task = createTask(taskId, "full");
         Map<String, Object> result = new LinkedHashMap<>();
 
@@ -172,7 +175,10 @@ public class DocumentIngestionService {
     }
 
     public Map<String, Object> incrementalReindex() {
-        String taskId = "incr_" + UUID.randomUUID().toString().replace("-", "");
+        return incrementalReindex("incr_" + UUID.randomUUID().toString().replace("-", ""));
+    }
+
+    public Map<String, Object> incrementalReindex(String taskId) {
         RagIngestionTask task = createTask(taskId, "incremental");
         Map<String, Object> result = new LinkedHashMap<>();
 
@@ -666,6 +672,17 @@ public class DocumentIngestionService {
     // ======================== Task Management ========================
 
     private RagIngestionTask createTask(String taskId, String taskType) {
+        RagIngestionTask existing = taskMapper.selectByTaskId(taskId);
+        if (existing != null) {
+            existing.setTaskType(taskType);
+            existing.setTaskStatus("pending");
+            existing.setErrorMessage(null);
+            existing.setResultJson(null);
+            existing.setFinishedAt(null);
+            existing.setEditTime(new java.util.Date());
+            taskMapper.updateById(existing);
+            return existing;
+        }
         RagIngestionTask task = new RagIngestionTask();
         task.setTaskId(taskId);
         task.setTaskType(taskType);

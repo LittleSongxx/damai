@@ -7,8 +7,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -56,6 +60,26 @@ public class Nl2SqlSchemaService {
                 .map(Nl2SqlProperties.Table::getName)
                 .map(name -> name.toLowerCase(Locale.ROOT))
                 .toList();
+    }
+
+    public Map<String, Set<String>> allowedColumnsByTable() {
+        Map<String, Set<String>> result = new LinkedHashMap<>();
+        for (Nl2SqlProperties.Table table : properties.getTables()) {
+            if (!table.isAllowed() || !StringUtils.hasText(table.getName())) {
+                continue;
+            }
+            Set<String> columns = new LinkedHashSet<>();
+            if (table.getColumns() != null) {
+                for (Nl2SqlProperties.Column column : table.getColumns()) {
+                    if (!StringUtils.hasText(column.getName()) || column.isSensitive()) {
+                        continue;
+                    }
+                    columns.add(column.getName().toLowerCase(Locale.ROOT));
+                }
+            }
+            result.put(table.getName().toLowerCase(Locale.ROOT), columns);
+        }
+        return result;
     }
 
     private List<Nl2SqlProperties.Example> selectExamples(String question) {

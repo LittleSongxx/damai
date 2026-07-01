@@ -18,7 +18,14 @@ public class AiNl2SqlEvalRun extends BaseTableData {
     private Double sqlValidityRate;
     private Double executionAccuracy;
     private Double exactMatchRate;
+    private Double resultSetEquivalenceRate;
+    private Double schemaLinkPrecision;
+    private Double schemaLinkRecall;
+    private Double repairSuccessRate;
+    private Double unsafeRejectionRate;
+    private Double lowConfidenceClarificationRate;
     private Double avgLatencyMs;
+    private Double avgEstimatedCost;
     private String runStatus;
     private String errorMessage;
 }

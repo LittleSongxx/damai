@@ -98,6 +98,27 @@ public class DocumentLifecycleService {
         return taskMapper.selectList(wrapper);
     }
 
+    public RagIngestionTask getTask(String taskId) {
+        return taskMapper.selectByTaskId(taskId);
+    }
+
+    public RagIngestionTask createSubmittedTask(String taskId, String taskType) {
+        RagIngestionTask existing = taskMapper.selectByTaskId(taskId);
+        if (existing != null) {
+            return existing;
+        }
+        RagIngestionTask task = new RagIngestionTask();
+        task.setTaskId(taskId);
+        task.setTaskType(taskType);
+        task.setTaskStatus("submitted");
+        task.setStartedAt(LocalDateTime.now().toString());
+        task.setCreateTime(new Date());
+        task.setEditTime(new Date());
+        task.setStatus(1);
+        taskMapper.insert(task);
+        return task;
+    }
+
     /**
      * Get document statistics.
      */

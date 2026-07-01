@@ -3,14 +3,23 @@ package org.javaup.ai.controller;
 import lombok.RequiredArgsConstructor;
 import org.javaup.ai.assistant.AssistantSkillManagementService;
 import org.javaup.ai.assistant.AssistantRuntimeService;
+import org.javaup.ai.assistant.mcp.McpBoundaryService;
+import org.javaup.ai.assistant.mcp.McpToolGovernanceService;
+import org.javaup.ai.assistant.runtime.AssistantRunGraphService;
 import org.javaup.ai.common.ApiResponse;
 import org.javaup.ai.context.AiRequestContextHolder;
 import org.javaup.ai.dto.AssistantRunCreateRequest;
 import org.javaup.ai.dto.AssistantSkillUpdateRequest;
+import org.javaup.ai.service.AssistantEvalRunService;
+import org.javaup.ai.service.AiQualityGateService;
 import org.javaup.ai.vo.AssistantActionResultVo;
 import org.javaup.ai.vo.AssistantConversationVo;
+import org.javaup.ai.vo.AssistantEvalRunRequest;
+import org.javaup.ai.vo.AssistantEvalRunVo;
 import org.javaup.ai.vo.AssistantRunCreatedVo;
 import org.javaup.ai.vo.AssistantRunDetailVo;
+import org.javaup.ai.vo.AssistantRunGraphVo;
+import org.javaup.ai.vo.AssistantRunReplayVo;
 import org.javaup.ai.vo.AssistantSkillDetailVo;
 import org.javaup.ai.vo.AssistantSkillEvalRunVo;
 import org.javaup.ai.vo.AssistantSkillVo;
@@ -36,6 +45,11 @@ public class AssistantController {
 
     private final AssistantRuntimeService assistantRuntimeService;
     private final AssistantSkillManagementService skillManagementService;
+    private final AssistantRunGraphService runGraphService;
+    private final AiQualityGateService qualityGateService;
+    private final McpToolGovernanceService mcpToolGovernanceService;
+    private final McpBoundaryService mcpBoundaryService;
+    private final AssistantEvalRunService assistantEvalRunService;
 
     @GetMapping("/capabilities")
     public ApiResponse<AiUserCapabilitiesVo> getCapabilities() {
@@ -63,6 +77,41 @@ public class AssistantController {
         return ApiResponse.ok(skillManagementService.createEvalRun(skillId, AiRequestContextHolder.getRequiredUser()));
     }
 
+    @PostMapping("/evals/{suite}/run")
+    public ApiResponse<AssistantEvalRunVo> runEvalSuite(@PathVariable("suite") String suite,
+                                                        @RequestBody(required = false) AssistantEvalRunRequest request) {
+        return ApiResponse.ok(assistantEvalRunService.runSuite(suite, request));
+    }
+
+    @GetMapping("/evals/{suite}/runs/{evalRunId}")
+    public ApiResponse<AssistantEvalRunVo> getEvalRun(@PathVariable("suite") String suite,
+                                                       @PathVariable("evalRunId") String evalRunId) {
+        AssistantEvalRunVo run = assistantEvalRunService.getSuiteRun(suite, evalRunId);
+        return run == null ? ApiResponse.error("Eval run 不存在") : ApiResponse.ok(run);
+    }
+
+    @GetMapping("/admin/quality-gates/latest")
+    public ApiResponse<java.util.Map<String, Object>> latestQualityGate() {
+        return ApiResponse.ok(qualityGateService.latestGate());
+    }
+
+    @GetMapping("/admin/mcp/governance")
+    public ApiResponse<java.util.Map<String, Object>> mcpGovernance() {
+        return ApiResponse.ok(mcpToolGovernanceService.governanceSnapshot());
+    }
+
+    @PostMapping("/admin/mcp/resources/read")
+    public ApiResponse<java.util.Map<String, Object>> readMcpResource(@RequestBody java.util.Map<String, Object> body) {
+        String resourceUri = body == null ? "" : String.valueOf(body.getOrDefault("resourceUri", ""));
+        return ApiResponse.ok(mcpBoundaryService.readResource(resourceUri, body == null ? java.util.Map.of() : body));
+    }
+
+    @PostMapping("/admin/mcp/prompts/render")
+    public ApiResponse<java.util.Map<String, Object>> renderMcpPrompt(@RequestBody java.util.Map<String, Object> body) {
+        String promptName = body == null ? "" : String.valueOf(body.getOrDefault("promptName", ""));
+        return ApiResponse.ok(mcpBoundaryService.renderPrompt(promptName, body == null ? java.util.Map.of() : body));
+    }
+
     @PostMapping("/runs")
     public ApiResponse<AssistantRunCreatedVo> createRun(@RequestBody AssistantRunCreateRequest request) {
         return ApiResponse.ok(assistantRuntimeService.createRun(request));
@@ -76,6 +125,22 @@ public class AssistantController {
     @GetMapping("/runs/{runId}")
     public ApiResponse<AssistantRunDetailVo> getRun(@PathVariable("runId") String runId) {
         return ApiResponse.ok(assistantRuntimeService.getRunDetail(runId));
+    }
+
+    @GetMapping("/runs/{runId}/graph")
+    public ApiResponse<AssistantRunGraphVo> getRunGraph(@PathVariable("runId") String runId) {
+        AssistantRunGraphVo graph = runGraphService.buildGraph(runId);
+        return graph == null ? ApiResponse.error("Run 不存在") : ApiResponse.ok(graph);
+    }
+
+    @PostMapping("/runs/{runId}/resume")
+    public ApiResponse<AssistantRunCreatedVo> resumeRun(@PathVariable("runId") String runId) {
+        return ApiResponse.ok(assistantRuntimeService.resumeRun(runId));
+    }
+
+    @PostMapping("/runs/{runId}/replay")
+    public ApiResponse<AssistantRunReplayVo> replayRun(@PathVariable("runId") String runId) {
+        return ApiResponse.ok(assistantRuntimeService.replayRun(runId));
     }
 
     @PostMapping("/runs/{runId}/actions/{actionId}/approve")

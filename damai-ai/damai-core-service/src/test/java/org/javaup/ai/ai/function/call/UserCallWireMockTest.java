@@ -24,6 +24,7 @@ class UserCallWireMockTest {
     void shouldForwardTokenHeaderToCurrentUserEndpoint() {
         wireMock.stubFor(com.github.tomakehurst.wiremock.client.WireMock.post(urlEqualTo("/damai/user/user/current"))
                 .withHeader("token", equalTo("token-test"))
+                .withHeader("X-Internal-Token", equalTo("internal-token-test"))
                 .willReturn(okJson("""
                         {"code":0,"data":{"id":1001,"name":"演示用户","mobile":"13800138000","email":"demo@test.com"}}
                         """)));
@@ -34,13 +35,16 @@ class UserCallWireMockTest {
                 return wireMock.baseUrl() + "/damai/user/user/current";
             }
         };
-        ReflectionTestUtils.setField(userCall, "requestAuthSupport", new DaMaiRequestAuthSupport());
+        DaMaiRequestAuthSupport authSupport = new DaMaiRequestAuthSupport();
+        ReflectionTestUtils.setField(authSupport, "internalToken", "internal-token-test");
+        ReflectionTestUtils.setField(userCall, "requestAuthSupport", authSupport);
 
         UserDetailVo user = userCall.currentUser("token-test");
 
         assertEquals(1001L, user.getId());
         assertEquals("13800138000", user.getMobile());
         wireMock.verify(postRequestedFor(urlEqualTo("/damai/user/user/current"))
-                .withHeader("token", equalTo("token-test")));
+                .withHeader("token", equalTo("token-test"))
+                .withHeader("X-Internal-Token", equalTo("internal-token-test")));
     }
 }

@@ -21,6 +21,6 @@ public class DaMaiRequestAuthSupport {
         if (allowUnsafeNoVerifyFallback) {
             return request.header("no_verify", "true");
         }
-        return request;
+        throw new IllegalStateException("damai-pro internal token is required; set damai.pro.internal-token or explicitly enable damai.pro.allow-unsafe-no-verify-fallback for local development");
     }
 }

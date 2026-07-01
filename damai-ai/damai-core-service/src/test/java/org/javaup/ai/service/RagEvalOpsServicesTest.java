@@ -9,6 +9,7 @@ import org.javaup.ai.mapper.AiRagEvalCaseMapper;
 import org.javaup.ai.mapper.AiRagEvalResultMapper;
 import org.javaup.ai.mapper.AiRagEvalRunMapper;
 import org.javaup.ai.vo.RagBadCaseConvertRequest;
+import org.javaup.ai.vo.RagBadCaseReviewRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -75,7 +76,13 @@ class RagEvalOpsServicesTest {
         result.setRecallAt5(0.9);
         result.setFaithfulnessScore(0.8);
         result.setAnswerCorrectnessScore(0.85);
+        result.setJudgeRelevance(0.8);
+        result.setJudgeCoverage(0.7);
+        result.setJudgeContradiction(0.1);
+        result.setJudgeCitationSupport(0.6);
+        result.setJudgeAnswerability(1.0);
         result.setTotalLatencyMs(120L);
+        result.setFailureType("citation_missing");
 
         AiRagEvalCase evalCase = new AiRagEvalCase();
         evalCase.setCaseId("case-1");
@@ -96,6 +103,17 @@ class RagEvalOpsServicesTest {
         assertEquals("PASS", ((Map<?, ?>) report.get("qualityGate")).get("status"));
         assertEquals(1L, ((Map<?, ?>) report.get("categoryBreakdown")).get("faq"));
         assertEquals(1L, ((Map<?, ?>) report.get("caseTypeBreakdown")).get("single_hop"));
+        Map<?, ?> judgeSummary = (Map<?, ?>) report.get("structuredJudgeSummary");
+        assertEquals(0.7, (Double) judgeSummary.get("avgCoverage"), 0.0001);
+        assertEquals(0L, judgeSummary.get("contradictionRiskCount"));
+        Map<?, ?> closurePlan = (Map<?, ?>) report.get("closurePlan");
+        assertEquals(false, closurePlan.get("baselineReady"));
+        assertEquals(true, closurePlan.get("releaseBlocked"));
+        assertEquals(1L, closurePlan.get("failedCases"));
+        assertEquals(1L, closurePlan.get("weakCitationCases"));
+        assertTrue(String.valueOf(closurePlan.get("candidateEvalCaseIds")).contains("case-1"));
+        assertTrue(String.valueOf(closurePlan.get("nextActions")).contains("baseline comparison"));
+        assertTrue(String.valueOf(closurePlan.get("workflow")).contains("convert to eval"));
     }
 
     @Test
@@ -166,10 +184,34 @@ class RagEvalOpsServicesTest {
         assertEquals("refund", created.getCategory());
         assertEquals("如何退票", created.getQuestion());
         assertEquals(1, badCase.getConvertedToEvalCase());
+        assertEquals("CONVERTED", badCase.getReviewStatus());
         assertNotNull(badCase.getConvertedCaseId());
 
         ArgumentCaptor<AiRagEvalCase> captor = ArgumentCaptor.forClass(AiRagEvalCase.class);
         verify(caseMapper).insert(captor.capture());
         assertEquals("golden-ds", captor.getValue().getDatasetId());
+    }
+
+    @Test
+    void shouldReviewBadCaseWithAuditFields() {
+        AiRagBadCase badCase = new AiRagBadCase();
+        badCase.setBadCaseId("bad-review");
+        badCase.setReviewStatus("PENDING");
+
+        when(badCaseMapper.selectOne(any())).thenReturn(badCase);
+        when(badCaseMapper.updateById(any(AiRagBadCase.class))).thenReturn(1);
+
+        RagBadCaseReviewRequest request = new RagBadCaseReviewRequest();
+        request.setReviewStatus("FIXED");
+        request.setReviewNote("prompt version v3 fixed citation support");
+
+        AiRagBadCase reviewed = badCaseService.reviewBadCase("bad-review", request, 99L);
+
+        assertNotNull(reviewed);
+        assertEquals("FIXED", reviewed.getReviewStatus());
+        assertEquals(99L, reviewed.getReviewedBy());
+        assertNotNull(reviewed.getReviewedAt());
+        assertEquals("prompt version v3 fixed citation support", reviewed.getReviewNote());
+        verify(badCaseMapper).updateById(badCase);
     }
 }

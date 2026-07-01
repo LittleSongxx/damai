@@ -5,6 +5,7 @@ import lombok.Data;
 import org.springframework.ai.document.Document;
 
 import java.util.List;
+import java.util.Map;
 
 @Data
 @Builder
@@ -33,4 +34,6 @@ public class RagSearchResultVo {
     private String confidenceLevel;
 
     private String correctiveAction;
+
+    private Map<String, Object> metadata;
 }

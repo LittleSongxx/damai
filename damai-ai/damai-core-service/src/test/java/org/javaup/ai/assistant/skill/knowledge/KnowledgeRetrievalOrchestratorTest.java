@@ -1,9 +1,7 @@
 package org.javaup.ai.assistant.skill.knowledge;
 
-import org.javaup.ai.rag.channel.SearchContext;
-import org.javaup.ai.rag.engine.MultiChannelRetrievalEngine;
+import org.javaup.ai.rag.RagRetrievalFacade;
 import org.javaup.ai.service.AdvancedQueryService;
-import org.javaup.ai.service.HybridSearchService;
 import org.javaup.ai.assistant.runtime.AssistantStageTraceService;
 import org.javaup.ai.vo.RagSearchResultVo;
 import org.javaup.ai.vo.RagSourceVo;
@@ -20,12 +18,14 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 
 class KnowledgeRetrievalOrchestratorTest {
 
     @Test
     void shouldRunCorrectiveRetrievalWhenFirstPassIsLowConfidence() {
-        MultiChannelRetrievalEngine retrievalEngine = mock(MultiChannelRetrievalEngine.class);
+        RagRetrievalFacade retrievalFacade = mock(RagRetrievalFacade.class);
         StructuredRuleSupportService structuredRuleSupportService = mock(StructuredRuleSupportService.class);
         AdvancedQueryService advancedQueryService = mock(AdvancedQueryService.class);
         KnowledgeRetrievalPlanner planner = new KnowledgeRetrievalPlanner(advancedQueryService);
@@ -33,7 +33,6 @@ class KnowledgeRetrievalOrchestratorTest {
         KnowledgeRetrievalEvaluator evaluator = new KnowledgeRetrievalEvaluator(chatClient);
         KnowledgeRetrievalTraceService retrievalTraceService = mock(KnowledgeRetrievalTraceService.class);
         AssistantStageTraceService stageTraceService = mock(AssistantStageTraceService.class);
-        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
         when(stageTraceService.startStage(anyString(), anyString(), anyString(), any(), any()))
                 .thenReturn(AssistantStageTraceService.StageSpan.builder().traceId("trace_1").stageKey("TEST").startedAt(System.currentTimeMillis()).build());
 
@@ -53,14 +52,15 @@ class KnowledgeRetrievalOrchestratorTest {
                 .rewrittenQuery("退票规则具体流程是什么怎么查询 reformulated")
                 .sources(List.of())
                 .documents(List.of())
+                .metadata(Map.of("retrievalBoundary", "RagRetrievalFacade"))
                 .build();
         StructuredRuleSupportService.SupportBundle supportBundle = new StructuredRuleSupportService.SupportBundle(List.of(), List.of());
-        when(retrievalEngine.retrieve(any(SearchContext.class))).thenReturn(firstPass, corrected);
+        when(retrievalFacade.retrieve(anyString(), anyInt(), anyBoolean())).thenReturn(firstPass, corrected);
         when(structuredRuleSupportService.lookup("退票规则具体流程是什么怎么查询")).thenReturn(supportBundle);
 
         KnowledgeRetrievalOrchestrator orchestrator = new KnowledgeRetrievalOrchestrator(
-                retrievalEngine, structuredRuleSupportService, planner, evaluator, advancedQueryService,
-                hybridSearchService, retrievalTraceService, stageTraceService);
+                structuredRuleSupportService, planner, evaluator, advancedQueryService,
+                retrievalFacade, retrievalTraceService, stageTraceService);
 
         KnowledgeRetrievalContext context = orchestrator.retrieve(plan);
 
@@ -73,7 +73,7 @@ class KnowledgeRetrievalOrchestratorTest {
 
     @Test
     void shouldResolveAnswerDocumentsWhenEngineOnlyReturnsSources() {
-        MultiChannelRetrievalEngine retrievalEngine = mock(MultiChannelRetrievalEngine.class);
+        RagRetrievalFacade retrievalFacade = mock(RagRetrievalFacade.class);
         StructuredRuleSupportService structuredRuleSupportService = mock(StructuredRuleSupportService.class);
         AdvancedQueryService advancedQueryService = mock(AdvancedQueryService.class);
         KnowledgeRetrievalPlanner planner = new KnowledgeRetrievalPlanner(advancedQueryService);
@@ -81,7 +81,6 @@ class KnowledgeRetrievalOrchestratorTest {
         KnowledgeRetrievalEvaluator evaluator = new KnowledgeRetrievalEvaluator(chatClient);
         KnowledgeRetrievalTraceService retrievalTraceService = mock(KnowledgeRetrievalTraceService.class);
         AssistantStageTraceService stageTraceService = mock(AssistantStageTraceService.class);
-        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
 
         RagSourceVo source = RagSourceVo.builder()
                 .chunkId("chunk-1")
@@ -93,19 +92,19 @@ class KnowledgeRetrievalOrchestratorTest {
                 .build();
         Document doc = new Document("正文", Map.of("chunkId", "chunk-1"));
 
-        when(retrievalEngine.retrieveSimple(any(SearchContext.class))).thenReturn(RagSearchResultVo.builder()
+        when(retrievalFacade.retrieveSimple(anyString(), anyInt())).thenReturn(RagSearchResultVo.builder()
                 .originalQuery("退票")
                 .normalizedQuery("退票")
                 .rewrittenQuery("退票")
                 .sources(List.of(source))
-                .documents(List.of())
+                .documents(List.of(doc))
+                .metadata(Map.of("retrievalBoundary", "RagRetrievalFacade", "documentResolvedByFacade", true))
                 .build());
         when(structuredRuleSupportService.lookup("退票")).thenReturn(new StructuredRuleSupportService.SupportBundle(List.of(), List.of()));
-        when(hybridSearchService.resolveDocuments(List.of(source))).thenReturn(List.of(doc));
 
         KnowledgeRetrievalOrchestrator orchestrator = new KnowledgeRetrievalOrchestrator(
-                retrievalEngine, structuredRuleSupportService, planner, evaluator, advancedQueryService,
-                hybridSearchService, retrievalTraceService, stageTraceService);
+                structuredRuleSupportService, planner, evaluator, advancedQueryService,
+                retrievalFacade, retrievalTraceService, stageTraceService);
 
         KnowledgeRetrievalPlan plan = new KnowledgeRetrievalPlan(
                 "退票", "退票", 4, false, 6, 260, 4000, List.of("退票"), KnowledgeRetrievalPlan.Complexity.SIMPLE);
@@ -113,5 +112,6 @@ class KnowledgeRetrievalOrchestratorTest {
 
         assertEquals(1, context.answerDocuments().size());
         assertEquals("chunk-1", String.valueOf(context.answerDocuments().get(0).getMetadata().get("chunkId")));
+        assertEquals("RagRetrievalFacade", context.searchResult().getMetadata().get("retrievalBoundary"));
     }
 }

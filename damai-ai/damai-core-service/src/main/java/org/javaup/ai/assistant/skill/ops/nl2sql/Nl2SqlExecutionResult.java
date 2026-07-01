@@ -14,6 +14,7 @@ public record Nl2SqlExecutionResult(
         boolean truncated,
         boolean skipped,
         String skipReason,
+        Map<String, Object> costGuard,
         long durationMs
 ) {
 }

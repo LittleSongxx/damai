@@ -28,6 +28,7 @@ import java.util.Map;
 public class CheckpointManager {
 
     private final AiRunMapper runMapper;
+    private final RunGraphStateService runGraphStateService;
 
     /**
      * 在关键节点保存可恢复状态。
@@ -46,6 +47,7 @@ public class CheckpointManager {
         runMapper.update(null, Wrappers.lambdaUpdate(AiRun.class)
                 .eq(AiRun::getRunId, runId)
                 .set(AiRun::getResumableStateJson, JSON.toJSONString(checkpoint)));
+        runGraphStateService.recordCheckpoint(runId, stage, payload);
         log.debug("Checkpoint saved: runId={}, stage={}", runId, stage);
     }
 
@@ -79,6 +81,7 @@ public class CheckpointManager {
         runMapper.update(null, Wrappers.lambdaUpdate(AiRun.class)
                 .eq(AiRun::getRunId, runId)
                 .set(AiRun::getResumableStateJson, null));
+        runGraphStateService.clearCheckpoints(runId);
     }
 
     /**

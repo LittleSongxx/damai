@@ -38,18 +38,6 @@ public class ProgramController {
         this.aiPermissionService = aiPermissionService;
     }
 
-    @RequestMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<ServerSentEvent<String>> chat(@RequestParam("prompt") String prompt,
-                                              @RequestParam("chatId") String chatId) {
-        return streamRun(prompt, chatId, AssistantRouteType.BUSINESS);
-    }
-
-    @RequestMapping(value = "/rag", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<ServerSentEvent<String>> rag(@RequestParam("prompt") String prompt,
-                                             @RequestParam("chatId") String chatId) {
-        return streamRun(prompt, chatId, AssistantRouteType.KNOWLEDGE);
-    }
-
     @RequestMapping(value = "/chat/mcp", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> chatMcp(@RequestParam("prompt") String prompt,
                                                  @RequestParam("chatId") String chatId) {

@@ -22,7 +22,28 @@ public class Nl2SqlProperties {
 
     private int repairAttempts = 1;
 
+    private double minSqlConfidence = 0.5D;
+
     private String schemaCollection = "damai_ai_nl2sql_schema";
+
+    private CostGuard costGuard = new CostGuard();
+
+    private boolean allowJoins = false;
+
+    private boolean allowSubqueries = false;
+
+    private boolean allowCte = false;
+
+    private boolean allowSetOperations = false;
+
+    private boolean allowWindowFunctions = false;
+
+    private List<String> allowedFunctions = new ArrayList<>(List.of(
+            "count", "sum", "avg", "min", "max",
+            "date", "current_date", "current_time", "current_timestamp",
+            "now", "date_sub", "date_add", "hour", "day", "month", "year",
+            "coalesce", "ifnull", "round"
+    ));
 
     private DataSource datasource = new DataSource();
 
@@ -52,6 +73,22 @@ public class Nl2SqlProperties {
         private String username = "";
 
         private String password = "";
+    }
+
+    @Data
+    public static class CostGuard {
+
+        private boolean enabled = true;
+
+        private boolean requireReadOnlyConnection = true;
+
+        private int explainTimeoutMs = 2000;
+
+        private long maxEstimatedRows = 10000;
+
+        private double maxQueryCost = 100000D;
+
+        private boolean failClosedOnExplainError = false;
     }
 
     @Data

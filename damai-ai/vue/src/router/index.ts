@@ -19,13 +19,11 @@ const router = createRouter({
     },
     {
       path: '/damai-ai',
-      name: 'DaMaiAI',
-      component: () => import('../views/DaMaiAi.vue')
+      redirect: '/assistant'
     },
     {
       path: '/damai-rag',
-      name: 'SmartRag',
-      component: () => import('../views/SmartRag.vue')
+      redirect: '/assistant'
     }
   ],
 })

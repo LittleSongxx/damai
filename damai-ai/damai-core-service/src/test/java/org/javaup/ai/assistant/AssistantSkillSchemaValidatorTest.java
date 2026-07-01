@@ -24,7 +24,7 @@ class AssistantSkillSchemaValidatorTest {
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () ->
                 validator.validateInput(descriptor, AssistantSkillContext.of(run(), user(), request)));
 
-        assertEquals("Skill business.program.search input 缺少必填字段: message", exception.getMessage());
+        assertEquals(true, exception.getMessage().contains("JSON Schema 校验失败"));
     }
 
     @Test
@@ -49,7 +49,36 @@ class AssistantSkillSchemaValidatorTest {
                         .message("已找到 3 个节目")
                         .build()));
 
-        assertEquals("Skill business.program.search output 缺少必填字段: responseSummary", exception.getMessage());
+        assertEquals(true, exception.getMessage().contains("JSON Schema 校验失败"));
+    }
+
+    @Test
+    void shouldRejectInputThatViolatesJsonSchemaTypeAndLength() {
+        AssistantSkillDescriptor descriptor = baseDescriptor().toBuilder()
+                .inputSchemaJson("""
+                        {
+                          "type": "object",
+                          "required": ["message"],
+                          "properties": {
+                            "message": {"type": "string", "minLength": 3},
+                            "clientContext": {
+                              "type": "object",
+                              "properties": {
+                                "routeHint": {"type": "string", "enum": ["business", "knowledge"]}
+                              }
+                            }
+                          }
+                        }
+                        """)
+                .build();
+        AssistantRunCreateRequest request = new AssistantRunCreateRequest();
+        request.setMessage("hi");
+        request.setClientContext(java.util.Map.of("routeHint", "ops"));
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () ->
+                validator.validateInput(descriptor, AssistantSkillContext.of(run(), user(), request)));
+
+        assertEquals(true, exception.getMessage().contains("JSON Schema 校验失败"));
     }
 
     private AssistantSkillDescriptor baseDescriptor() {

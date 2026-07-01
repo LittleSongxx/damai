@@ -229,6 +229,8 @@ CREATE TABLE IF NOT EXISTS `d_ai_run` (
   `error_message` text DEFAULT NULL COMMENT '错误信息',
   `event_seq` int DEFAULT 0 COMMENT '当前事件序号',
   `completed_at` datetime DEFAULT NULL COMMENT '完成时间',
+  `resumable_state_json` longtext DEFAULT NULL COMMENT '可恢复执行状态JSON',
+  `resumed` int DEFAULT 0 COMMENT '恢复执行次数',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
   `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
   `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
@@ -253,6 +255,36 @@ CREATE TABLE IF NOT EXISTS `d_ai_run_event` (
   UNIQUE KEY `uk_ai_event_id` (`event_id`),
   KEY `idx_ai_run_event` (`run_id`,`event_order`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='统一助手事件表';
+
+CREATE TABLE IF NOT EXISTS `d_ai_run_graph_node` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `node_id` varchar(128) NOT NULL COMMENT '图节点ID',
+  `run_id` varchar(128) NOT NULL COMMENT 'Run ID',
+  `conversation_id` varchar(128) DEFAULT NULL COMMENT '会话ID',
+  `user_id` bigint DEFAULT NULL COMMENT '用户ID',
+  `node_type` varchar(64) NOT NULL COMMENT '节点类型',
+  `node_label` varchar(128) DEFAULT NULL COMMENT '节点展示名称',
+  `graph_order` int DEFAULT 0 COMMENT '图节点排序',
+  `node_status` varchar(32) NOT NULL COMMENT '节点状态',
+  `latest_event_id` varchar(128) DEFAULT NULL COMMENT '最近事件ID',
+  `latest_event_type` varchar(64) DEFAULT NULL COMMENT '最近事件类型',
+  `latest_event_order` int DEFAULT NULL COMMENT '最近事件顺序',
+  `checkpoint_id` varchar(192) DEFAULT NULL COMMENT '检查点ID',
+  `checkpoint_stage` varchar(64) DEFAULT NULL COMMENT '检查点阶段',
+  `state_json` longtext DEFAULT NULL COMMENT '节点状态JSON',
+  `input_summary` text DEFAULT NULL COMMENT '输入摘要',
+  `output_summary` text DEFAULT NULL COMMENT '输出摘要',
+  `risk_level` varchar(32) DEFAULT 'LOW' COMMENT '风险等级',
+  `trace_ref` varchar(128) DEFAULT NULL COMMENT '链路引用',
+  `started_at` datetime DEFAULT NULL COMMENT '开始时间',
+  `completed_at` datetime DEFAULT NULL COMMENT '完成时间',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ai_run_graph_node` (`run_id`,`node_id`),
+  KEY `idx_ai_run_graph_status` (`run_id`,`node_status`,`graph_order`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='统一助手运行图节点表';
 
 CREATE TABLE IF NOT EXISTS `d_ai_action` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
@@ -470,21 +502,147 @@ CREATE TABLE IF NOT EXISTS `d_ai_feedback` (
   KEY `idx_ai_feedback_user` (`user_id`,`create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI用户反馈表';
 
+CREATE TABLE IF NOT EXISTS `d_ai_sentiment_record` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `record_id` varchar(128) NOT NULL COMMENT '情绪记录ID',
+  `run_id` varchar(128) DEFAULT NULL COMMENT '关联Run ID',
+  `conversation_id` varchar(191) DEFAULT NULL COMMENT '会话ID',
+  `user_id` bigint DEFAULT NULL COMMENT '用户ID',
+  `user_message` varchar(500) DEFAULT NULL COMMENT '用户消息',
+  `sentiment` varchar(32) DEFAULT 'NEUTRAL' COMMENT '情绪:POSITIVE/NEUTRAL/NEGATIVE',
+  `intensity` double DEFAULT 0 COMMENT '情绪强度',
+  `is_urgent` tinyint(1) DEFAULT 0 COMMENT '是否紧急',
+  `emotion_tags_json` text DEFAULT NULL COMMENT '情绪标签JSON',
+  `escalation_triggered` tinyint(1) DEFAULT 0 COMMENT '是否触发升级',
+  `escalation_reason` varchar(1000) DEFAULT NULL COMMENT '升级原因',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ai_sentiment_record_id` (`record_id`),
+  KEY `idx_ai_sentiment_user` (`user_id`,`create_time`),
+  KEY `idx_ai_sentiment_run` (`run_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI客服情绪记录表';
+
+CREATE TABLE IF NOT EXISTS `d_ai_escalation_ticket` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `ticket_id` varchar(128) NOT NULL COMMENT '工单ID',
+  `run_id` varchar(128) DEFAULT NULL COMMENT '关联Run ID',
+  `conversation_id` varchar(191) DEFAULT NULL COMMENT '会话ID',
+  `user_id` bigint DEFAULT NULL COMMENT '用户ID',
+  `escalation_type` varchar(64) DEFAULT NULL COMMENT '升级类型',
+  `priority` varchar(32) DEFAULT 'LOW' COMMENT '优先级:LOW/MEDIUM/HIGH/CRITICAL',
+  `ticket_status` varchar(32) DEFAULT 'OPEN' COMMENT '状态:OPEN/ASSIGNED/IN_PROGRESS/RESOLVED',
+  `ai_diagnosis` text DEFAULT NULL COMMENT 'AI诊断',
+  `dialogue_summary` mediumtext DEFAULT NULL COMMENT '对话摘要',
+  `context_json` mediumtext DEFAULT NULL COMMENT '客服上下文JSON',
+  `sentiment` varchar(32) DEFAULT NULL COMMENT '情绪标签',
+  `intent_code` varchar(64) DEFAULT NULL COMMENT '客服意图',
+  `suggested_reply` text DEFAULT NULL COMMENT '建议人工回复',
+  `assigned_to` bigint DEFAULT NULL COMMENT '分配坐席',
+  `resolution` text DEFAULT NULL COMMENT '处理结果',
+  `resolved_at` datetime DEFAULT NULL COMMENT '解决时间',
+  `resolved_by` bigint DEFAULT NULL COMMENT '解决人',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ai_escalation_ticket_id` (`ticket_id`),
+  KEY `idx_ai_escalation_run` (`run_id`,`ticket_status`),
+  KEY `idx_ai_escalation_user` (`user_id`,`create_time`),
+  KEY `idx_ai_escalation_customer` (`priority`,`sentiment`,`intent_code`,`ticket_status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI客服升级工单表';
+
+CREATE TABLE IF NOT EXISTS `d_ai_customer_hot_question` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `question_id` varchar(128) NOT NULL COMMENT '高频问题ID',
+  `scene` varchar(64) NOT NULL DEFAULT 'customer_service' COMMENT '场景',
+  `display_text` varchar(255) NOT NULL COMMENT '前端展示文本',
+  `query_text` varchar(500) DEFAULT NULL COMMENT '实际提问文本',
+  `intent_code` varchar(64) DEFAULT NULL COMMENT '客服意图',
+  `route_hint` varchar(64) DEFAULT NULL COMMENT '路由提示',
+  `answer_mode` varchar(32) DEFAULT 'RUN_ASSISTANT' COMMENT 'CACHED_ANSWER/RUN_ASSISTANT/LINK',
+  `cached_answer_json` mediumtext DEFAULT NULL COMMENT '缓存答案卡片JSON',
+  `source_refs_json` text DEFAULT NULL COMMENT '引用来源JSON',
+  `tags_json` text DEFAULT NULL COMMENT '标签JSON',
+  `priority` int DEFAULT 100 COMMENT '优先级',
+  `enabled` tinyint(1) DEFAULT 1 COMMENT '是否启用',
+  `cache_version` int DEFAULT 1 COMMENT '缓存版本',
+  `expire_at` datetime DEFAULT NULL COMMENT '过期时间',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ai_customer_hot_question_id` (`question_id`),
+  KEY `idx_ai_customer_hot_scene` (`scene`,`enabled`,`priority`),
+  KEY `idx_ai_customer_hot_intent` (`intent_code`,`enabled`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI客服高频问题与秒答缓存表';
+
+CREATE TABLE IF NOT EXISTS `d_ai_customer_service_metric_event` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `metric_id` varchar(128) NOT NULL COMMENT '指标事件ID',
+  `run_id` varchar(128) DEFAULT NULL COMMENT '关联Run ID',
+  `conversation_id` varchar(191) DEFAULT NULL COMMENT '会话ID',
+  `user_id` bigint DEFAULT NULL COMMENT '用户ID',
+  `metric_type` varchar(64) NOT NULL COMMENT '指标类型',
+  `metric_value` double DEFAULT 0 COMMENT '指标值',
+  `latency_ms` bigint DEFAULT NULL COMMENT '耗时ms',
+  `dimensions_json` text DEFAULT NULL COMMENT '维度JSON',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ai_customer_metric_id` (`metric_id`),
+  KEY `idx_ai_customer_metric_type` (`metric_type`,`create_time`),
+  KEY `idx_ai_customer_metric_run` (`run_id`),
+  KEY `idx_ai_customer_metric_user` (`user_id`,`create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI客服体验指标事件表';
+
 CREATE TABLE IF NOT EXISTS `d_ai_prompt_version` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
   `prompt_key` varchar(128) NOT NULL COMMENT 'Prompt标识',
   `version` int NOT NULL DEFAULT 1 COMMENT '版本号',
   `template` longtext NOT NULL COMMENT 'Prompt模板内容',
   `description` varchar(512) DEFAULT NULL COMMENT '描述',
-  `active` tinyint(1) DEFAULT '1' COMMENT '是否活跃',
+  `active` tinyint(1) DEFAULT '0' COMMENT '是否活跃',
+  `traffic_percent` int DEFAULT '0' COMMENT '灰度流量比例',
+  `rollout_status` varchar(32) DEFAULT 'DRAFT' COMMENT '发布状态:DRAFT/STABLE/GRADUAL/SUPERSEDED/ROLLED_BACK',
+  `baseline_eval_run_id` varchar(128) DEFAULT NULL COMMENT '发布关联baseline评测Run',
+  `release_note` varchar(1000) DEFAULT NULL COMMENT '发布说明',
+  `released_by` bigint DEFAULT NULL COMMENT '发布人',
+  `released_at` datetime DEFAULT NULL COMMENT '发布时间',
+  `rollback_from_version` varchar(32) DEFAULT NULL COMMENT '回滚前版本',
+  `rollback_reason` varchar(1000) DEFAULT NULL COMMENT '回滚原因',
   `created_by` bigint DEFAULT NULL COMMENT '创建者',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
   `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
   `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_ai_prompt_key_version` (`prompt_key`,`version`),
-  KEY `idx_ai_prompt_active` (`prompt_key`,`active`)
+  KEY `idx_ai_prompt_active` (`prompt_key`,`active`,`rollout_status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI Prompt版本管理表';
+
+CREATE TABLE IF NOT EXISTS `d_ai_prompt_release_record` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `release_id` varchar(128) NOT NULL COMMENT '发布记录ID',
+  `prompt_key` varchar(128) NOT NULL COMMENT 'Prompt标识',
+  `from_version` int DEFAULT NULL COMMENT '来源版本',
+  `to_version` int NOT NULL COMMENT '目标版本',
+  `action_type` varchar(32) NOT NULL COMMENT '动作:PUBLISH/ROLLBACK',
+  `rollout_status` varchar(32) DEFAULT NULL COMMENT '发布状态',
+  `traffic_percent` int DEFAULT NULL COMMENT '流量比例',
+  `baseline_eval_run_id` varchar(128) DEFAULT NULL COMMENT 'baseline评测Run',
+  `release_note` varchar(1000) DEFAULT NULL COMMENT '发布说明',
+  `release_evidence_json` json DEFAULT NULL COMMENT '发布质量门禁与回滚证据',
+  `rollback_reason` varchar(1000) DEFAULT NULL COMMENT '回滚原因',
+  `operator_id` bigint DEFAULT NULL COMMENT '操作人',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ai_prompt_release_id` (`release_id`),
+  KEY `idx_ai_prompt_release_key` (`prompt_key`,`create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI Prompt发布回滚记录表';
 
 CREATE TABLE IF NOT EXISTS `d_ai_rag_eval_case` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
@@ -662,6 +820,13 @@ CREATE TABLE IF NOT EXISTS `d_ai_rag_eval_result` (
   `citation_coverage` double DEFAULT NULL COMMENT '引用覆盖率',
   `refusal_correctness` double DEFAULT NULL COMMENT '拒答正确性',
   `safety_score` double DEFAULT NULL COMMENT '安全合规评分',
+  `judge_relevance` double DEFAULT NULL COMMENT '结构化Judge相关性',
+  `judge_coverage` double DEFAULT NULL COMMENT '结构化Judge覆盖度',
+  `judge_contradiction` double DEFAULT NULL COMMENT '结构化Judge矛盾风险',
+  `judge_citation_support` double DEFAULT NULL COMMENT '结构化Judge引用支撑',
+  `judge_answerability` double DEFAULT NULL COMMENT '结构化Judge可回答性',
+  `judge_refusal_reason` text DEFAULT NULL COMMENT '结构化Judge拒答原因',
+  `judge_structured_output` mediumtext DEFAULT NULL COMMENT '结构化Judge输出',
   `input_tokens` int DEFAULT NULL COMMENT '输入Token',
   `output_tokens` int DEFAULT NULL COMMENT '输出Token',
   `total_tokens` int DEFAULT NULL COMMENT '总Token',
@@ -749,6 +914,9 @@ CREATE TABLE IF NOT EXISTS `d_ai_rag_bad_case` (
   `converted_to_eval_case` tinyint(1) DEFAULT 0 COMMENT '是否已转评测用例',
   `converted_case_id` varchar(128) DEFAULT NULL COMMENT '转换后的用例ID',
   `review_status` varchar(32) DEFAULT 'PENDING' COMMENT '审核状态',
+  `reviewed_by` bigint DEFAULT NULL COMMENT '审核人',
+  `reviewed_at` datetime DEFAULT NULL COMMENT '审核时间',
+  `review_note` text DEFAULT NULL COMMENT '审核说明',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
   `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
   `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
@@ -756,7 +924,8 @@ CREATE TABLE IF NOT EXISTS `d_ai_rag_bad_case` (
   UNIQUE KEY `uk_ai_rag_bad_case` (`bad_case_id`),
   KEY `idx_ai_rag_bad_case_trace` (`trace_id`),
   KEY `idx_ai_rag_bad_case_failure` (`failure_type`),
-  KEY `idx_ai_rag_bad_case_converted` (`converted_to_eval_case`)
+  KEY `idx_ai_rag_bad_case_converted` (`converted_to_eval_case`),
+  KEY `idx_ai_rag_bad_case_review` (`review_status`,`reviewed_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='RAG Bad Case回流表';
 
 CREATE TABLE IF NOT EXISTS `d_ai_nl2sql_eval_case` (
@@ -764,6 +933,7 @@ CREATE TABLE IF NOT EXISTS `d_ai_nl2sql_eval_case` (
   `case_id` varchar(128) NOT NULL COMMENT '用例ID',
   `question` text NOT NULL COMMENT '自然语言问题',
   `expected_sql` text DEFAULT NULL COMMENT '期望SQL(可选,用于精确匹配评测)',
+  `expected_result_json` text DEFAULT NULL COMMENT '期望结果集JSON(用于结果等价评测)',
   `expected_table_names` varchar(512) DEFAULT NULL COMMENT '期望涉及的表名(逗号分隔)',
   `category` varchar(64) DEFAULT NULL COMMENT '分类: order/sales/pay/refund/api/mq/cost',
   `difficulty` varchar(16) DEFAULT 'medium' COMMENT '难度: easy/medium/hard',
@@ -784,7 +954,14 @@ CREATE TABLE IF NOT EXISTS `d_ai_nl2sql_eval_run` (
   `sql_validity_rate` double DEFAULT NULL COMMENT 'SQL合法性通过率(SQL Validity)',
   `execution_accuracy` double DEFAULT NULL COMMENT '执行准确率(Execution Accuracy)',
   `exact_match_rate` double DEFAULT NULL COMMENT 'SQL精确匹配率(Exact Set Match)',
+  `result_set_equivalence_rate` double DEFAULT NULL COMMENT '结果集等价率',
+  `schema_link_precision` double DEFAULT NULL COMMENT 'Schema Linking Precision',
+  `schema_link_recall` double DEFAULT NULL COMMENT 'Schema Linking Recall',
+  `repair_success_rate` double DEFAULT NULL COMMENT '修复成功率',
+  `unsafe_rejection_rate` double DEFAULT NULL COMMENT '危险请求拒绝率',
+  `low_confidence_clarification_rate` double DEFAULT NULL COMMENT '低置信澄清率',
   `avg_latency_ms` double DEFAULT NULL COMMENT '平均延迟ms',
+  `avg_estimated_cost` double DEFAULT NULL COMMENT '平均预估成本',
   `run_status` varchar(32) DEFAULT 'RUNNING' COMMENT '状态',
   `error_message` text DEFAULT NULL COMMENT '错误信息',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
@@ -803,9 +980,20 @@ CREATE TABLE IF NOT EXISTS `d_ai_nl2sql_eval_result` (
   `is_valid_sql` tinyint(1) DEFAULT NULL COMMENT 'SQL是否通过安全校验',
   `execute_success` tinyint(1) DEFAULT NULL COMMENT 'SQL是否执行成功',
   `exact_match` tinyint(1) DEFAULT NULL COMMENT '是否与expected_sql精确匹配',
+  `result_set_equivalent` tinyint(1) DEFAULT NULL COMMENT '结果集是否等价',
+  `unsafe_rejected` tinyint(1) DEFAULT NULL COMMENT '是否拒绝危险请求',
+  `low_confidence_clarified` tinyint(1) DEFAULT NULL COMMENT '是否低置信澄清',
+  `repair_attempted` tinyint(1) DEFAULT NULL COMMENT '是否尝试修复',
+  `repair_succeeded` tinyint(1) DEFAULT NULL COMMENT '是否修复成功',
+  `schema_link_precision` double DEFAULT NULL COMMENT 'Schema Linking Precision',
+  `schema_link_recall` double DEFAULT NULL COMMENT 'Schema Linking Recall',
+  `estimated_cost` double DEFAULT NULL COMMENT '预估成本',
   `latency_ms` bigint DEFAULT NULL COMMENT '延迟ms',
   `error_message` text DEFAULT NULL COMMENT '错误信息',
   `eval_method` varchar(32) DEFAULT NULL COMMENT '评估方法',
+  `safety_report_json` text DEFAULT NULL COMMENT '安全报告JSON',
+  `schema_linking_evidence_json` text DEFAULT NULL COMMENT 'Schema Linking证据JSON',
+  `repair_trace_json` text DEFAULT NULL COMMENT '修复轨迹JSON',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
   `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
   `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
@@ -843,12 +1031,402 @@ SET @sql := IF(
     SELECT 1
     FROM INFORMATION_SCHEMA.COLUMNS
     WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_escalation_ticket'
+      AND COLUMN_NAME = 'context_json'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_escalation_ticket` ADD COLUMN `context_json` mediumtext DEFAULT NULL COMMENT ''客服上下文JSON'' AFTER `dialogue_summary`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_escalation_ticket'
+      AND COLUMN_NAME = 'sentiment'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_escalation_ticket` ADD COLUMN `sentiment` varchar(32) DEFAULT NULL COMMENT ''情绪标签'' AFTER `context_json`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_escalation_ticket'
+      AND COLUMN_NAME = 'intent_code'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_escalation_ticket` ADD COLUMN `intent_code` varchar(64) DEFAULT NULL COMMENT ''客服意图'' AFTER `sentiment`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_escalation_ticket'
+      AND COLUMN_NAME = 'suggested_reply'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_escalation_ticket` ADD COLUMN `suggested_reply` text DEFAULT NULL COMMENT ''建议人工回复'' AFTER `intent_code`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.STATISTICS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_escalation_ticket'
+      AND INDEX_NAME = 'idx_ai_escalation_customer'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_escalation_ticket` ADD KEY `idx_ai_escalation_customer` (`priority`,`sentiment`,`intent_code`,`ticket_status`)'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
       AND TABLE_NAME = 'd_ai_run'
       AND COLUMN_NAME = 'event_seq'
   ),
   'SELECT 1',
   'ALTER TABLE `d_ai_run` ADD COLUMN `event_seq` int DEFAULT 0 COMMENT ''当前事件序号'' AFTER `error_message`'
 );
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_run'
+      AND COLUMN_NAME = 'resumable_state_json'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_run` ADD COLUMN `resumable_state_json` longtext DEFAULT NULL COMMENT ''可恢复执行状态JSON'' AFTER `completed_at`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_run'
+      AND COLUMN_NAME = 'resumed'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_run` ADD COLUMN `resumed` int DEFAULT 0 COMMENT ''恢复执行次数'' AFTER `resumable_state_json`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_prompt_version'
+      AND COLUMN_NAME = 'traffic_percent'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_prompt_version` ADD COLUMN `traffic_percent` int DEFAULT 0 COMMENT ''灰度流量比例'' AFTER `active`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_prompt_version'
+      AND COLUMN_NAME = 'rollout_status'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_prompt_version` ADD COLUMN `rollout_status` varchar(32) DEFAULT ''DRAFT'' COMMENT ''发布状态:DRAFT/STABLE/GRADUAL/SUPERSEDED/ROLLED_BACK'' AFTER `traffic_percent`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_prompt_version'
+      AND COLUMN_NAME = 'baseline_eval_run_id'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_prompt_version` ADD COLUMN `baseline_eval_run_id` varchar(128) DEFAULT NULL COMMENT ''发布关联baseline评测Run'' AFTER `rollout_status`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_prompt_version'
+      AND COLUMN_NAME = 'release_note'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_prompt_version` ADD COLUMN `release_note` varchar(1000) DEFAULT NULL COMMENT ''发布说明'' AFTER `baseline_eval_run_id`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_prompt_version'
+      AND COLUMN_NAME = 'released_by'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_prompt_version` ADD COLUMN `released_by` bigint DEFAULT NULL COMMENT ''发布人'' AFTER `release_note`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_prompt_version'
+      AND COLUMN_NAME = 'released_at'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_prompt_version` ADD COLUMN `released_at` datetime DEFAULT NULL COMMENT ''发布时间'' AFTER `released_by`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_prompt_version'
+      AND COLUMN_NAME = 'rollback_from_version'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_prompt_version` ADD COLUMN `rollback_from_version` varchar(32) DEFAULT NULL COMMENT ''回滚前版本'' AFTER `released_at`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_prompt_version'
+      AND COLUMN_NAME = 'rollback_reason'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_prompt_version` ADD COLUMN `rollback_reason` varchar(1000) DEFAULT NULL COMMENT ''回滚原因'' AFTER `rollback_from_version`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_prompt_release_record'
+      AND COLUMN_NAME = 'release_evidence_json'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_prompt_release_record` ADD COLUMN `release_evidence_json` json DEFAULT NULL COMMENT ''发布质量门禁与回滚证据'' AFTER `release_note`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_rag_bad_case'
+      AND COLUMN_NAME = 'reviewed_by'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_rag_bad_case` ADD COLUMN `reviewed_by` bigint DEFAULT NULL COMMENT ''审核人'' AFTER `review_status`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_rag_bad_case'
+      AND COLUMN_NAME = 'reviewed_at'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_rag_bad_case` ADD COLUMN `reviewed_at` datetime DEFAULT NULL COMMENT ''审核时间'' AFTER `reviewed_by`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_rag_bad_case'
+      AND COLUMN_NAME = 'review_note'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_rag_bad_case` ADD COLUMN `review_note` text DEFAULT NULL COMMENT ''审核说明'' AFTER `reviewed_at`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema
+      AND TABLE_NAME = 'd_ai_nl2sql_eval_case'
+      AND COLUMN_NAME = 'expected_result_json'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_nl2sql_eval_case` ADD COLUMN `expected_result_json` text DEFAULT NULL COMMENT ''期望结果集JSON(用于结果等价评测)'' AFTER `expected_sql`'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(EXISTS(SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_nl2sql_eval_run' AND COLUMN_NAME = 'result_set_equivalence_rate'), 'SELECT 1', 'ALTER TABLE `d_ai_nl2sql_eval_run` ADD COLUMN `result_set_equivalence_rate` double DEFAULT NULL COMMENT ''结果集等价率'' AFTER `exact_match_rate`');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(EXISTS(SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_nl2sql_eval_run' AND COLUMN_NAME = 'schema_link_precision'), 'SELECT 1', 'ALTER TABLE `d_ai_nl2sql_eval_run` ADD COLUMN `schema_link_precision` double DEFAULT NULL COMMENT ''Schema Linking Precision'' AFTER `result_set_equivalence_rate`');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(EXISTS(SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_nl2sql_eval_run' AND COLUMN_NAME = 'schema_link_recall'), 'SELECT 1', 'ALTER TABLE `d_ai_nl2sql_eval_run` ADD COLUMN `schema_link_recall` double DEFAULT NULL COMMENT ''Schema Linking Recall'' AFTER `schema_link_precision`');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(EXISTS(SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_nl2sql_eval_run' AND COLUMN_NAME = 'repair_success_rate'), 'SELECT 1', 'ALTER TABLE `d_ai_nl2sql_eval_run` ADD COLUMN `repair_success_rate` double DEFAULT NULL COMMENT ''修复成功率'' AFTER `schema_link_recall`');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(EXISTS(SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_nl2sql_eval_run' AND COLUMN_NAME = 'unsafe_rejection_rate'), 'SELECT 1', 'ALTER TABLE `d_ai_nl2sql_eval_run` ADD COLUMN `unsafe_rejection_rate` double DEFAULT NULL COMMENT ''危险请求拒绝率'' AFTER `repair_success_rate`');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(EXISTS(SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_nl2sql_eval_run' AND COLUMN_NAME = 'low_confidence_clarification_rate'), 'SELECT 1', 'ALTER TABLE `d_ai_nl2sql_eval_run` ADD COLUMN `low_confidence_clarification_rate` double DEFAULT NULL COMMENT ''低置信澄清率'' AFTER `unsafe_rejection_rate`');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(EXISTS(SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_nl2sql_eval_run' AND COLUMN_NAME = 'avg_estimated_cost'), 'SELECT 1', 'ALTER TABLE `d_ai_nl2sql_eval_run` ADD COLUMN `avg_estimated_cost` double DEFAULT NULL COMMENT ''平均预估成本'' AFTER `avg_latency_ms`');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(EXISTS(SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_nl2sql_eval_result' AND COLUMN_NAME = 'result_set_equivalent'), 'SELECT 1', 'ALTER TABLE `d_ai_nl2sql_eval_result` ADD COLUMN `result_set_equivalent` tinyint(1) DEFAULT NULL COMMENT ''结果集是否等价'' AFTER `exact_match`');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(EXISTS(SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_nl2sql_eval_result' AND COLUMN_NAME = 'unsafe_rejected'), 'SELECT 1', 'ALTER TABLE `d_ai_nl2sql_eval_result` ADD COLUMN `unsafe_rejected` tinyint(1) DEFAULT NULL COMMENT ''是否拒绝危险请求'' AFTER `result_set_equivalent`');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(EXISTS(SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_nl2sql_eval_result' AND COLUMN_NAME = 'low_confidence_clarified'), 'SELECT 1', 'ALTER TABLE `d_ai_nl2sql_eval_result` ADD COLUMN `low_confidence_clarified` tinyint(1) DEFAULT NULL COMMENT ''是否低置信澄清'' AFTER `unsafe_rejected`');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(EXISTS(SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_nl2sql_eval_result' AND COLUMN_NAME = 'repair_attempted'), 'SELECT 1', 'ALTER TABLE `d_ai_nl2sql_eval_result` ADD COLUMN `repair_attempted` tinyint(1) DEFAULT NULL COMMENT ''是否尝试修复'' AFTER `low_confidence_clarified`');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(EXISTS(SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_nl2sql_eval_result' AND COLUMN_NAME = 'repair_succeeded'), 'SELECT 1', 'ALTER TABLE `d_ai_nl2sql_eval_result` ADD COLUMN `repair_succeeded` tinyint(1) DEFAULT NULL COMMENT ''是否修复成功'' AFTER `repair_attempted`');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(EXISTS(SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_nl2sql_eval_result' AND COLUMN_NAME = 'schema_link_precision'), 'SELECT 1', 'ALTER TABLE `d_ai_nl2sql_eval_result` ADD COLUMN `schema_link_precision` double DEFAULT NULL COMMENT ''Schema Linking Precision'' AFTER `repair_succeeded`');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(EXISTS(SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_nl2sql_eval_result' AND COLUMN_NAME = 'schema_link_recall'), 'SELECT 1', 'ALTER TABLE `d_ai_nl2sql_eval_result` ADD COLUMN `schema_link_recall` double DEFAULT NULL COMMENT ''Schema Linking Recall'' AFTER `schema_link_precision`');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(EXISTS(SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_nl2sql_eval_result' AND COLUMN_NAME = 'estimated_cost'), 'SELECT 1', 'ALTER TABLE `d_ai_nl2sql_eval_result` ADD COLUMN `estimated_cost` double DEFAULT NULL COMMENT ''预估成本'' AFTER `schema_link_recall`');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(EXISTS(SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_nl2sql_eval_result' AND COLUMN_NAME = 'safety_report_json'), 'SELECT 1', 'ALTER TABLE `d_ai_nl2sql_eval_result` ADD COLUMN `safety_report_json` text DEFAULT NULL COMMENT ''安全报告JSON'' AFTER `eval_method`');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(EXISTS(SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_nl2sql_eval_result' AND COLUMN_NAME = 'schema_linking_evidence_json'), 'SELECT 1', 'ALTER TABLE `d_ai_nl2sql_eval_result` ADD COLUMN `schema_linking_evidence_json` text DEFAULT NULL COMMENT ''Schema Linking证据JSON'' AFTER `safety_report_json`');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(EXISTS(SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_nl2sql_eval_result' AND COLUMN_NAME = 'repair_trace_json'), 'SELECT 1', 'ALTER TABLE `d_ai_nl2sql_eval_result` ADD COLUMN `repair_trace_json` text DEFAULT NULL COMMENT ''修复轨迹JSON'' AFTER `schema_linking_evidence_json`');
 PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
@@ -1019,6 +1597,76 @@ SET @sql := IF(
   ),
   'SELECT 1',
   'ALTER TABLE `d_ai_rag_eval_result` ADD COLUMN `context_precision` double DEFAULT NULL COMMENT ''RAGAS上下文精度'' AFTER `faithfulness_score`'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_rag_eval_result' AND COLUMN_NAME = 'judge_relevance'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_rag_eval_result` ADD COLUMN `judge_relevance` double DEFAULT NULL COMMENT ''结构化Judge相关性'' AFTER `safety_score`'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_rag_eval_result' AND COLUMN_NAME = 'judge_coverage'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_rag_eval_result` ADD COLUMN `judge_coverage` double DEFAULT NULL COMMENT ''结构化Judge覆盖度'' AFTER `judge_relevance`'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_rag_eval_result' AND COLUMN_NAME = 'judge_contradiction'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_rag_eval_result` ADD COLUMN `judge_contradiction` double DEFAULT NULL COMMENT ''结构化Judge矛盾风险'' AFTER `judge_coverage`'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_rag_eval_result' AND COLUMN_NAME = 'judge_citation_support'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_rag_eval_result` ADD COLUMN `judge_citation_support` double DEFAULT NULL COMMENT ''结构化Judge引用支撑'' AFTER `judge_contradiction`'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_rag_eval_result' AND COLUMN_NAME = 'judge_answerability'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_rag_eval_result` ADD COLUMN `judge_answerability` double DEFAULT NULL COMMENT ''结构化Judge可回答性'' AFTER `judge_citation_support`'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_rag_eval_result' AND COLUMN_NAME = 'judge_refusal_reason'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_rag_eval_result` ADD COLUMN `judge_refusal_reason` text DEFAULT NULL COMMENT ''结构化Judge拒答原因'' AFTER `judge_answerability`'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := IF(
+  EXISTS(
+    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = @damai_ai_schema AND TABLE_NAME = 'd_ai_rag_eval_result' AND COLUMN_NAME = 'judge_structured_output'
+  ),
+  'SELECT 1',
+  'ALTER TABLE `d_ai_rag_eval_result` ADD COLUMN `judge_structured_output` mediumtext DEFAULT NULL COMMENT ''结构化Judge输出'' AFTER `judge_refusal_reason`'
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 

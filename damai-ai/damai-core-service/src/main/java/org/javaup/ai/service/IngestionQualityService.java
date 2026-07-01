@@ -5,6 +5,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.entity.RagChunk;
 import org.javaup.ai.mapper.RagChunkMapper;
+import org.javaup.ai.rag.RagRetrievalFacade;
+import org.javaup.ai.vo.RagSearchResultVo;
 import org.javaup.ai.vo.RagSourceVo;
 import org.springframework.stereotype.Service;
 
@@ -26,7 +28,7 @@ import java.util.Map;
 public class IngestionQualityService {
 
     private final RagChunkMapper chunkMapper;
-    private final HybridSearchService hybridSearchService;
+    private final RagRetrievalFacade retrievalFacade;
 
     private static final int MIN_CHUNK_TEXT_LENGTH = 20;
     private static final int MAX_EMPTY_METADATA_RATIO = 5;
@@ -158,7 +160,10 @@ public class IngestionQualityService {
 
         for (String query : testQueries) {
             try {
-                List<RagSourceVo> results = hybridSearchService.denseSearch(query, 5);
+                RagSearchResultVo searchResult = retrievalFacade.retrieveSimple(query, 5);
+                List<RagSourceVo> results = searchResult != null && searchResult.getSources() != null
+                        ? searchResult.getSources()
+                        : List.of();
                 boolean hasResults = !results.isEmpty();
                 if (hasResults) covered++;
 
@@ -167,6 +172,10 @@ public class IngestionQualityService {
                 detail.put("resultCount", results.size());
                 detail.put("topScore", results.isEmpty() ? 0 : results.get(0).getScore());
                 detail.put("covered", hasResults);
+                if (searchResult != null && searchResult.getMetadata() != null) {
+                    detail.put("retrievalBoundary", searchResult.getMetadata().get("retrievalBoundary"));
+                    detail.put("retrievalMode", searchResult.getMetadata().get("retrievalMode"));
+                }
                 details.add(detail);
             } catch (Exception e) {
                 log.warn("Coverage check failed for query '{}': {}", query, e.getMessage());

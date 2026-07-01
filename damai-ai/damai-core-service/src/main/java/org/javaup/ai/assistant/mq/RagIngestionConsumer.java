@@ -38,8 +38,8 @@ public class RagIngestionConsumer {
         try {
             log.info("Processing RAG ingestion task: type={}, taskId={}", msg.getTaskType(), msg.getTaskId());
             switch (msg.getTaskType()) {
-                case "full" -> ingestionService.reindexAll();
-                case "incremental" -> ingestionService.incrementalReindex();
+                case "full" -> ingestionService.reindexAll(msg.getTaskId());
+                case "incremental" -> ingestionService.incrementalReindex(msg.getTaskId());
                 default -> log.warn("Unknown RAG ingestion task type: {}", msg.getTaskType());
             }
             channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);

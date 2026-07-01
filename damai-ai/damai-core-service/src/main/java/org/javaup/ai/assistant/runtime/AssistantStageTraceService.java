@@ -128,6 +128,10 @@ public class AssistantStageTraceService {
                         "traceId", span.traceId(),
                         "stageKey", span.stageKey(),
                         "latencyMs", latencyMs,
+                        "promptTokens", promptTokens == null ? 0 : promptTokens,
+                        "completionTokens", completionTokens == null ? 0 : completionTokens,
+                        "totalTokens", totalTokens == null ? 0 : totalTokens,
+                        "estimatedCost", estimatedCost == null ? "" : estimatedCost.toPlainString(),
                         "metadata", mergedMetadata
                 ));
             } else {

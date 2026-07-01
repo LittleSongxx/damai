@@ -3,9 +3,10 @@ const DAMAI_PRO_LOGIN_URL = import.meta.env.VITE_DAMAI_PRO_LOGIN_URL || 'http://
 const TIMEOUT = 30000
 
 class APIError extends Error {
-  constructor(message, status) {
+  constructor(message, status, payload = null) {
     super(message)
     this.status = status
+    this.payload = payload
     this.name = 'APIError'
   }
 }
@@ -64,8 +65,9 @@ async function fetchWithTimeout(url, options = {}) {
         ensureAuthenticated()
       }
       let message = `HTTP error! status: ${response.status}`
+      let payload = null
       try {
-        const payload = await response.clone().json()
+        payload = await response.clone().json()
         message = payload?.message || payload?.data?.message || payload?.error || message
       } catch (error) {
         const text = await response.clone().text()
@@ -73,7 +75,7 @@ async function fetchWithTimeout(url, options = {}) {
           message = text
         }
       }
-      throw new APIError(message, response.status)
+      throw new APIError(message, response.status, payload)
     }
 
     return response
@@ -210,14 +212,6 @@ export const chatAPI = {
     }))
   },
 
-  async sendAssistantMessage(prompt, chatId) {
-    return streamRequest('/program/chat', { prompt, chatId })
-  },
-
-  async sendRagMessage(prompt, chatId) {
-    return streamRequest('/program/rag', { prompt, chatId })
-  },
-
   async sendAnalysisMessage(prompt, chatId) {
     return streamRequest('/program/chat/mcp', { prompt, chatId })
   },
@@ -292,6 +286,25 @@ export const assistantAPI = {
     return response.json()
   },
 
+  async getRunGraph(runId) {
+    const response = await fetchWithTimeout(buildUrl(`/assistant/runs/${runId}/graph`))
+    return response.json()
+  },
+
+  async resumeRun(runId) {
+    const response = await fetchWithTimeout(buildUrl(`/assistant/runs/${runId}/resume`), {
+      method: 'POST'
+    })
+    return response.json()
+  },
+
+  async replayRun(runId) {
+    const response = await fetchWithTimeout(buildUrl(`/assistant/runs/${runId}/replay`), {
+      method: 'POST'
+    })
+    return response.json()
+  },
+
   async listConversations() {
     const response = await fetchWithTimeout(buildUrl('/assistant/conversations'))
     return response.json()
@@ -342,6 +355,216 @@ export const assistantAPI = {
       method: 'POST'
     })
     return response.json()
+  },
+
+  async runEvalSuite(suite, payload = {}) {
+    return requestJson(`/assistant/evals/${suite}/run`, {
+      method: 'POST',
+      body: payload
+    })
+  },
+
+  async getEvalRun(suite, evalRunId) {
+    const response = await fetchWithTimeout(buildUrl(`/assistant/evals/${suite}/runs/${evalRunId}`))
+    return response.json()
+  },
+
+  async getQualityGate() {
+    const response = await fetchWithTimeout(buildUrl('/assistant/admin/quality-gates/latest'))
+    return response.json()
+  },
+
+  async getMcpGovernance() {
+    const response = await fetchWithTimeout(buildUrl('/assistant/admin/mcp/governance'))
+    return response.json()
+  },
+
+  async readMcpResource(payload = {}) {
+    return requestJson('/assistant/admin/mcp/resources/read', {
+      method: 'POST',
+      body: payload
+    })
+  },
+
+  async renderMcpPrompt(payload = {}) {
+    return requestJson('/assistant/admin/mcp/prompts/render', {
+      method: 'POST',
+      body: payload
+    })
+  }
+}
+
+export const customerServiceAPI = {
+  async getStarterPrompts() {
+    const response = await fetchWithTimeout(buildUrl('/assistant/customer-service/starter-prompts'))
+    return response.json()
+  },
+
+  async quickAnswer(payload = {}) {
+    return requestJson('/assistant/customer-service/quick-answer', {
+      method: 'POST',
+      body: payload
+    })
+  },
+
+  async createEscalation(payload = {}) {
+    return requestJson('/assistant/customer-service/escalations', {
+      method: 'POST',
+      body: payload
+    })
+  },
+
+  async getEscalation(ticketId) {
+    const response = await fetchWithTimeout(buildUrl(`/assistant/customer-service/escalations/${ticketId}`))
+    return response.json()
+  },
+
+  async getDashboard() {
+    const response = await fetchWithTimeout(buildUrl('/assistant/admin/customer-service/dashboard'))
+    return response.json()
+  },
+
+  async getTopQuestions() {
+    const response = await fetchWithTimeout(buildUrl('/assistant/admin/customer-service/top-questions'))
+    return response.json()
+  },
+
+  async getUnresolvedCases() {
+    const response = await fetchWithTimeout(buildUrl('/assistant/admin/customer-service/unresolved-cases'))
+    return response.json()
+  }
+}
+
+export const ragEvalAPI = {
+  async getRunReport(evalRunId) {
+    const response = await fetchWithTimeout(buildUrl(`/api/rag-eval/runs/${evalRunId}/report`))
+    return response.json()
+  },
+
+  async compareRun(evalRunId, baselineRunId) {
+    const response = await fetchWithTimeout(buildUrl(`/api/rag-eval/runs/${evalRunId}/compare`, { baselineRunId }))
+    return response.json()
+  },
+
+  async listBadCases(reviewStatus = 'PENDING', failureType = '') {
+    const response = await fetchWithTimeout(buildUrl('/api/rag-eval/bad-cases', { reviewStatus, failureType }))
+    return response.json()
+  },
+
+  async convertBadCase(badCaseId, payload = {}) {
+    const response = await fetchWithTimeout(buildUrl(`/api/rag-eval/bad-cases/${badCaseId}/convert`), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    })
+    return response.json()
+  },
+
+  async reviewBadCase(badCaseId, payload = {}) {
+    const response = await fetchWithTimeout(buildUrl(`/api/rag-eval/bad-cases/${badCaseId}/review`), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    })
+    return response.json()
+  },
+
+  async createReindexJob(taskType = 'full') {
+    const response = await fetchWithTimeout(buildUrl('/ai/rag/reindex-jobs', { taskType }), {
+      method: 'POST'
+    })
+    return response.json()
+  },
+
+  async listIngestionTasks() {
+    const response = await fetchWithTimeout(buildUrl('/ai/rag/ingestion/tasks'))
+    return response.json()
+  }
+}
+
+export const aiOpsAdminAPI = {
+  async listFaultScenarios() {
+    const response = await fetchWithTimeout(buildUrl('/assistant/admin/aiops/fault-scenarios'))
+    return response.json()
+  },
+
+  async injectFaultScenario(scenarioId, payload = {}) {
+    const response = await fetchWithTimeout(buildUrl(`/assistant/admin/aiops/fault-scenarios/${scenarioId}/inject`), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    })
+    return response.json()
+  },
+
+  async buildRcaEvidence(payload = {}) {
+    const response = await fetchWithTimeout(buildUrl('/assistant/admin/aiops/rca-evidence'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    })
+    return response.json()
+  }
+}
+
+export const promptVersionAPI = {
+  async list(promptKey = '') {
+    const response = await fetchWithTimeout(buildUrl('/api/prompt-versions', { promptKey }))
+    return response.json()
+  },
+
+  async listReleaseRecords(promptKey = '') {
+    const response = await fetchWithTimeout(buildUrl('/api/prompt-versions/release-records', { promptKey }))
+    return response.json()
+  },
+
+  async createDraft(payload) {
+    return requestJson('/api/prompt-versions', {
+      method: 'POST',
+      body: payload
+    })
+  },
+
+  async buildReleasePlan(payload) {
+    return requestJson('/api/prompt-versions/release-plan', {
+      method: 'POST',
+      body: payload
+    })
+  },
+
+  async publish(payload) {
+    return requestJson('/api/prompt-versions/publish', {
+      method: 'POST',
+      body: payload
+    })
+  },
+
+  async promote(payload) {
+    return requestJson('/api/prompt-versions/promote', {
+      method: 'POST',
+      body: payload
+    })
+  },
+
+  async rollback(payload) {
+    return requestJson('/api/prompt-versions/rollback', {
+      method: 'POST',
+      body: payload
+    })
+  },
+
+  async invalidateCache() {
+    return requestJson('/api/prompt-versions/invalidate-cache', {
+      method: 'POST'
+    })
   }
 }
 

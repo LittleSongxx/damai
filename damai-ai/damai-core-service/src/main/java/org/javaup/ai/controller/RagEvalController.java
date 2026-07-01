@@ -9,6 +9,7 @@ import org.javaup.ai.entity.AiRagEvalJudgeConfig;
 import org.javaup.ai.entity.AiRagEvalRetrievalConfig;
 import org.javaup.ai.entity.AiRagEvalRun;
 import org.javaup.ai.entity.AiRagOnlineTrace;
+import org.javaup.ai.context.AiRequestContextHolder;
 import org.javaup.ai.mapper.AiRagEvalCaseMapper;
 import org.javaup.ai.mapper.AiRagEvalDatasetMapper;
 import org.javaup.ai.mapper.AiRagEvalJudgeConfigMapper;
@@ -21,6 +22,7 @@ import org.javaup.ai.service.RagEvalService;
 import org.javaup.ai.service.RagOnlineTraceService;
 import org.javaup.ai.vo.RagBadCaseConvertRequest;
 import org.javaup.ai.vo.RagBadCaseRequest;
+import org.javaup.ai.vo.RagBadCaseReviewRequest;
 import org.javaup.ai.vo.RagEvalCaseRequest;
 import org.javaup.ai.vo.RagEvalRunRequest;
 import org.javaup.ai.vo.RagOnlineTraceRequest;
@@ -395,5 +397,18 @@ public class RagEvalController {
             return ResponseEntity.ok(Map.of("code", 1, "message", "bad case not found"));
         }
         return ResponseEntity.ok(Map.of("code", 0, "data", evalCase));
+    }
+
+    @PostMapping("/bad-cases/{badCaseId}/review")
+    public ResponseEntity<Map<String, Object>> reviewBadCase(@PathVariable String badCaseId,
+                                                             @RequestBody(required = false) RagBadCaseReviewRequest request) {
+        Long reviewerId = AiRequestContextHolder.getOptional()
+                .map(context -> context.getUser() == null ? null : context.getUser().getUserId())
+                .orElse(null);
+        AiRagBadCase badCase = ragBadCaseService.reviewBadCase(badCaseId, request, reviewerId);
+        if (badCase == null) {
+            return ResponseEntity.ok(Map.of("code", 1, "message", "bad case not found"));
+        }
+        return ResponseEntity.ok(Map.of("code", 0, "data", badCase));
     }
 }

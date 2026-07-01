@@ -25,20 +25,25 @@ import java.util.regex.Pattern;
 public class OpsMetricsQuerySkill implements AssistantSkill {
 
     private static final Pattern SERVICE_PATTERN = Pattern.compile("([a-z-]+-service)");
+    private static final Pattern TRACE_PATTERN = Pattern.compile("trace(?:id)?[=: ]+([A-Za-z0-9\\-_]+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SPAN_PATTERN = Pattern.compile("span(?:id)?[=: ]+([A-Za-z0-9\\-_]+)", Pattern.CASE_INSENSITIVE);
 
     private final ChatClient unifiedOpsChatClient;
     private final AssistantToolInvoker toolInvoker;
     private final MetricsGateway metricsGateway;
     private final AssistantMemoryKeyService memoryKeyService;
+    private final OpsRcaEvidenceService rcaEvidenceService;
 
     public OpsMetricsQuerySkill(@Qualifier("unifiedOpsChatClient") ChatClient unifiedOpsChatClient,
                                 AssistantToolInvoker toolInvoker,
                                 MetricsGateway metricsGateway,
-                                AssistantMemoryKeyService memoryKeyService) {
+                                AssistantMemoryKeyService memoryKeyService,
+                                OpsRcaEvidenceService rcaEvidenceService) {
         this.unifiedOpsChatClient = unifiedOpsChatClient;
         this.toolInvoker = toolInvoker;
         this.metricsGateway = metricsGateway;
         this.memoryKeyService = memoryKeyService;
+        this.rcaEvidenceService = rcaEvidenceService;
     }
 
     @Override
@@ -91,9 +96,21 @@ public class OpsMetricsQuerySkill implements AssistantSkill {
         } else {
             Matcher matcher = SERVICE_PATTERN.matcher(prompt);
             String serviceName = matcher.find() ? matcher.group(1) : "damai-ai";
-            evidence = toolInvoker.invoke(runId, "metricsGateway", "ops",
+            Map<String, Object> primaryEvidence = toolInvoker.invoke(runId, "metricsGateway", "ops",
                     Map.of("serviceName", serviceName),
                     () -> metricsGateway.getServiceHealthOverview(serviceName));
+            OpsRcaRequest rcaRequest = new OpsRcaRequest();
+            rcaRequest.setQuery(prompt);
+            rcaRequest.setServiceName(serviceName);
+            rcaRequest.setTraceId(extract(prompt, TRACE_PATTERN));
+            rcaRequest.setSpanId(extract(prompt, SPAN_PATTERN));
+            Map<String, Object> evidenceBundle = toolInvoker.invoke(runId, "opsRcaEvidence", "ops",
+                    CommonUtils.mapOf("query", prompt,
+                            "serviceName", serviceName,
+                            "traceId", rcaRequest.getTraceId(),
+                            "spanId", rcaRequest.getSpanId()),
+                    () -> rcaEvidenceService.buildEvidenceBundle(rcaRequest));
+            evidence = Map.of("primaryEvidence", primaryEvidence, "evidenceBundle", evidenceBundle);
         }
 
         return generateAnswer(context, prompt, evidence);
@@ -114,8 +131,8 @@ public class OpsMetricsQuerySkill implements AssistantSkill {
 
                 输出要求：
                 1. 先概括当前服务健康状况。
-                2. 对异常指标给出可能原因分析。
-                3. 最后给出优化或排查建议。
+                2. 对异常指标给出可能原因分析，并说明证据链。
+                3. 最后给出优化或排查建议，必须引用 evidenceBundle 中的 SLO、日志、指标或 trace 线索。
                 """.formatted(memorySummary(context), prompt, JSON.toJSONString(evidence));
         String answer = unifiedOpsChatClient.prompt()
                 .user(answerPrompt)
@@ -134,6 +151,11 @@ public class OpsMetricsQuerySkill implements AssistantSkill {
             return "无";
         }
         return context.getMemoryContext().summary();
+    }
+
+    private String extract(String prompt, Pattern pattern) {
+        Matcher matcher = pattern.matcher(prompt == null ? "" : prompt);
+        return matcher.find() ? matcher.group(1) : null;
     }
 
 }

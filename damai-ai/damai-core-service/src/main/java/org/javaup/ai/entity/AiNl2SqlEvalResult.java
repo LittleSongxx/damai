@@ -19,7 +19,18 @@ public class AiNl2SqlEvalResult extends BaseTableData {
     private Integer isValidSql;
     private Integer executeSuccess;
     private Integer exactMatch;
+    private Integer resultSetEquivalent;
+    private Integer unsafeRejected;
+    private Integer lowConfidenceClarified;
+    private Integer repairAttempted;
+    private Integer repairSucceeded;
+    private Double schemaLinkPrecision;
+    private Double schemaLinkRecall;
+    private Double estimatedCost;
     private Long latencyMs;
     private String errorMessage;
     private String evalMethod;
+    private String safetyReportJson;
+    private String schemaLinkingEvidenceJson;
+    private String repairTraceJson;
 }

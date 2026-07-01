@@ -158,6 +158,18 @@ damai:
       answer-correctness-threshold: ${DAMAI_AI_EVAL_ANSWER_CORRECTNESS_THRESHOLD:0.75}
     security:
       admin-user-ids: ${DAMAI_AI_ADMIN_USER_IDS:}
+    mcp:
+      governance:
+        enabled: ${DAMAI_AI_MCP_GOVERNANCE_ENABLED:true}
+        require-admin: ${DAMAI_AI_MCP_REQUIRE_ADMIN:true}
+        require-high-risk-confirmation: ${DAMAI_AI_MCP_REQUIRE_HIGH_RISK_CONFIRMATION:true}
+        expose-nl2sql: ${DAMAI_AI_MCP_EXPOSE_NL2SQL:false}
+        allowlist: ${DAMAI_AI_MCP_ALLOWLIST:log.getServiceList,log.searchLogsByKeyword,log.getLogsByTraceId,log.getLatestLogs,log.getErrorLogs,log.getWarnLogs,log.getLogStatistics,log.searchLogsByClass,metrics.getMetricsServiceList,metrics.getJvmMemory,metrics.getCpuMetrics,metrics.getServiceHealthOverview,metrics.getAllServicesHealth}
+        resource-allowlist: ${DAMAI_AI_MCP_RESOURCE_ALLOWLIST:observability://logs/services,observability://metrics/services,observability://traces/{traceId},assistant://runs/{runId}/graph}
+        prompt-allowlist: ${DAMAI_AI_MCP_PROMPT_ALLOWLIST:ops.rca,ops.log-diagnosis,ops.metrics-diagnosis}
+        high-risk-tools: ${DAMAI_AI_MCP_HIGH_RISK_TOOLS:nl2sql.nl2sqlQuery}
+        high-risk-resources: ${DAMAI_AI_MCP_HIGH_RISK_RESOURCES:assistant://runs/{runId}/graph}
+        high-risk-prompts: ${DAMAI_AI_MCP_HIGH_RISK_PROMPTS:ops.rca}
     web-search:
       enabled: ${DAMAI_AI_WEB_SEARCH_ENABLED:true}
       timeout-ms: ${DAMAI_AI_WEB_SEARCH_TIMEOUT_MS:5000}
@@ -195,8 +207,16 @@ damai:
       schema-top-k: ${DAMAI_AI_NL2SQL_SCHEMA_TOP_K:5}
       query-timeout-ms: ${DAMAI_AI_NL2SQL_QUERY_TIMEOUT_MS:5000}
       repair-attempts: ${DAMAI_AI_NL2SQL_REPAIR_ATTEMPTS:1}
+      min-sql-confidence: ${DAMAI_AI_NL2SQL_MIN_CONFIDENCE:0.5}
       context-ttl-minutes: ${DAMAI_AI_NL2SQL_CONTEXT_TTL_MINUTES:60}
       context-max-sessions: ${DAMAI_AI_NL2SQL_CONTEXT_MAX_SESSIONS:10000}
+      cost-guard:
+        enabled: ${DAMAI_AI_NL2SQL_COST_GUARD_ENABLED:true}
+        require-read-only-connection: ${DAMAI_AI_NL2SQL_REQUIRE_READ_ONLY_CONNECTION:true}
+        explain-timeout-ms: ${DAMAI_AI_NL2SQL_EXPLAIN_TIMEOUT_MS:2000}
+        max-estimated-rows: ${DAMAI_AI_NL2SQL_MAX_ESTIMATED_ROWS:10000}
+        max-query-cost: ${DAMAI_AI_NL2SQL_MAX_QUERY_COST:100000}
+        fail-closed-on-explain-error: ${DAMAI_AI_NL2SQL_FAIL_CLOSED_ON_EXPLAIN_ERROR:false}
       datasource:
         driver-class-name: ${DAMAI_AI_NL2SQL_DRIVER:com.mysql.cj.jdbc.Driver}
         url: ${DAMAI_AI_NL2SQL_URL:}

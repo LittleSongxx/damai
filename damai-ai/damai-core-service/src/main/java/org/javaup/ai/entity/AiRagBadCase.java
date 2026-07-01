@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 import org.javaup.ai.entity.base.BaseTableData;
 
+import java.util.Date;
+
 @Data
 @TableName("d_ai_rag_bad_case")
 public class AiRagBadCase extends BaseTableData {
@@ -28,4 +30,7 @@ public class AiRagBadCase extends BaseTableData {
     private Integer convertedToEvalCase;
     private String convertedCaseId;
     private String reviewStatus;
+    private Long reviewedBy;
+    private Date reviewedAt;
+    private String reviewNote;
 }

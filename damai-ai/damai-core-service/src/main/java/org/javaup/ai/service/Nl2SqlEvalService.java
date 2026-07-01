@@ -1,16 +1,18 @@
 package org.javaup.ai.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import lombok.extern.slf4j.Slf4j;
+import com.alibaba.fastjson2.JSON;
 import org.javaup.ai.assistant.skill.ops.nl2sql.Nl2SqlException;
 import org.javaup.ai.assistant.skill.ops.nl2sql.Nl2SqlExecutionResult;
 import org.javaup.ai.assistant.skill.ops.nl2sql.Nl2SqlOrchestrator;
+import org.javaup.ai.assistant.skill.ops.nl2sql.Nl2SqlValidatedSql;
 import org.javaup.ai.entity.AiNl2SqlEvalCase;
 import org.javaup.ai.entity.AiNl2SqlEvalResult;
 import org.javaup.ai.entity.AiNl2SqlEvalRun;
 import org.javaup.ai.mapper.AiNl2SqlEvalCaseMapper;
 import org.javaup.ai.mapper.AiNl2SqlEvalResultMapper;
 import org.javaup.ai.mapper.AiNl2SqlEvalRunMapper;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationContext;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -103,7 +105,15 @@ public class Nl2SqlEvalService {
         AtomicInteger validCount = new AtomicInteger(0);
         AtomicInteger execSuccessCount = new AtomicInteger(0);
         AtomicInteger exactMatchCount = new AtomicInteger(0);
+        AtomicInteger resultSetEquivalentCount = new AtomicInteger(0);
+        AtomicInteger unsafeRejectedCount = new AtomicInteger(0);
+        AtomicInteger lowConfidenceClarifiedCount = new AtomicInteger(0);
+        AtomicInteger repairAttemptedCount = new AtomicInteger(0);
+        AtomicInteger repairSucceededCount = new AtomicInteger(0);
         List<Long> latencies = new ArrayList<>();
+        List<Double> schemaLinkPrecisions = new ArrayList<>();
+        List<Double> schemaLinkRecalls = new ArrayList<>();
+        List<Double> costs = new ArrayList<>();
         List<AiNl2SqlEvalResult> results = new ArrayList<>();
 
         List<Future<?>> futures = new ArrayList<>();
@@ -125,6 +135,30 @@ public class Nl2SqlEvalService {
                         }
                         if (result.getExactMatch() != null && result.getExactMatch() == 1) {
                             exactMatchCount.incrementAndGet();
+                        }
+                        if (result.getResultSetEquivalent() != null && result.getResultSetEquivalent() == 1) {
+                            resultSetEquivalentCount.incrementAndGet();
+                        }
+                        if (result.getUnsafeRejected() != null && result.getUnsafeRejected() == 1) {
+                            unsafeRejectedCount.incrementAndGet();
+                        }
+                        if (result.getLowConfidenceClarified() != null && result.getLowConfidenceClarified() == 1) {
+                            lowConfidenceClarifiedCount.incrementAndGet();
+                        }
+                        if (result.getRepairAttempted() != null && result.getRepairAttempted() == 1) {
+                            repairAttemptedCount.incrementAndGet();
+                        }
+                        if (result.getRepairSucceeded() != null && result.getRepairSucceeded() == 1) {
+                            repairSucceededCount.incrementAndGet();
+                        }
+                        if (result.getSchemaLinkPrecision() != null) {
+                            schemaLinkPrecisions.add(result.getSchemaLinkPrecision());
+                        }
+                        if (result.getSchemaLinkRecall() != null) {
+                            schemaLinkRecalls.add(result.getSchemaLinkRecall());
+                        }
+                        if (result.getEstimatedCost() != null) {
+                            costs.add(result.getEstimatedCost());
                         }
                         if (result.getLatencyMs() != null) {
                             latencies.add(result.getLatencyMs());
@@ -155,8 +189,18 @@ public class Nl2SqlEvalService {
         run.setSqlValidityRate(done > 0 ? (double) validCount.get() / done : 0.0);
         run.setExecutionAccuracy(done > 0 ? (double) execSuccessCount.get() / done : 0.0);
         run.setExactMatchRate(done > 0 ? (double) exactMatchCount.get() / done : 0.0);
+        run.setResultSetEquivalenceRate(done > 0 ? (double) resultSetEquivalentCount.get() / done : 0.0);
+        run.setUnsafeRejectionRate(done > 0 ? (double) unsafeRejectedCount.get() / done : 0.0);
+        run.setLowConfidenceClarificationRate(done > 0 ? (double) lowConfidenceClarifiedCount.get() / done : 0.0);
+        run.setRepairSuccessRate(repairAttemptedCount.get() > 0 ? (double) repairSucceededCount.get() / repairAttemptedCount.get() : 0.0);
+        run.setSchemaLinkPrecision(schemaLinkPrecisions.isEmpty() ? 0.0
+                : schemaLinkPrecisions.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+        run.setSchemaLinkRecall(schemaLinkRecalls.isEmpty() ? 0.0
+                : schemaLinkRecalls.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
         run.setAvgLatencyMs(latencies.isEmpty() ? 0.0
                 : latencies.stream().mapToLong(Long::longValue).average().orElse(0.0));
+        run.setAvgEstimatedCost(costs.isEmpty() ? 0.0
+                : costs.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
         run.setRunStatus(done == total ? "COMPLETED" : "COMPLETED_WITH_ERRORS");
         run.setEditTime(new Date());
         runMapper.updateById(run);
@@ -181,10 +225,17 @@ public class Nl2SqlEvalService {
             result.setLatencyMs(elapsed);
 
             Object status = evidence.get("status");
+            result.setSchemaLinkingEvidenceJson(JSON.toJSONString(evidence.getOrDefault("schemaLinkingEvidence", Map.of())));
+            result.setSafetyReportJson(JSON.toJSONString(evidence.getOrDefault("safetyReport", Map.of())));
+            result.setRepairTraceJson(JSON.toJSONString(repairTrace(evidence)));
+            result.setEstimatedCost(costFromEvidence(evidence));
+            applySchemaLinkMetrics(evalCase, evidence, result);
+            applyGovernanceFlags(evidence, result);
             if ("FAILED".equals(status)) {
                 Object msg = evidence.get("message");
                 if (msg != null && msg.toString().contains("安全校验")) {
                     result.setIsValidSql(0);
+                    result.setUnsafeRejected(1);
                 }
                 result.setErrorMessage(msg != null ? msg.toString() : "Unknown error");
             } else if ("NEED_CLARIFICATION".equals(status)) {
@@ -196,8 +247,10 @@ public class Nl2SqlEvalService {
                 result.setIsValidSql(1);
 
                 Object validatedSql = evidence.get("validatedSql");
-                if (validatedSql != null) {
-                    result.setGeneratedSql(validatedSql.toString());
+                if (validatedSql instanceof Nl2SqlValidatedSql sql) {
+                    result.setGeneratedSql(sql.sql());
+                } else if (validatedSql != null) {
+                    result.setGeneratedSql(String.valueOf(validatedSql));
                 }
 
                 Object execution = evidence.get("execution");
@@ -208,6 +261,9 @@ public class Nl2SqlEvalService {
                         result.setErrorMessage("Execution skipped: " + execResult.skipReason());
                     } else {
                         result.setExecuteSuccess(1);
+                        if (StringUtils.hasText(evalCase.getExpectedResultJson())) {
+                            result.setResultSetEquivalent(resultSetEquivalent(evalCase.getExpectedResultJson(), execResult.rows()) ? 1 : 0);
+                        }
                     }
                 }
 
@@ -222,6 +278,7 @@ public class Nl2SqlEvalService {
             long elapsed = System.currentTimeMillis() - start;
             result.setLatencyMs(elapsed);
             result.setIsValidSql(0);
+            result.setUnsafeRejected(1);
             result.setErrorMessage("Validation failed: " + e.getMessage());
         } catch (Exception e) {
             long elapsed = System.currentTimeMillis() - start;
@@ -241,6 +298,100 @@ public class Nl2SqlEvalService {
                 .replaceAll("\\s*\\(\\s*", "(")
                 .replaceAll("\\s*\\)\\s*", ")")
                 .replaceAll(";\\s*$", "");
+    }
+
+    private void applyGovernanceFlags(Map<String, Object> evidence, AiNl2SqlEvalResult result) {
+        Map<String, Object> safetyReport = mapValue(evidence.get("safetyReport"));
+        if (Boolean.TRUE.equals(safetyReport.get("lowConfidenceBlocked"))) {
+            result.setLowConfidenceClarified(1);
+        }
+        if (Boolean.TRUE.equals(safetyReport.get("unsafeExecutionRejected"))) {
+            result.setUnsafeRejected(1);
+        }
+        if (evidence.containsKey("repairGeneration") || evidence.containsKey("repairedSql")) {
+            result.setRepairAttempted(1);
+        }
+        if (evidence.containsKey("repairedSql")) {
+            result.setRepairSucceeded(1);
+        }
+    }
+
+    private void applySchemaLinkMetrics(AiNl2SqlEvalCase evalCase, Map<String, Object> evidence, AiNl2SqlEvalResult result) {
+        List<String> expectedTables = splitCsv(evalCase.getExpectedTableNames());
+        Map<String, Object> schemaEvidence = mapValue(evidence.get("schemaLinkingEvidence"));
+        List<String> predictedTables = listValue(schemaEvidence.get("tables"));
+        if (expectedTables.isEmpty() && predictedTables.isEmpty()) {
+            return;
+        }
+        long overlap = predictedTables.stream().filter(expectedTables::contains).count();
+        result.setSchemaLinkPrecision(predictedTables.isEmpty() ? 0.0 : (double) overlap / predictedTables.size());
+        result.setSchemaLinkRecall(expectedTables.isEmpty() ? 0.0 : (double) overlap / expectedTables.size());
+    }
+
+    private Map<String, Object> repairTrace(Map<String, Object> evidence) {
+        Map<String, Object> trace = new LinkedHashMap<>();
+        if (evidence.containsKey("repairGeneration")) {
+            trace.put("repairGeneration", evidence.get("repairGeneration"));
+        }
+        if (evidence.containsKey("repairedSql")) {
+            trace.put("repairedSql", evidence.get("repairedSql"));
+        }
+        return trace;
+    }
+
+    private Double costFromEvidence(Map<String, Object> evidence) {
+        Object cost = evidence.get("estimatedCost");
+        if (cost instanceof Number number) {
+            return number.doubleValue();
+        }
+        if (cost != null) {
+            try {
+                return Double.parseDouble(String.valueOf(cost));
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mapValue(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            return map.entrySet().stream()
+                    .collect(Collectors.toMap(entry -> String.valueOf(entry.getKey()), Map.Entry::getValue,
+                            (left, right) -> right, LinkedHashMap::new));
+        }
+        return Map.of();
+    }
+
+    private List<String> listValue(Object value) {
+        if (value instanceof List<?> list) {
+            return list.stream()
+                    .map(String::valueOf)
+                    .filter(StringUtils::hasText)
+                    .map(item -> item.trim().toLowerCase())
+                    .toList();
+        }
+        return List.of();
+    }
+
+    private List<String> splitCsv(String value) {
+        if (!StringUtils.hasText(value)) {
+            return List.of();
+        }
+        return java.util.Arrays.stream(value.split(","))
+                .map(item -> item.trim().toLowerCase())
+                .filter(StringUtils::hasText)
+                .toList();
+    }
+
+    private boolean resultSetEquivalent(String expectedResultJson, List<Map<String, Object>> actualRows) {
+        try {
+            Object expected = JSON.parse(expectedResultJson);
+            Object actual = JSON.parse(JSON.toJSONString(actualRows == null ? List.of() : actualRows));
+            return JSON.toJSONString(expected).equals(JSON.toJSONString(actual));
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     public AiNl2SqlEvalRun getRunStatus(String evalRunId) {

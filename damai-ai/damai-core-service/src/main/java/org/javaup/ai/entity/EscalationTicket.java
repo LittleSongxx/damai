@@ -35,6 +35,14 @@ public class EscalationTicket extends BaseTableData {
 
     private String dialogueSummary;
 
+    private String contextJson;
+
+    private String sentiment;
+
+    private String intentCode;
+
+    private String suggestedReply;
+
     private Long assignedTo;
 
     private String resolution;

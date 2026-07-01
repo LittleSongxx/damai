@@ -1,11 +1,14 @@
 package org.javaup.ai.controller;
 
 import org.javaup.ai.assistant.AssistantRuntimeService;
+import org.javaup.ai.assistant.mq.RagIngestionMessage;
+import org.javaup.ai.assistant.mq.RagIngestionPublisher;
 import org.javaup.ai.common.ApiResponse;
 import org.javaup.ai.service.DocumentIngestionService;
 import org.javaup.ai.service.DocumentLifecycleService;
 import org.javaup.ai.service.HybridSearchService;
 import org.javaup.ai.service.IngestionQualityService;
+import org.javaup.ai.entity.RagIngestionTask;
 import org.javaup.ai.vo.AssistantActionResultVo;
 import org.javaup.ai.vo.AssistantRunDetailVo;
 import org.javaup.ai.vo.CreateOrderVo;
@@ -29,17 +32,20 @@ public class AiWorkflowController {
     private final DocumentIngestionService documentIngestionService;
     private final DocumentLifecycleService documentLifecycleService;
     private final IngestionQualityService ingestionQualityService;
+    private final RagIngestionPublisher ragIngestionPublisher;
 
     public AiWorkflowController(AssistantRuntimeService assistantRuntimeService,
                                  HybridSearchService hybridSearchService,
                                  DocumentIngestionService documentIngestionService,
                                  DocumentLifecycleService documentLifecycleService,
-                                 IngestionQualityService ingestionQualityService) {
+                                 IngestionQualityService ingestionQualityService,
+                                 RagIngestionPublisher ragIngestionPublisher) {
         this.assistantRuntimeService = assistantRuntimeService;
         this.hybridSearchService = hybridSearchService;
         this.documentIngestionService = documentIngestionService;
         this.documentLifecycleService = documentLifecycleService;
         this.ingestionQualityService = ingestionQualityService;
+        this.ragIngestionPublisher = ragIngestionPublisher;
     }
 
     @GetMapping("/workflows/{runId}")
@@ -87,15 +93,33 @@ public class AiWorkflowController {
     @PostMapping("/rag/reindex/async")
     public ApiResponse<Map<String, String>> reindexFaqAsync() {
         String taskId = "ingest_" + java.util.UUID.randomUUID().toString().replace("-", "");
-        org.javaup.ai.assistant.mq.RagIngestionMessage msg =
-                org.javaup.ai.assistant.mq.RagIngestionMessage.builder()
+        RagIngestionMessage msg =
+                RagIngestionMessage.builder()
                         .taskId(taskId)
                         .taskType("full")
                         .build();
-        // Publisher injected later — for now, call sync and return
-        Map<String, Object> result = documentIngestionService.reindexAll();
-        return ApiResponse.ok(Map.of("taskId", taskId, "status", "completed",
-                "summary", result.toString()));
+        documentLifecycleService.createSubmittedTask(taskId, "full");
+        ragIngestionPublisher.publish(msg);
+        return ApiResponse.ok(Map.of("taskId", taskId, "status", "submitted"));
+    }
+
+    @PostMapping("/rag/reindex-jobs")
+    public ApiResponse<Map<String, String>> createReindexJob(@RequestParam(defaultValue = "full") String taskType) {
+        String normalizedType = "incremental".equalsIgnoreCase(taskType) ? "incremental" : "full";
+        String prefix = "incremental".equals(normalizedType) ? "incr_" : "ingest_";
+        String taskId = prefix + java.util.UUID.randomUUID().toString().replace("-", "");
+        documentLifecycleService.createSubmittedTask(taskId, normalizedType);
+        ragIngestionPublisher.publish(RagIngestionMessage.builder()
+                .taskId(taskId)
+                .taskType(normalizedType)
+                .build());
+        return ApiResponse.ok(Map.of("taskId", taskId, "status", "submitted", "taskType", normalizedType));
+    }
+
+    @GetMapping("/rag/reindex-jobs/{taskId}")
+    public ApiResponse<RagIngestionTask> getReindexJob(@PathVariable("taskId") String taskId) {
+        RagIngestionTask task = documentLifecycleService.getTask(taskId);
+        return task == null ? ApiResponse.error("任务不存在或尚未被消费者领取") : ApiResponse.ok(task);
     }
 
     /** Incremental reindex */

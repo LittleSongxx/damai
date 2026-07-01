@@ -15,6 +15,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -99,6 +100,35 @@ public class MetricsGateway {
         );
     }
 
+    public Map<String, Object> queryRange(String promql, Instant start, Instant end, Duration step) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("query", promql);
+        result.put("start", start == null ? "" : start.toString());
+        result.put("end", end == null ? "" : end.toString());
+        result.put("stepSeconds", step == null ? 60 : step.toSeconds());
+        if (promql == null || promql.isBlank() || start == null || end == null) {
+            result.put("series", List.of());
+            result.put("error", "query/start/end are required");
+            return result;
+        }
+        try {
+            JSONObject json = queryPath("/api/v1/query_range?query=" + encode(promql)
+                    + "&start=" + encode(start.toString())
+                    + "&end=" + encode(end.toString())
+                    + "&step=" + Math.max(1, step == null ? 60 : step.toSeconds()));
+            result.put("status", json.getString("status"));
+            JSONObject data = json.getJSONObject("data");
+            result.put("series", data == null || data.getJSONArray("result") == null
+                    ? List.of()
+                    : data.getJSONArray("result"));
+            return result;
+        } catch (Exception ex) {
+            result.put("series", List.of());
+            result.put("error", ex.getMessage());
+            return result;
+        }
+    }
+
     public String evaluateHealth(Double heapUsed, Double heapMax, Double cpu, Double threads) {
         if (heapUsed != null && heapMax != null && heapMax > 0) {
             double usage = heapUsed / heapMax;
@@ -135,8 +165,11 @@ public class MetricsGateway {
     }
 
     private JSONObject executePromql(String query) {
-        String encoded = URLEncoder.encode(query, StandardCharsets.UTF_8);
-        return queryPath("/api/v1/query?query=" + encoded);
+        return queryPath("/api/v1/query?query=" + encode(query));
+    }
+
+    private String encode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
     private Double querySingleMetric(String query) {

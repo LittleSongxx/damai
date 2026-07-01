@@ -49,7 +49,7 @@ class AiAuthenticationServiceTest {
         user.setEmail("demo@test.com");
         when(userCall.currentUser("token-2002")).thenReturn(user);
         when(aiPermissionService.isAdmin(2002L)).thenReturn(false);
-        when(circuitBreakerService.executeWebSearch(any(), any())).thenAnswer(inv -> inv.getArgument(0, java.util.function.Supplier.class).get());
+        when(circuitBreakerService.executeUserService(any(), any())).thenAnswer(inv -> inv.getArgument(0, java.util.function.Supplier.class).get());
 
         AiUserContext context = authenticationService.authenticate("token-2002");
 

@@ -1,0 +1,46 @@
+name: damai-ai quality gate
+
+on:
+  pull_request:
+    paths:
+      - 'damai-ai/**'
+      - '.github/workflows/damai-ai-quality-gate.yml'
+  push:
+    paths:
+      - 'damai-ai/**'
+      - '.github/workflows/damai-ai-quality-gate.yml'
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: damai-ai
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: damai-ai/vue/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: damai-ai/vue
+        run: npm ci
+
+      - name: Run damai-ai quality gate
+        run: bash scripts/quality-gate.sh
+
+      - name: Upload quality gate summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: damai-ai-quality-gate-summary
+          path: damai-ai/target/quality-gate-summary.json

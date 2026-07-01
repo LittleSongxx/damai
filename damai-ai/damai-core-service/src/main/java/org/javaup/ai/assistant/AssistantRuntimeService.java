@@ -28,11 +28,14 @@ import org.javaup.ai.vo.AiUserCapabilitiesVo;
 import org.javaup.ai.vo.AssistantActionResultVo;
 import org.javaup.ai.vo.AssistantRunCreatedVo;
 import org.javaup.ai.vo.AssistantRunDetailVo;
+import org.javaup.ai.vo.AssistantRunReplayVo;
 import org.javaup.ai.vo.ChatHistoryMessageVO;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -90,7 +93,7 @@ public class AssistantRuntimeService {
         }
         List<AiRunEvent> events = runService.listEvents(runId);
         Flux<ServerSentEvent<String>> replay = Flux.fromIterable(events).map(this::toEvent);
-        if (hasTerminalEvent(events)) {
+        if (isTerminalRunStatus(run) && hasTerminalEvent(events)) {
             return replay;
         }
         int lastOrder = events.isEmpty() ? 0 : events.get(events.size() - 1).getEventOrder();
@@ -120,6 +123,89 @@ public class AssistantRuntimeService {
                 .stageTraces(run == null ? List.of() : runService.listStageTraces(runId))
                 .retrievalTraces(run == null ? List.of() : runService.listRetrievalTraces(runId))
                 .memorySummary(run == null ? null : runService.getLatestMemorySummary(run.getConversationId(), run.getUserId()))
+                .build();
+    }
+
+    public AssistantRunCreatedVo resumeRun(String runId) {
+        AiRun run = runService.getRun(runId);
+        if (run == null) {
+            throw new IllegalArgumentException("Run does not exist: " + runId);
+        }
+        CheckpointManager.ResumeContext checkpoint = checkpointManager.tryResume(run);
+        if (checkpoint == null) {
+            throw new IllegalStateException("Run has no resumable checkpoint: " + runId);
+        }
+        int resumeCount = runService.resetForResume(runId);
+        String checkpointFingerprint = checkpointFingerprint(checkpoint);
+        String replayAttemptId = replayAttemptId(runId, "resume", resumeCount, checkpointFingerprint);
+        runService.appendEvent(runId, AssistantEventTypes.RUN_RESUMED, Map.of(
+                "runId", runId,
+                "checkpointStage", checkpoint.stage(),
+                "checkpointId", runId + ":" + checkpoint.stage(),
+                "checkpointFingerprint", checkpointFingerprint,
+                "replayAttemptId", replayAttemptId,
+                "idempotencyPolicy", idempotencyPolicy(),
+                "resumeCount", resumeCount,
+                "resumeSource", "api"
+        ));
+        runService.appendEvent(runId, AssistantEventTypes.RUN_RECOVERY_PLANNED,
+                recoveryPlanPayload(run, checkpoint, resumeCount, "resume"));
+        eventStreamService.ensureRunStream(runId);
+        launchProcess(runId, snapshotContext());
+        return AssistantRunCreatedVo.builder()
+                .runId(run.getRunId())
+                .chatId(run.getConversationId())
+                .status(AssistantRunStatus.CREATED.name())
+                .eventStreamPath("/assistant/runs/" + run.getRunId() + "/events")
+                .build();
+    }
+
+    public AssistantRunReplayVo replayRun(String runId) {
+        AiRun run = runService.getRun(runId);
+        if (run == null) {
+            throw new IllegalArgumentException("Run does not exist: " + runId);
+        }
+        CheckpointManager.ResumeContext checkpoint = checkpointManager.tryResume(run);
+        if (checkpoint == null) {
+            throw new IllegalStateException("Run has no replayable checkpoint: " + runId);
+        }
+        int resumeCount = runService.resetForResume(runId);
+        String checkpointFingerprint = checkpointFingerprint(checkpoint);
+        String replayAttemptId = replayAttemptId(runId, "replay", resumeCount, checkpointFingerprint);
+        Map<String, Object> plan = recoveryPlanPayload(run, checkpoint, resumeCount, "replay");
+        Map<String, Object> replayPayload = new java.util.LinkedHashMap<>();
+        replayPayload.put("runId", runId);
+        replayPayload.put("checkpointStage", checkpoint.stage());
+        replayPayload.put("checkpointId", runId + ":" + checkpoint.stage());
+        replayPayload.put("checkpointFingerprint", checkpointFingerprint);
+        replayPayload.put("replayAttemptId", replayAttemptId);
+        replayPayload.put("idempotencyPolicy", idempotencyPolicy());
+        replayPayload.put("resumeCount", resumeCount);
+        replayPayload.put("replaySource", "api");
+        replayPayload.put("skipRouting", checkpoint.canSkipRouting());
+        replayPayload.put("skipRetrieval", checkpoint.canSkipRetrieval());
+        replayPayload.put("riskHint", plan.get("riskHint"));
+        runService.appendEvent(runId, AssistantEventTypes.RUN_REPLAY_REQUESTED, replayPayload);
+        runService.appendEvent(runId, AssistantEventTypes.RUN_RECOVERY_PLANNED, plan);
+        eventStreamService.ensureRunStream(runId);
+        launchProcess(runId, snapshotContext());
+        return AssistantRunReplayVo.builder()
+                .runId(run.getRunId())
+                .chatId(run.getConversationId())
+                .status(AssistantRunStatus.CREATED.name())
+                .checkpointId(run.getRunId() + ":" + checkpoint.stage())
+                .checkpointStage(checkpoint.stage())
+                .checkpointFingerprint(checkpointFingerprint)
+                .replayAttemptId(replayAttemptId)
+                .idempotencyPolicy(idempotencyPolicy())
+                .replayable(true)
+                .replayScheduled(true)
+                .skipRouting(checkpoint.canSkipRouting())
+                .skipRetrieval(checkpoint.canSkipRetrieval())
+                .riskHint(String.valueOf(plan.getOrDefault("riskHint", "")))
+                .nextActions(recoveryNextActions(checkpoint))
+                .checkpointPayload(new java.util.LinkedHashMap<>(checkpoint.payload()))
+                .eventStreamPath("/assistant/runs/" + run.getRunId() + "/events")
                 .build();
     }
 
@@ -185,6 +271,16 @@ public class AssistantRuntimeService {
                 // 从 checkpoint 恢复：从快照重建 plan，跳过已完成的阶段
                 log.info("Resuming runId={} from checkpoint stage={}", run.getRunId(), resumeCtx.stage());
                 plan = rebuildPlanFromCheckpoint(run, resumeCtx);
+                runService.appendEvent(run.getRunId(), AssistantEventTypes.CHECKPOINT_REPLAYED, Map.of(
+                        "runId", run.getRunId(),
+                        "checkpointStage", resumeCtx.stage(),
+                        "checkpointId", run.getRunId() + ":" + resumeCtx.stage(),
+                        "checkpointFingerprint", checkpointFingerprint(resumeCtx),
+                        "replayAttemptId", replayAttemptId(run.getRunId(), "process", run.getResumed() == null ? 0 : run.getResumed(), checkpointFingerprint(resumeCtx)),
+                        "idempotencyPolicy", idempotencyPolicy(),
+                        "resumeCount", run.getResumed() == null ? 0 : run.getResumed(),
+                        "replayed", true
+                ));
                 traceRecorder.completeStage(planningSpan, "resumed_from:" + resumeCtx.stage(), Map.of(
                         "resumed", true,
                         "checkpointStage", resumeCtx.stage()
@@ -358,12 +454,82 @@ public class AssistantRuntimeService {
         return payload;
     }
 
+    private Map<String, Object> recoveryPlanPayload(AiRun run,
+                                                    CheckpointManager.ResumeContext checkpoint,
+                                                    int resumeCount,
+                                                    String replayMode) {
+        String checkpointFingerprint = checkpointFingerprint(checkpoint);
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("runId", run.getRunId());
+        payload.put("checkpointStage", checkpoint.stage());
+        payload.put("checkpointId", run.getRunId() + ":" + checkpoint.stage());
+        payload.put("checkpointFingerprint", checkpointFingerprint);
+        payload.put("replayAttemptId", replayAttemptId(run.getRunId(), replayMode, resumeCount, checkpointFingerprint));
+        payload.put("replayMode", replayMode);
+        payload.put("idempotencyPolicy", idempotencyPolicy());
+        payload.put("resumeCount", resumeCount);
+        payload.put("resumable", true);
+        payload.put("skipRouting", checkpoint.canSkipRouting());
+        payload.put("skipRetrieval", checkpoint.canSkipRetrieval());
+        payload.put("payloadKeys", new java.util.ArrayList<>(checkpoint.payload().keySet()));
+        payload.put("riskHint", checkpoint.canSkipRetrieval() ? "REPLAY_AFTER_RETRIEVAL" : "REPLAY_AFTER_ROUTING");
+        payload.put("nextActions", recoveryNextActions(checkpoint));
+        payload.put("summary", "resume from " + checkpoint.stage() + "; skipRouting="
+                + checkpoint.canSkipRouting() + "; skipRetrieval=" + checkpoint.canSkipRetrieval());
+        return payload;
+    }
+
+    private String checkpointFingerprint(CheckpointManager.ResumeContext checkpoint) {
+        if (checkpoint == null) {
+            return "";
+        }
+        String raw = checkpoint.stage() + ":" + JSON.toJSONString(checkpoint.payload());
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hashed = digest.digest(raw.getBytes(StandardCharsets.UTF_8));
+            StringBuilder builder = new StringBuilder();
+            for (int index = 0; index < Math.min(8, hashed.length); index++) {
+                builder.append(String.format("%02x", hashed[index]));
+            }
+            return builder.toString();
+        } catch (Exception ignored) {
+            return Integer.toHexString(raw.hashCode());
+        }
+    }
+
+    private String replayAttemptId(String runId, String mode, int resumeCount, String checkpointFingerprint) {
+        return runId + ":" + mode + ":" + resumeCount + ":" + checkpointFingerprint;
+    }
+
+    private String idempotencyPolicy() {
+        return "RUN_ID_MODE_RESUME_COUNT_CHECKPOINT_FINGERPRINT";
+    }
+
+    private List<String> recoveryNextActions(CheckpointManager.ResumeContext checkpoint) {
+        List<String> actions = new java.util.ArrayList<>();
+        if (checkpoint.canSkipRouting()) {
+            actions.add("Reuse checkpointed route and skill decision; do not call router again");
+        }
+        if (checkpoint.canSkipRetrieval()) {
+            actions.add("Reuse checkpointed retrieval/tool evidence where executor supports it");
+        } else {
+            actions.add("Replay downstream tool or retrieval stage from checkpointed plan");
+        }
+        actions.add("Append checkpoint replay audit event before finalizing resumed run");
+        return actions;
+    }
+
     private boolean hasTerminalEvent(List<AiRunEvent> events) {
         return events.stream().anyMatch(event -> isTerminalEvent(event.getEventType()));
     }
 
     private boolean isTerminalEvent(String eventType) {
         return AssistantEventTypes.RUN_COMPLETED.equals(eventType) || AssistantEventTypes.RUN_FAILED.equals(eventType);
+    }
+
+    private boolean isTerminalRunStatus(AiRun run) {
+        return run != null && (AssistantRunStatus.COMPLETED.name().equals(run.getRunStatus())
+                || AssistantRunStatus.FAILED.name().equals(run.getRunStatus()));
     }
 
     private AiRequestContext snapshotContext() {

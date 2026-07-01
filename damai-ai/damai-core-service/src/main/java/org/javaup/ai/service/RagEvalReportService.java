@@ -66,8 +66,11 @@ public class RagEvalReportService {
                 result -> StringUtils.hasText(result.getFailureType()) ? result.getFailureType() : "NONE",
                 LinkedHashMap::new,
                 Collectors.counting())));
+        report.put("structuredJudgeSummary", buildStructuredJudgeSummary(results));
         report.put("latencySummary", buildLatencySummary(results));
-        report.put("topBadCases", buildTopBadCases(results, caseLookup));
+        List<Map<String, Object>> topBadCases = buildTopBadCases(results, caseLookup);
+        report.put("topBadCases", topBadCases);
+        report.put("closurePlan", buildClosurePlan(run, results, topBadCases));
         report.put("resultCount", results.size());
         return report;
     }
@@ -194,11 +197,124 @@ public class RagEvalReportService {
                     item.put("recallAt5", result.getRecallAt5());
                     item.put("faithfulness", result.getFaithfulnessScore());
                     item.put("answerCorrectness", result.getAnswerCorrectnessScore());
+                    item.put("judgeRelevance", result.getJudgeRelevance());
+                    item.put("judgeCoverage", result.getJudgeCoverage());
+                    item.put("judgeContradiction", result.getJudgeContradiction());
+                    item.put("judgeCitationSupport", result.getJudgeCitationSupport());
+                    item.put("judgeAnswerability", result.getJudgeAnswerability());
+                    item.put("judgeRefusalReason", result.getJudgeRefusalReason());
                     item.put("compositeScore", scoreResult(result));
                     item.put("failureType", result.getFailureType());
                     return item;
                 })
                 .toList();
+    }
+
+    private Map<String, Object> buildClosurePlan(AiRagEvalRun run,
+                                                 List<AiRagEvalResult> results,
+                                                 List<Map<String, Object>> topBadCases) {
+        long failedCases = results.stream()
+                .filter(result -> StringUtils.hasText(result.getFailureType()) && !"NONE".equalsIgnoreCase(result.getFailureType()))
+                .count();
+        long weakCitation = results.stream()
+                .filter(result -> result.getJudgeCitationSupport() != null && result.getJudgeCitationSupport() < 0.7)
+                .count();
+        long lowCoverage = results.stream()
+                .filter(result -> result.getJudgeCoverage() != null && result.getJudgeCoverage() < 0.7)
+                .count();
+        boolean baselineReady = StringUtils.hasText(run.getBaselineRunId());
+        boolean releaseBlocked = !baselineReady || failedCases > 0 || weakCitation > 0 || lowCoverage > 0;
+        List<String> candidateCaseIds = topBadCases.stream()
+                .filter(this::shouldConvertTopBadCase)
+                .map(item -> String.valueOf(item.get("caseId")))
+                .filter(StringUtils::hasText)
+                .limit(5)
+                .toList();
+
+        List<String> nextActions = new ArrayList<>();
+        if (!baselineReady) {
+            nextActions.add("run baseline comparison before prompt/config release");
+        }
+        if (!candidateCaseIds.isEmpty()) {
+            nextActions.add("convert low-score top bad cases into golden eval cases");
+        }
+        if (weakCitation > 0) {
+            nextActions.add("tune citation support threshold, prompt citation rules, or retrieval evidence gate");
+        }
+        if (lowCoverage > 0) {
+            nextActions.add("review retrieval recall, query rewrite, and document coverage for low-coverage cases");
+        }
+        if (nextActions.isEmpty()) {
+            nextActions.add("approve release with baseline snapshot and rollback record");
+        }
+
+        Map<String, Object> plan = new LinkedHashMap<>();
+        plan.put("baselineReady", baselineReady);
+        plan.put("baselineRunId", run.getBaselineRunId());
+        plan.put("releaseBlocked", releaseBlocked);
+        plan.put("failedCases", failedCases);
+        plan.put("weakCitationCases", weakCitation);
+        plan.put("lowCoverageCases", lowCoverage);
+        plan.put("candidateEvalCaseIds", candidateCaseIds);
+        plan.put("nextActions", nextActions);
+        plan.put("workflow", List.of(
+                "online bad case",
+                "human review",
+                "convert to eval",
+                "baseline comparison",
+                "prompt/config release"));
+        return plan;
+    }
+
+    private boolean shouldConvertTopBadCase(Map<String, Object> item) {
+        Object score = item.get("compositeScore");
+        if (score instanceof Number number && number.doubleValue() < 0.75) {
+            return true;
+        }
+        Object citation = item.get("judgeCitationSupport");
+        if (citation instanceof Number number && number.doubleValue() < 0.7) {
+            return true;
+        }
+        Object coverage = item.get("judgeCoverage");
+        if (coverage instanceof Number number && number.doubleValue() < 0.7) {
+            return true;
+        }
+        Object failureType = item.get("failureType");
+        return failureType != null
+                && StringUtils.hasText(String.valueOf(failureType))
+                && !"NONE".equalsIgnoreCase(String.valueOf(failureType));
+    }
+
+    private Map<String, Object> buildStructuredJudgeSummary(List<AiRagEvalResult> results) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("avgRelevance", average(results.stream().map(AiRagEvalResult::getJudgeRelevance).toList()));
+        summary.put("avgCoverage", average(results.stream().map(AiRagEvalResult::getJudgeCoverage).toList()));
+        summary.put("avgContradiction", average(results.stream().map(AiRagEvalResult::getJudgeContradiction).toList()));
+        summary.put("avgCitationSupport", average(results.stream().map(AiRagEvalResult::getJudgeCitationSupport).toList()));
+        summary.put("avgAnswerability", average(results.stream().map(AiRagEvalResult::getJudgeAnswerability).toList()));
+        summary.put("lowCoverageCount", results.stream()
+                .filter(result -> result.getJudgeCoverage() != null && result.getJudgeCoverage() < 0.7)
+                .count());
+        summary.put("contradictionRiskCount", results.stream()
+                .filter(result -> result.getJudgeContradiction() != null && result.getJudgeContradiction() > 0.2)
+                .count());
+        summary.put("weakCitationCount", results.stream()
+                .filter(result -> result.getJudgeCitationSupport() != null && result.getJudgeCitationSupport() < 0.7)
+                .count());
+        summary.put("unanswerableCount", results.stream()
+                .filter(result -> result.getJudgeAnswerability() != null && result.getJudgeAnswerability() < 0.5)
+                .count());
+        return summary;
+    }
+
+    private Double average(List<Double> values) {
+        List<Double> available = values.stream()
+                .filter(value -> value != null && !value.isNaN() && !value.isInfinite())
+                .toList();
+        if (available.isEmpty()) {
+            return null;
+        }
+        return available.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
     }
 
     private double scoreResult(AiRagEvalResult result) {

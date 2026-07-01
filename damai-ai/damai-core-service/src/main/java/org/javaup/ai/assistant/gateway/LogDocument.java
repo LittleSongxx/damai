@@ -20,6 +20,9 @@ public class LogDocument {
     @IndexField(value = "traceId", fieldType = FieldType.KEYWORD)
     private String traceId;
 
+    @IndexField(value = "spanId", fieldType = FieldType.KEYWORD)
+    private String spanId;
+
     @IndexField(value = "projectName", fieldType = FieldType.KEYWORD)
     private String projectName;
 

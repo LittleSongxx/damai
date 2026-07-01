@@ -19,5 +19,11 @@ public class AiPromptVersion extends BaseTableData {
     private Boolean active;
     private Integer trafficPercent;
     private String rolloutStatus;
+    private String baselineEvalRunId;
+    private String releaseNote;
+    private Long releasedBy;
+    private java.util.Date releasedAt;
+    private String rollbackFromVersion;
+    private String rollbackReason;
     private Long createdBy;
 }

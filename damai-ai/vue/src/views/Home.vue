@@ -1,7 +1,7 @@
 <template>
   <div class="home" :class="{ 'dark': isDark }">
     <div class="container">
-      <h1 class="title">旧版 AI 入口</h1>
+      <h1 class="title">大麦 AI 工作台</h1>
       <div class="cards-grid">
         <router-link 
           v-for="app in aiApps" 
@@ -26,7 +26,6 @@ import { useDark } from '@vueuse/core'
 import { 
   ChartBarIcon
 } from '@heroicons/vue/24/outline'
-import DamaiAssistantIcon from '../components/icons/DamaiAssistantIcon.vue'
 import DamaiAssistantRobotIcon from '../components/icons/DamaiAssistantRobotIcon.vue'
 import DamaiAnalysisIcon from '../components/icons/DamaiAnalysisIcon.vue'
 
@@ -35,34 +34,20 @@ const isDark = useDark()
 const aiApps = ref([
   {
     id: 0,
-    title: '大麦统一助手',
-    description: '新的统一入口，后台自动路由到业务、规则或运维技能',
+    title: '大麦智能客服',
+    description: '唯一用户侧入口，支持高频问题秒答、规则问答、售后工单和转人工',
     route: '/assistant',
     icon: DamaiAssistantRobotIcon
   },
   {
     id: 1,
-    title: '大麦贴心助手',
-    description: '帮你解决大麦业务相关的问题',
-    route: '/damai-ai',
-    icon: DamaiAssistantRobotIcon
-  },
-  {
-    id: 2,
-    title: '大麦规则助手',
-    description: '帮你解决大麦规则相关的问题',
-    route: '/damai-rag',
-    icon: DamaiAssistantIcon
-  },
-  {
-    id: 3,
     title: '大麦运维助手',
     description: '日志查询、链路追踪、系统监控分析',
     route: '/damai-analysis',
     icon: DamaiAnalysisIcon
   },
   {
-    id: 4,
+    id: 2,
     title: 'AI可观测性',
     description: 'Token统计、费用监控、调用追踪',
     route: '/ai-observability',

@@ -98,6 +98,7 @@ public class Nl2SqlEvalController {
         }
         if (updates.getQuestion() != null) existing.setQuestion(updates.getQuestion());
         if (updates.getExpectedSql() != null) existing.setExpectedSql(updates.getExpectedSql());
+        if (updates.getExpectedResultJson() != null) existing.setExpectedResultJson(updates.getExpectedResultJson());
         if (updates.getExpectedTableNames() != null) existing.setExpectedTableNames(updates.getExpectedTableNames());
         if (updates.getCategory() != null) existing.setCategory(updates.getCategory());
         if (updates.getDifficulty() != null) existing.setDifficulty(updates.getDifficulty());

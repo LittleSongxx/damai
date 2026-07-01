@@ -1,5 +1,5 @@
 import { computed, nextTick, ref } from 'vue'
-import { assistantAPI } from '../api/api'
+import { aiOpsAdminAPI, assistantAPI, customerServiceAPI, ragEvalAPI } from '../api/api'
 
 function normalizeMessage(message, index) {
   return {
@@ -129,11 +129,17 @@ export function useAssistantRuntime() {
   const currentSkillId = ref('')
   const currentSkillName = ref('')
   const currentMessages = ref([])
+  const customerStarterPrompts = ref([])
+  const customerServiceCard = ref(null)
+  const customerSuggestions = ref([])
+  const customerSentiment = ref(null)
+  const customerEscalationTicket = ref(null)
   const conversations = ref([])
   const runTimeline = ref([])
   const evidenceCards = ref([])
   const stageTraces = ref([])
   const retrievalTraces = ref([])
+  const runGraph = ref(null)
   const memorySummary = ref(null)
   const pendingAction = ref(null)
   const toolCalls = ref([])
@@ -141,6 +147,20 @@ export function useAssistantRuntime() {
   const errorMessage = ref('')
   const refusalReason = ref('')
   const runStatus = ref('')
+  const qualityGate = ref(null)
+  const mcpGovernance = ref(null)
+  const mcpBoundaryResult = ref(null)
+  const evalSuiteResult = ref(null)
+  const evalSuiteRunning = ref('')
+  const ragEvalReport = ref(null)
+  const ragBaselineRunId = ref('')
+  const ragEvalComparison = ref(null)
+  const ragBadCases = ref([])
+  const ragIngestionTasks = ref([])
+  const ragLastReindexJob = ref(null)
+  const aiOpsFaultScenarios = ref([])
+  const aiOpsFaultResult = ref(null)
+  const adminWorkspaceError = ref('')
   const capabilities = ref({ admin: false, allowedRoutes: ['business', 'knowledge', 'general'], skills: [] })
   const seenEventIds = ref(new Set())
 
@@ -168,12 +188,17 @@ export function useAssistantRuntime() {
     evidenceCards.value = []
     stageTraces.value = []
     retrievalTraces.value = []
+    runGraph.value = null
     memorySummary.value = null
     pendingAction.value = null
     toolCalls.value = []
     clarificationOptions.value = []
     refusalReason.value = ''
     errorMessage.value = ''
+    customerServiceCard.value = null
+    customerSuggestions.value = []
+    customerSentiment.value = null
+    customerEscalationTicket.value = null
     runStatus.value = ''
     currentRoute.value = ''
     currentSkillId.value = ''
@@ -262,6 +287,10 @@ export function useAssistantRuntime() {
     }
   }
 
+  const applyRunGraph = (graph) => {
+    runGraph.value = graph || null
+  }
+
   const appendAssistantDelta = async (delta) => {
     if (!delta) {
       return
@@ -329,6 +358,220 @@ export function useAssistantRuntime() {
       allowedRoutes: Array.isArray(result?.data?.allowedRoutes) ? result.data.allowedRoutes : ['business', 'knowledge', 'general'],
       skills: Array.isArray(result?.data?.skills) ? result.data.skills : []
     }
+    if (capabilities.value.admin) {
+      await loadAdminWorkspace()
+    } else {
+      qualityGate.value = null
+      mcpGovernance.value = null
+      mcpBoundaryResult.value = null
+      evalSuiteResult.value = null
+      evalSuiteRunning.value = ''
+      ragEvalReport.value = null
+      ragEvalComparison.value = null
+      ragBaselineRunId.value = ''
+      ragBadCases.value = []
+      ragIngestionTasks.value = []
+      ragLastReindexJob.value = null
+      aiOpsFaultScenarios.value = []
+    }
+  }
+
+  const loadAdminWorkspace = async () => {
+    adminWorkspaceError.value = ''
+    try {
+      const gate = await assistantAPI.getQualityGate()
+      qualityGate.value = gate?.data || null
+    } catch (error) {
+      qualityGate.value = null
+      adminWorkspaceError.value = error.message || '治理门禁加载失败'
+    }
+
+    try {
+      const mcp = await assistantAPI.getMcpGovernance()
+      mcpGovernance.value = mcp?.data || null
+    } catch (error) {
+      mcpGovernance.value = null
+    }
+
+    try {
+      if (qualityGate.value?.latestRagRunId) {
+        const report = await ragEvalAPI.getRunReport(qualityGate.value.latestRagRunId)
+        ragEvalReport.value = report?.data || null
+        ragBaselineRunId.value = ragEvalReport.value?.baselineRunId || ragBaselineRunId.value || ''
+      } else {
+        ragEvalReport.value = null
+      }
+    } catch (error) {
+      ragEvalReport.value = null
+    }
+
+    try {
+      const badCases = await ragEvalAPI.listBadCases('PENDING')
+      ragBadCases.value = Array.isArray(badCases?.data) ? badCases.data : []
+    } catch (error) {
+      ragBadCases.value = []
+    }
+
+    try {
+      const tasks = await ragEvalAPI.listIngestionTasks()
+      ragIngestionTasks.value = Array.isArray(tasks?.data) ? tasks.data : []
+    } catch (error) {
+      ragIngestionTasks.value = []
+    }
+
+    try {
+      const scenarios = await aiOpsAdminAPI.listFaultScenarios()
+      aiOpsFaultScenarios.value = Array.isArray(scenarios?.data) ? scenarios.data : []
+    } catch (error) {
+      aiOpsFaultScenarios.value = []
+    }
+  }
+
+  const loadCustomerStarterPrompts = async () => {
+    try {
+      const result = await customerServiceAPI.getStarterPrompts()
+      customerStarterPrompts.value = Array.isArray(result?.data) ? result.data : []
+    } catch (error) {
+      customerStarterPrompts.value = []
+    }
+  }
+
+  const convertBadCaseToEval = async (badCase, overrides = {}) => {
+    if (!badCase?.badCaseId) {
+      return null
+    }
+    const payload = {
+      expectedAnswer: badCase.expectedAnswer || badCase.generatedAnswer || '',
+      expectedChunks: badCase.expectedChunks || '',
+      category: badCase.category || 'online-bad-case',
+      difficulty: badCase.difficulty || 'medium',
+      caseType: badCase.caseType || 'single_hop',
+      datasetId: 'default-golden',
+      datasetVersion: 'v1',
+      ...overrides
+    }
+    const result = await ragEvalAPI.convertBadCase(badCase.badCaseId, payload)
+    await loadAdminWorkspace()
+    return result
+  }
+
+  const reviewBadCase = async (badCase, reviewStatus, reviewNote = '') => {
+    if (!badCase?.badCaseId || !reviewStatus) {
+      return null
+    }
+    const result = await ragEvalAPI.reviewBadCase(badCase.badCaseId, {
+      reviewStatus,
+      reviewNote
+    })
+    await loadAdminWorkspace()
+    return result
+  }
+
+  const compareRagEvalWithBaseline = async (baselineRunId = ragBaselineRunId.value) => {
+    const evalRunId = qualityGate.value?.latestRagRunId || ragEvalReport.value?.evalRunId || ''
+    if (!evalRunId || !baselineRunId) {
+      ragEvalComparison.value = null
+      return null
+    }
+    ragBaselineRunId.value = baselineRunId
+    const result = await ragEvalAPI.compareRun(evalRunId, baselineRunId)
+    ragEvalComparison.value = result?.data || null
+    return result
+  }
+
+  const createRagReindexJob = async (taskType = 'full') => {
+    const normalizedType = taskType === 'incremental' ? 'incremental' : 'full'
+    const result = await ragEvalAPI.createReindexJob(normalizedType)
+    ragLastReindexJob.value = result?.data || null
+    await loadAdminWorkspace()
+    return result
+  }
+
+  const runEvalSuite = async (suite, payload = {}) => {
+    const normalizedSuite = String(suite || '').trim().toLowerCase()
+    if (!normalizedSuite) {
+      return null
+    }
+    evalSuiteRunning.value = normalizedSuite
+    try {
+      const result = await assistantAPI.runEvalSuite(normalizedSuite, payload)
+      evalSuiteResult.value = result?.data || null
+      await loadAdminWorkspace()
+      return result
+    } finally {
+      evalSuiteRunning.value = ''
+    }
+  }
+
+  const refreshEvalSuiteRun = async (suite = evalSuiteResult.value?.suite, evalRunId = evalSuiteResult.value?.evalRunId) => {
+    const normalizedSuite = String(suite || '').trim().toLowerCase()
+    if (!normalizedSuite || !evalRunId) {
+      return null
+    }
+    const result = await assistantAPI.getEvalRun(normalizedSuite, evalRunId)
+    evalSuiteResult.value = result?.data || evalSuiteResult.value
+    return result
+  }
+
+  const injectAiOpsFaultScenario = async (scenario) => {
+    if (!scenario?.scenarioId) {
+      return null
+    }
+    const result = await aiOpsAdminAPI.injectFaultScenario(scenario.scenarioId, {
+      query: scenario.rcaPrompt,
+      serviceName: scenario.serviceName,
+      windowMinutes: scenario.windowMinutes,
+      traceId: scenario.injectedSignals?.traceId,
+      releaseVersion: `${scenario.scenarioId}-release-20260630`,
+      configKey: `${scenario.scenarioId}.feature-flag`,
+      changeWindowMinutes: Math.max(60, Number(scenario.windowMinutes || 30) * 2)
+    })
+    aiOpsFaultResult.value = result?.data || null
+    return result
+  }
+
+  const buildAiOpsRcaEvidence = async (scenario = null) => {
+    const scenarioPayload = scenario || aiOpsFaultScenarios.value[0] || {}
+    const result = await aiOpsAdminAPI.buildRcaEvidence({
+      query: scenarioPayload.rcaPrompt || aiOpsFaultResult.value?.assistantPrompt || 'diagnose recent production incident',
+      serviceName: scenarioPayload.serviceName || aiOpsFaultResult.value?.evidenceBundle?.serviceName || 'order-service',
+      traceId: scenarioPayload.injectedSignals?.traceId || aiOpsFaultResult.value?.evidenceBundle?.traceId || '',
+      windowMinutes: scenarioPayload.windowMinutes || 30,
+      releaseVersion: `${scenarioPayload.scenarioId || 'manual'}-release-20260630`,
+      configKey: `${scenarioPayload.scenarioId || 'manual'}.feature-flag`,
+      changeWindowMinutes: Math.max(60, Number(scenarioPayload.windowMinutes || 30) * 2)
+    })
+    aiOpsFaultResult.value = {
+      status: 'RCA_EVIDENCE',
+      assistantPrompt: `RCA evidence bundle for ${result?.data?.serviceName || scenarioPayload.serviceName || 'order-service'}`,
+      evidenceBundle: result?.data || null
+    }
+    return result
+  }
+
+  const readMcpResource = async (resourceUri = 'assistant://runs/{runId}/graph', overrides = {}) => {
+    const result = await assistantAPI.readMcpResource({
+      resourceUri,
+      runId: currentRunId.value,
+      traceId: aiOpsFaultResult.value?.evidenceBundle?.traceId || '',
+      confirmed: true,
+      ...overrides
+    })
+    mcpBoundaryResult.value = result?.data || null
+    return result
+  }
+
+  const renderMcpPrompt = async (promptName = 'ops.rca', overrides = {}) => {
+    const result = await assistantAPI.renderMcpPrompt({
+      promptName,
+      serviceName: aiOpsFaultResult.value?.evidenceBundle?.serviceName || 'order-service',
+      traceId: aiOpsFaultResult.value?.evidenceBundle?.traceId || '',
+      windowMinutes: 30,
+      confirmed: true,
+      ...overrides
+    })
+    mcpBoundaryResult.value = result?.data || null
+    return result
   }
 
   const loadConversation = async (chatId) => {
@@ -346,6 +589,12 @@ export function useAssistantRuntime() {
     if (conversation?.latestRunId) {
       const runDetail = await assistantAPI.getRun(conversation.latestRunId)
       applyRunDetail(runDetail?.data)
+      try {
+        const graph = await assistantAPI.getRunGraph(conversation.latestRunId)
+        applyRunGraph(graph?.data)
+      } catch (error) {
+        runGraph.value = null
+      }
     }
     await scrollToBottom()
   }
@@ -492,6 +741,30 @@ export function useAssistantRuntime() {
         refusalReason.value = Array.isArray(data?.reasons) ? data.reasons.join('；') : (data?.message || refusalReason.value)
         recordTimeline(event, data, eventId)
         break
+      case 'customer.quick_answer.hit':
+      case 'customer.quick_answer.miss':
+      case 'customer.service.card':
+        customerServiceCard.value = data || null
+        if (Array.isArray(data?.sourceRefs)) {
+          evidenceCards.value = data.sourceRefs
+        }
+        if (Array.isArray(data?.suggestions)) {
+          customerSuggestions.value = data.suggestions
+        }
+        recordTimeline(event, data, eventId)
+        break
+      case 'customer.sentiment.detected':
+        customerSentiment.value = data || null
+        recordTimeline(event, data, eventId)
+        break
+      case 'customer.suggestions.generated':
+        customerSuggestions.value = Array.isArray(data?.suggestions) ? data.suggestions : []
+        recordTimeline(event, data, eventId)
+        break
+      case 'customer.escalation.created':
+        customerEscalationTicket.value = data?.ticket || data || null
+        recordTimeline(event, data, eventId)
+        break
       case 'run.completed':
         runStatus.value = data?.status || 'COMPLETED'
         recordTimeline(event, data, eventId)
@@ -513,6 +786,72 @@ export function useAssistantRuntime() {
     }
     const runDetail = await assistantAPI.getRun(runId)
     applyRunDetail(runDetail?.data)
+    try {
+      const graph = await assistantAPI.getRunGraph(runId)
+      applyRunGraph(graph?.data)
+    } catch (error) {
+      runGraph.value = null
+    }
+  }
+
+  const resumeRun = async () => {
+    if (!currentRunId.value || isStreaming.value) {
+      return
+    }
+    isStreaming.value = true
+    errorMessage.value = ''
+    try {
+      const result = await assistantAPI.resumeRun(currentRunId.value)
+      const stream = await assistantAPI.streamRun(result?.data?.eventStreamPath)
+      for await (const item of stream) {
+        if (!item) {
+          continue
+        }
+        if (item.id && seenEventIds.value.has(item.id)) {
+          continue
+        }
+        if (item.id) {
+          seenEventIds.value.add(item.id)
+        }
+        await handleRunEvent(item.event, item.data, item.id)
+      }
+      await refreshRunState(currentRunId.value)
+      await loadConversations()
+    } catch (error) {
+      errorMessage.value = error.message || '恢复运行失败'
+    } finally {
+      isStreaming.value = false
+    }
+  }
+
+  const replayRun = async () => {
+    if (!currentRunId.value || isStreaming.value) {
+      return
+    }
+    isStreaming.value = true
+    errorMessage.value = ''
+    try {
+      const result = await assistantAPI.replayRun(currentRunId.value)
+      const stream = await assistantAPI.streamRun(result?.data?.eventStreamPath)
+      for await (const item of stream) {
+        if (!item) {
+          continue
+        }
+        if (item.id && seenEventIds.value.has(item.id)) {
+          continue
+        }
+        if (item.id) {
+          seenEventIds.value.add(item.id)
+        }
+        await handleRunEvent(item.event, item.data, item.id)
+      }
+      await refreshRunState(currentRunId.value)
+      await loadConversations()
+    } catch (error) {
+      errorMessage.value = error.message || '重放运行失败'
+    } finally {
+      isStreaming.value = false
+    }
   }
 
   const sendMessage = async (presetMessage, clientContextOverrides = {}) => {
@@ -534,9 +873,58 @@ export function useAssistantRuntime() {
     await scrollToBottom()
 
     try {
-      const stream = await assistantAPI.sendMessage(message, currentChatId.value || null, {
+      const customerContext = {
+        scene: 'customer_service',
         entry: 'assistant-hub',
         ...clientContextOverrides
+      }
+      const quickAnswer = await customerServiceAPI.quickAnswer({
+        chatId: currentChatId.value || null,
+        message,
+        intentHint: clientContextOverrides.intentHint || clientContextOverrides.intentCode,
+        hotQuestionId: clientContextOverrides.hotQuestionId,
+        programId: clientContextOverrides.programId,
+        orderNo: clientContextOverrides.orderNo,
+        categoryId: clientContextOverrides.categoryId,
+        clientContext: customerContext
+      })
+      const quickData = quickAnswer?.data || null
+      if (quickData) {
+        customerSentiment.value = quickData.sentiment || null
+        customerSuggestions.value = Array.isArray(quickData.suggestions) ? quickData.suggestions : []
+        customerEscalationTicket.value = quickData.escalationTicket || null
+      }
+      if (quickData?.hit && quickData.answerMode === 'CACHED_ANSWER') {
+        const content = quickData.directAnswer || '已为你命中客服高频问题。'
+        currentMessages.value.push({
+          id: `assistant-customer-${Date.now()}`,
+          role: 'assistant',
+          content,
+          timestamp: new Date().toISOString()
+        })
+        evidenceCards.value = Array.isArray(quickData.sourceRefs) ? quickData.sourceRefs : []
+        clarificationOptions.value = Array.isArray(quickData.actionButtons)
+          ? quickData.actionButtons.map(button => button.label).filter(Boolean)
+          : []
+        customerServiceCard.value = quickData
+        runStatus.value = 'QUICK_ANSWER'
+        currentRoute.value = quickData.routeHint || 'customer_service'
+        currentSkillId.value = quickData.intentCode || ''
+        currentSkillName.value = '客服秒答'
+        recordTimeline('customer.quick_answer.hit', quickData, `customer-hit-${Date.now()}`)
+        if (quickData.sentiment) {
+          recordTimeline('customer.sentiment.detected', quickData.sentiment, `customer-sentiment-${Date.now()}`)
+        }
+        if (quickData.escalationTicket) {
+          recordTimeline('customer.escalation.created', quickData.escalationTicket, `customer-escalation-${Date.now()}`)
+        }
+        await scrollToBottom()
+        return
+      }
+
+      const stream = await assistantAPI.sendMessage(message, currentChatId.value || null, {
+        ...customerContext,
+        ...(quickData?.clientContext || {})
       })
       for await (const item of stream) {
         if (!item) {
@@ -595,12 +983,18 @@ export function useAssistantRuntime() {
     currentSkillId,
     currentSkillName,
     currentMessages,
+    customerStarterPrompts,
+    customerServiceCard,
+    customerSuggestions,
+    customerSentiment,
+    customerEscalationTicket,
     conversations,
     runTimeline,
     orderedTimeline,
     evidenceCards,
     stageTraces,
     retrievalTraces,
+    runGraph,
     memorySummary,
     pendingAction,
     toolCalls,
@@ -608,15 +1002,43 @@ export function useAssistantRuntime() {
     errorMessage,
     refusalReason,
     runStatus,
+    qualityGate,
+    mcpGovernance,
+    mcpBoundaryResult,
+    evalSuiteResult,
+    evalSuiteRunning,
+    ragEvalReport,
+    ragBaselineRunId,
+    ragEvalComparison,
+    ragBadCases,
+    ragIngestionTasks,
+    ragLastReindexJob,
+    aiOpsFaultScenarios,
+    aiOpsFaultResult,
+    adminWorkspaceError,
     hasMessages,
     capabilities,
     canUseOps,
     adjustTextareaHeight,
+    loadCustomerStarterPrompts,
     loadCapabilities,
+    loadAdminWorkspace,
     loadConversations,
     loadConversation,
     startNewChat,
     sendMessage,
+    resumeRun,
+    replayRun,
+    compareRagEvalWithBaseline,
+    runEvalSuite,
+    refreshEvalSuiteRun,
+    convertBadCaseToEval,
+    reviewBadCase,
+    createRagReindexJob,
+    readMcpResource,
+    renderMcpPrompt,
+    injectAiOpsFaultScenario,
+    buildAiOpsRcaEvidence,
     approveAction: () => resolveAction(pendingAction.value, 'approve'),
     rejectAction: () => resolveAction(pendingAction.value, 'reject')
   }

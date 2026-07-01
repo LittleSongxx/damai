@@ -22,6 +22,7 @@ import org.javaup.ai.mapper.AiRunEventMapper;
 import org.javaup.ai.mapper.AiRunMapper;
 import org.javaup.ai.mapper.AiTraceMapper;
 import org.javaup.ai.mapper.AiToolCallMapper;
+import org.javaup.ai.assistant.runtime.RunGraphStateService;
 import org.javaup.ai.vo.AssistantRunCreatedVo;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,7 +30,9 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -46,6 +49,7 @@ public class AssistantRunService {
     private final AiConversationMemorySummaryMapper memorySummaryMapper;
     private final AssistantConversationService conversationService;
     private final AssistantRunEventStreamService eventStreamService;
+    private final RunGraphStateService runGraphStateService;
 
     @Transactional(rollbackFor = Exception.class)
     public AssistantRunCreatedVo createRun(AssistantRunCreateRequest request) {
@@ -65,6 +69,7 @@ public class AssistantRunService {
         run.setClientContextJson(request.getClientContext() == null ? null : JSON.toJSONString(request.getClientContext()));
         run.setStatus(1);
         runMapper.insert(run);
+        runGraphStateService.initializeRun(run);
         conversationService.bindLatestRun(chatId, null, run.getRunId(), run.getRunStatus(), request.getMessage());
         return AssistantRunCreatedVo.builder()
                 .runId(run.getRunId())
@@ -137,9 +142,11 @@ public class AssistantRunService {
         event.setUserId(run.getUserId());
         event.setEventOrder(nextOrder);
         event.setEventType(eventType);
-        event.setPayloadJson(payload == null ? "{}" : JSON.toJSONString(payload));
+        Map<String, Object> normalizedPayload = normalizeEventPayload(run, eventType, payload);
+        event.setPayloadJson(JSON.toJSONString(normalizedPayload));
         event.setStatus(1);
         runEventMapper.insert(event);
+        runGraphStateService.recordEvent(run, event, normalizedPayload);
         publishAfterCommit(event);
         return event;
     }
@@ -171,6 +178,22 @@ public class AssistantRunService {
         run.setCompletedAt(new Date());
         runMapper.updateById(run);
         conversationService.bindLatestRun(run.getConversationId(), routeOf(run), run.getRunId(), run.getRunStatus(), run.getUserMessage());
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public int resetForResume(String runId) {
+        AiRun run = getRunInternal(runId);
+        if (run == null) {
+            throw new IllegalArgumentException("Run does not exist: " + runId);
+        }
+        run.setRunStatus(AssistantRunStatus.CREATED.name());
+        run.setCurrentStage("RESUME_REQUESTED");
+        run.setErrorMessage(null);
+        run.setCompletedAt(null);
+        run.setResumed(run.getResumed() == null ? 1 : run.getResumed() + 1);
+        runMapper.updateById(run);
+        conversationService.bindLatestRun(run.getConversationId(), routeOf(run), run.getRunId(), run.getRunStatus(), run.getUserMessage());
+        return run.getResumed();
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -408,6 +431,28 @@ public class AssistantRunService {
                 eventStreamService.publish(event);
             }
         });
+    }
+
+    private Map<String, Object> normalizeEventPayload(AiRun run, String eventType, Object payload) {
+        Map<String, Object> normalized = new LinkedHashMap<>();
+        if (payload instanceof Map<?, ?> map) {
+            map.forEach((key, value) -> normalized.put(String.valueOf(key), value));
+        } else if (payload != null) {
+            normalized.put("data", payload);
+        }
+        normalized.putIfAbsent("runId", run.getRunId());
+        normalized.put("eventType", eventType);
+        normalized.putIfAbsent("graphNodeId", graphNodeId(eventType));
+        normalized.putIfAbsent("eventCategory", org.javaup.ai.assistant.runtime.RunGraphDefinition.eventCategory(eventType));
+        normalized.putIfAbsent("traceRef", run.getRunId());
+        if (run.getResumableStateJson() != null && !run.getResumableStateJson().isBlank()) {
+            normalized.putIfAbsent("checkpointId", run.getRunId() + ":" + run.getCurrentStage());
+        }
+        return normalized;
+    }
+
+    private String graphNodeId(String eventType) {
+        return org.javaup.ai.assistant.runtime.RunGraphDefinition.nodeTypeForEvent(eventType);
     }
 
     private AssistantRouteType routeOf(AiRun run) {

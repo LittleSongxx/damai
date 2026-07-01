@@ -1,7 +1,9 @@
 package org.javaup.ai.service;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.alibaba.fastjson2.JSON;
 import lombok.extern.slf4j.Slf4j;
+import org.javaup.ai.dto.CustomerEscalationRequest;
 import org.javaup.ai.entity.AiRun;
 import org.javaup.ai.entity.EscalationTicket;
 import org.javaup.ai.mapper.AiRunMapper;
@@ -37,11 +39,7 @@ public class EscalationService {
     @Transactional
     public EscalationTicket escalate(String runId, String conversationId, Long userId,
                                       String escalationType, String reason, String aiDiagnosis) {
-        // 避免重复升级
-        EscalationTicket existing = ticketMapper.selectOne(
-                Wrappers.lambdaQuery(EscalationTicket.class)
-                        .eq(EscalationTicket::getRunId, runId)
-                        .eq(EscalationTicket::getTicketStatus, "OPEN"));
+        EscalationTicket existing = findOpenDuplicate(runId, conversationId, userId, escalationType);
         if (existing != null) {
             log.info("Escalation already exists for runId={}", runId);
             return existing;
@@ -70,14 +68,80 @@ public class EscalationService {
         return ticket;
     }
 
+    @Transactional
+    public EscalationTicket createCustomerEscalation(CustomerEscalationRequest request, Long userId) {
+        String escalationType = "HUMAN_HANDOFF".equals(request.getIntentCode()) ? "HUMAN_HANDOFF" : "CUSTOMER_SERVICE";
+        EscalationTicket existing = findOpenDuplicate(request.getRunId(), request.getConversationId(), userId, escalationType);
+        if (existing != null) {
+            return existing;
+        }
+        String dialogueSummary = StringUtils.hasText(request.getUserQuestion())
+                ? "用户: " + request.getUserQuestion() + "\n助手: " + value(request.getAiAnswer())
+                : buildDialogueSummary(request.getConversationId(), userId);
+        EscalationTicket ticket = new EscalationTicket();
+        ticket.setTicketId(UUID.randomUUID().toString().replace("-", ""));
+        ticket.setRunId(request.getRunId());
+        ticket.setConversationId(request.getConversationId());
+        ticket.setUserId(userId);
+        ticket.setEscalationType(escalationType);
+        ticket.setPriority(customerPriority(request));
+        ticket.setTicketStatus("OPEN");
+        ticket.setAiDiagnosis(StringUtils.hasText(request.getReason()) ? request.getReason() : "用户请求智能客服转人工");
+        ticket.setDialogueSummary(dialogueSummary);
+        ticket.setContextJson(JSON.toJSONString(Map.of(
+                "userQuestion", value(request.getUserQuestion()),
+                "aiAnswer", value(request.getAiAnswer()),
+                "sentimentIntensity", request.getSentimentIntensity() == null ? 0D : request.getSentimentIntensity(),
+                "sourceRefs", request.getSourceRefs() == null ? List.of() : request.getSourceRefs(),
+                "businessContext", request.getBusinessContext() == null ? Map.of() : request.getBusinessContext()
+        )));
+        ticket.setSentiment(request.getSentiment());
+        ticket.setIntentCode(request.getIntentCode());
+        ticket.setSuggestedReply(StringUtils.hasText(request.getSuggestedReply())
+                ? request.getSuggestedReply()
+                : "先确认用户诉求和订单/场次信息，再按退票、实名、入场或售后规则给出明确下一步。");
+        ticket.setCreateTime(new Date());
+        ticket.setEditTime(new Date());
+        ticket.setStatus(1);
+        ticketMapper.insert(ticket);
+        log.info("Customer service escalation created: ticketId={}, priority={}", ticket.getTicketId(), ticket.getPriority());
+        return ticket;
+    }
+
+    public EscalationTicket getUserTicket(String ticketId, Long userId) {
+        if (!StringUtils.hasText(ticketId) || userId == null) {
+            return null;
+        }
+        return ticketMapper.selectOne(Wrappers.lambdaQuery(EscalationTicket.class)
+                .eq(EscalationTicket::getTicketId, ticketId)
+                .eq(EscalationTicket::getUserId, userId)
+                .eq(EscalationTicket::getStatus, 1)
+                .last("limit 1"));
+    }
+
     /**
      * 查询待处理工单 - 供人工坐席查看
      */
     public List<EscalationTicket> getPendingTickets() {
-        return ticketMapper.selectList(
+        return getPendingTickets(null, null, null);
+    }
+
+    public List<EscalationTicket> getPendingTickets(String priority, String sentiment, String intentCode) {
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<EscalationTicket> query =
                 Wrappers.lambdaQuery(EscalationTicket.class)
                         .in(EscalationTicket::getTicketStatus, List.of("OPEN", "ASSIGNED", "IN_PROGRESS"))
-                        .orderByAsc(EscalationTicket::getPriority)
+                        .eq(EscalationTicket::getStatus, 1);
+        if (StringUtils.hasText(priority)) {
+            query.eq(EscalationTicket::getPriority, priority);
+        }
+        if (StringUtils.hasText(sentiment)) {
+            query.eq(EscalationTicket::getSentiment, sentiment);
+        }
+        if (StringUtils.hasText(intentCode)) {
+            query.eq(EscalationTicket::getIntentCode, intentCode);
+        }
+        return ticketMapper.selectList(
+                query.orderByAsc(EscalationTicket::getPriority)
                         .orderByAsc(EscalationTicket::getCreateTime));
     }
 
@@ -159,5 +223,40 @@ public class EscalationService {
         if ("UNRESOLVED".equals(escalationType)) return "MEDIUM";
         if ("COMPLEX".equals(escalationType)) return "MEDIUM";
         return "LOW";
+    }
+
+    private EscalationTicket findOpenDuplicate(String runId, String conversationId, Long userId, String escalationType) {
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<EscalationTicket> query =
+                Wrappers.lambdaQuery(EscalationTicket.class)
+                        .eq(EscalationTicket::getTicketStatus, "OPEN")
+                        .eq(EscalationTicket::getStatus, 1);
+        if (StringUtils.hasText(runId)) {
+            query.eq(EscalationTicket::getRunId, runId);
+        } else {
+            if (!StringUtils.hasText(conversationId) || userId == null) {
+                return null;
+            }
+            query.eq(EscalationTicket::getConversationId, conversationId)
+                    .eq(EscalationTicket::getUserId, userId)
+                    .eq(EscalationTicket::getEscalationType, escalationType);
+        }
+        return ticketMapper.selectOne(query.last("limit 1"));
+    }
+
+    private String customerPriority(CustomerEscalationRequest request) {
+        if (request.getSentimentIntensity() != null && request.getSentimentIntensity() >= 0.85D) {
+            return "CRITICAL";
+        }
+        if ("COMPLAINT".equals(request.getIntentCode()) || "NEGATIVE".equals(request.getSentiment())) {
+            return "HIGH";
+        }
+        if ("HUMAN_HANDOFF".equals(request.getIntentCode()) || "ORDER_AFTERSALE".equals(request.getIntentCode())) {
+            return "MEDIUM";
+        }
+        return "LOW";
+    }
+
+    private String value(String raw) {
+        return raw == null ? "" : raw;
     }
 }

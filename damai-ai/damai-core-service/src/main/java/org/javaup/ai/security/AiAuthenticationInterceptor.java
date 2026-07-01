@@ -7,6 +7,7 @@ import org.javaup.ai.common.ApiResponse;
 import org.javaup.ai.context.AiRequestContext;
 import org.javaup.ai.context.AiRequestContextHolder;
 import org.javaup.ai.context.AiUserContext;
+import org.javaup.ai.security.AiPermissionService;
 import org.springframework.http.HttpMethod;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -22,9 +23,6 @@ import java.util.Set;
 public class AiAuthenticationInterceptor implements HandlerInterceptor {
 
     private static final Set<String> OPEN_PREFIXES = Set.of(
-            "/actuator/",
-            "/api/rag-eval",
-            "/ai/rag",
             "/error"
     );
 
@@ -32,9 +30,12 @@ public class AiAuthenticationInterceptor implements HandlerInterceptor {
     private boolean playgroundEnabled;
 
     private final AiAuthenticationService authenticationService;
+    private final AiPermissionService permissionService;
 
-    public AiAuthenticationInterceptor(AiAuthenticationService authenticationService) {
+    public AiAuthenticationInterceptor(AiAuthenticationService authenticationService,
+                                       AiPermissionService permissionService) {
         this.authenticationService = authenticationService;
+        this.permissionService = permissionService;
     }
 
     @Override
@@ -53,12 +54,14 @@ public class AiAuthenticationInterceptor implements HandlerInterceptor {
             String token = request.getHeader("token");
             AiUserContext userContext = authenticationService.authenticate(token);
             AiRequestContextHolder.set(AiRequestContext.builder().user(userContext).build());
+            if (requiresAdmin(uri) && !permissionService.isAdmin(userContext)) {
+                writeError(response, HttpServletResponse.SC_FORBIDDEN, "当前账号无权访问 AI 管理、评测、运维或索引治理接口");
+                AiRequestContextHolder.clear();
+                return false;
+            }
             return true;
         } catch (AiAuthenticationException ex) {
-            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            response.setCharacterEncoding(StandardCharsets.UTF_8.name());
-            response.setContentType("application/json;charset=UTF-8");
-            response.getWriter().write(JSON.toJSONString(ApiResponse.error(401, ex.getMessage())));
+            writeError(response, HttpServletResponse.SC_UNAUTHORIZED, ex.getMessage());
             return false;
         }
     }
@@ -66,5 +69,24 @@ public class AiAuthenticationInterceptor implements HandlerInterceptor {
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
         AiRequestContextHolder.clear();
+    }
+
+    private boolean requiresAdmin(String uri) {
+        return uri.startsWith("/admin/")
+                || uri.startsWith("/actuator")
+                || uri.startsWith("/api/rag-eval")
+                || uri.startsWith("/api/nl2sql-eval")
+                || uri.startsWith("/api/prompt-versions")
+                || uri.startsWith("/ai/rag/")
+                || uri.startsWith("/ai/enhance/observability")
+                || uri.startsWith("/assistant/evals/")
+                || uri.startsWith("/assistant/admin/");
+    }
+
+    private void writeError(HttpServletResponse response, int status, String message) throws java.io.IOException {
+        response.setStatus(status);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setContentType("application/json;charset=UTF-8");
+        response.getWriter().write(JSON.toJSONString(ApiResponse.error(status, message)));
     }
 }

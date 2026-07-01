@@ -17,19 +17,22 @@ const routes = [
     component: () => import('../views/SkillManagement.vue')
   },
   {
+    path: '/assistant/prompts',
+    name: 'PromptGovernance',
+    component: () => import('../views/PromptGovernance.vue')
+  },
+  {
     path: '/legacy',
     name: 'Home',
     component: () => import('../views/Home.vue')
   },
   {
     path: '/damai-ai',
-    name: 'DaMaiAI',
-    component: () => import('../views/DaMaiAi.vue')
+    redirect: '/assistant'
   },
   {
     path: '/damai-rag',
-    name: 'SmartRag',
-    component: () => import('../views/SmartRag.vue')
+    redirect: '/assistant'
   },
   {
     path: '/damai-analysis',

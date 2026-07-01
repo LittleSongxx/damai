@@ -46,8 +46,13 @@ public class AssistantExecutionPlanner {
         Double sentimentIntensity = null;
         List<String> emotionTags = null;
         if (sentimentAnalysisService != null) {
-            SentimentAnalysisService.SentimentResult sentiment = sentimentAnalysisService.analyze(
-                    request.getMessage(), run.getRunId(), run.getConversationId(), run.getUserId());
+            boolean customerServiceScene = isCustomerServiceScene(request.getClientContext());
+            SentimentAnalysisService.SentimentResult sentiment = customerServiceScene
+                    ? sentimentAnalysisService.quickAnalyze(request.getMessage(), run.getRunId(), run.getConversationId(), run.getUserId())
+                    : sentimentAnalysisService.analyze(request.getMessage(), run.getRunId(), run.getConversationId(), run.getUserId());
+            if (customerServiceScene) {
+                sentimentAnalysisService.analyzeAsync(request.getMessage(), run.getRunId(), run.getConversationId(), run.getUserId());
+            }
             sentimentLabel = sentiment.sentiment();
             sentimentIntensity = sentiment.intensity();
             emotionTags = sentiment.emotionTags();
@@ -117,6 +122,14 @@ public class AssistantExecutionPlanner {
                 .sentimentIntensity(sentimentIntensity)
                 .emotionTags(emotionTags)
                 .build();
+    }
+
+    private boolean isCustomerServiceScene(Map<String, Object> clientContext) {
+        if (clientContext == null) {
+            return false;
+        }
+        Object scene = clientContext.get("scene");
+        return scene != null && "customer_service".equals(String.valueOf(scene));
     }
 
     private AssistantExecutionPlan lowConfidenceSkillPlan(AiRun run, AssistantRunCreateRequest request, AssistantRouteDecision decision, AssistantSkillDecision skillDecision) {

@@ -206,7 +206,10 @@ public class RagEvalScorer {
                   "covered_points": [true, false, ...],
                   "context_recall_score": 0.0-1.0,
                   "relevant_sentence_ratio": 0.0-1.0,
-                  "context_relevance_score": 0.0-1.0
+                  "context_relevance_score": 0.0-1.0,
+                  "coverage_score": 0.0-1.0,
+                  "answerability_score": 0.0-1.0,
+                  "answerability": "ANSWERABLE|PARTIAL|UNANSWERABLE"
                 }
 
                 注意：
@@ -278,7 +281,12 @@ public class RagEvalScorer {
                   "factual_accuracy": 0.0-1.0,
                   "semantic_completeness": 0.0-1.0,
                   "answer_correctness_score": 0.0-1.0,
-                  "correctness_reason": "与参考答案对比的关键差异"
+                  "correctness_reason": "与参考答案对比的关键差异",
+
+                  "contradiction_score": 0.0-1.0,
+                  "citation_support_score": 0.0-1.0,
+                  "answerability_score": 0.0-1.0,
+                  "refusal_reason": "如果答案应该拒答或信息不足，请说明原因；否则为空字符串"
                 }
 
                 评估标准：
@@ -331,6 +339,9 @@ public class RagEvalScorer {
             Double citationPrecision = json.containsKey("citation_precision") ? clamp(json.getDoubleValue("citation_precision")) : null;
             Double citationRecall = json.containsKey("citation_recall") ? clamp(json.getDoubleValue("citation_recall")) : null;
             Double citationCoverage = json.containsKey("citation_coverage") ? clamp(json.getDoubleValue("citation_coverage")) : null;
+            if (citationCoverage == null && json.containsKey("citation_support_score")) {
+                citationCoverage = clamp(json.getDoubleValue("citation_support_score"));
+            }
             Double refusalCorrectness = json.containsKey("refusal_correctness") ? clamp(json.getDoubleValue("refusal_correctness")) : null;
             Double safetyScore = json.containsKey("safety_score") ? clamp(json.getDoubleValue("safety_score")) : null;
 

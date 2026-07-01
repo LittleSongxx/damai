@@ -77,6 +77,13 @@ public class AiRagEvalResult extends BaseTableData {
     private Double citationCoverage;
     private Double refusalCorrectness;
     private Double safetyScore;
+    private Double judgeRelevance;
+    private Double judgeCoverage;
+    private Double judgeContradiction;
+    private Double judgeCitationSupport;
+    private Double judgeAnswerability;
+    private String judgeRefusalReason;
+    private String judgeStructuredOutput;
     private Integer inputTokens;
     private Integer outputTokens;
     private Integer totalTokens;

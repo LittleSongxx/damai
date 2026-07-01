@@ -15,6 +15,7 @@ import org.javaup.ai.mapper.AiRagEvalCaseMapper;
 import org.javaup.ai.mapper.AiRagEvalResultMapper;
 import org.javaup.ai.mapper.AiRagEvalRunMapper;
 import org.javaup.ai.mapper.RagChunkMapper;
+import org.javaup.ai.rag.RagRetrievalFacade;
 import org.javaup.ai.vo.RagEvalRunRequest;
 import org.javaup.ai.vo.RagSearchResultVo;
 import org.javaup.ai.vo.RagSourceVo;
@@ -53,7 +54,7 @@ class RagEvalServiceTest {
     private AiRagEvalResultMapper resultMapper;
 
     @Mock
-    private HybridSearchService hybridSearchService;
+    private RagRetrievalFacade retrievalFacade;
 
     @Mock
     private RagEvalScorer ragEvalScorer;
@@ -66,7 +67,7 @@ class RagEvalServiceTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        service = new RagEvalService(caseMapper, runMapper, resultMapper, hybridSearchService, ragEvalScorer, ragChunkMapper, new EvalConfig());
+        service = new RagEvalService(caseMapper, runMapper, resultMapper, retrievalFacade, ragEvalScorer, ragChunkMapper, new EvalConfig());
     }
 
     @Test
@@ -241,7 +242,7 @@ class RagEvalServiceTest {
     void shouldDiagnoseZeroOverlapAndMissingExpectedChunks() {
         AiRagEvalCase evalCase = evalCase("case-diagnose", "如何申请退票？", "refund", "easy", "[\"chunk-1\",\"chunk-2\"]", "支持退票");
         when(caseMapper.selectOne(any())).thenReturn(evalCase);
-        when(hybridSearchService.hybridSearchWithTrace(anyString(), anyInt(), anyBoolean())).thenReturn(RagSearchResultVo.builder()
+        when(retrievalFacade.retrieve(anyString(), anyInt(), anyBoolean())).thenReturn(RagSearchResultVo.builder()
                 .sources(List.of(
                         RagSourceVo.builder().chunkId("chunk-3").score(0.9).build(),
                         RagSourceVo.builder().chunkId("chunk-4").score(0.8).build()))
@@ -260,7 +261,7 @@ class RagEvalServiceTest {
 
         Map<String, Object> diagnosis = service.diagnoseCase("case-diagnose", request);
 
-        assertEquals("hybrid_search_with_trace_fallback", diagnosis.get("retrievalPath"));
+        assertEquals("rag_retrieval_facade_fallback", diagnosis.get("retrievalPath"));
         assertEquals(2, diagnosis.get("expectedChunkCount"));
         assertEquals(1, diagnosis.get("missingExpectedChunkCount"));
         assertEquals(0, diagnosis.get("overlapAt5Count"));
@@ -285,12 +286,15 @@ class RagEvalServiceTest {
         run.setCompletedCases(0);
 
         AiRagEvalCase evalCase = evalCase("case-failed", "如何申请退票？", "refund", "easy", "[\"chunk-1\"]", "支持退票");
-        when(hybridSearchService.hybridSearchWithTrace(anyString(), anyInt(), anyBoolean())).thenReturn(searchResult());
+        when(retrievalFacade.retrieve(anyString(), anyInt(), anyBoolean())).thenReturn(searchResult());
         when(ragEvalScorer.generateAnswer(anyString(), anyList())).thenReturn("支持退票");
         when(ragEvalScorer.evaluateContext(anyString(), anyString(), anyList()))
-                .thenReturn(new RagEvalScorer.ContextEvalResult(0.8, 0.7, 0.6));
+                .thenReturn(new RagEvalScorer.ContextEvalResult(0.8, 0.7, 0.6,
+                        "{\"context_relevance_score\":0.6,\"coverage_score\":0.7,\"answerability\":\"ANSWERABLE\"}"));
         when(ragEvalScorer.evaluateGeneration(anyString(), anyString(), anyString(), anyList()))
-                .thenReturn(new RagEvalScorer.GenEvalResult(0.9, 0.85, 0.8));
+                .thenReturn(new RagEvalScorer.GenEvalResult(0.9, 0.85, 0.8,
+                        0.1, 9, 1, 0.7, 0.8, 0.75, 0.82, 1.0, 0.95,
+                        "{\"contradiction_score\":0.1,\"citation_support_score\":0.82,\"refusal_reason\":\"\"}"));
         when(resultMapper.insert(any(AiRagEvalResult.class))).thenThrow(new RuntimeException("Data too long for column 'eval_method'"));
         when(runMapper.updateById(any(AiRagEvalRun.class))).thenReturn(1);
 
@@ -319,12 +323,15 @@ class RagEvalServiceTest {
         run.setCompletedCases(0);
 
         AiRagEvalCase evalCase = evalCase("case-success", "如何申请退票？", "refund", "easy", "[\"chunk-1\"]", "支持退票");
-        when(hybridSearchService.hybridSearchWithTrace(anyString(), anyInt(), anyBoolean())).thenReturn(searchResult());
+        when(retrievalFacade.retrieve(anyString(), anyInt(), anyBoolean())).thenReturn(searchResult());
         when(ragEvalScorer.generateAnswer(anyString(), anyList())).thenReturn("支持退票");
         when(ragEvalScorer.evaluateContext(anyString(), anyString(), anyList()))
-                .thenReturn(new RagEvalScorer.ContextEvalResult(0.8, 0.7, 0.6));
+                .thenReturn(new RagEvalScorer.ContextEvalResult(0.8, 0.7, 0.6,
+                        "{\"context_relevance_score\":0.6,\"coverage_score\":0.7,\"answerability\":\"ANSWERABLE\"}"));
         when(ragEvalScorer.evaluateGeneration(anyString(), anyString(), anyString(), anyList()))
-                .thenReturn(new RagEvalScorer.GenEvalResult(0.9, 0.85, 0.8));
+                .thenReturn(new RagEvalScorer.GenEvalResult(0.9, 0.85, 0.8,
+                        0.1, 9, 1, 0.7, 0.8, 0.75, 0.82, 1.0, 0.95,
+                        "{\"contradiction_score\":0.1,\"citation_support_score\":0.82,\"refusal_reason\":\"\"}"));
         when(resultMapper.insert(any(AiRagEvalResult.class))).thenReturn(1);
         when(runMapper.updateById(any(AiRagEvalRun.class))).thenReturn(1);
 
@@ -345,6 +352,12 @@ class RagEvalServiceTest {
         assertEquals(1.0, run.getAvgRecall());
         assertEquals(0.9, run.getAvgFaithfulness());
         assertEquals(0.8, run.getAvgAnswerCorrectness());
+        assertEquals(0.6, persisted.getJudgeRelevance());
+        assertEquals(0.7, persisted.getJudgeCoverage());
+        assertEquals(0.1, persisted.getJudgeContradiction(), 0.0001);
+        assertEquals(0.82, persisted.getJudgeCitationSupport());
+        assertEquals(1.0, persisted.getJudgeAnswerability());
+        assertTrue(persisted.getJudgeStructuredOutput().contains("citationSupport"));
         assertNull(run.getErrorMessage());
     }
 
@@ -399,7 +412,7 @@ class RagEvalServiceTest {
         service.executeEvalAsync(run, List.of(evalCase), request);
 
         verify(orchestrator).retrieve(any(KnowledgeRetrievalPlan.class));
-        verify(hybridSearchService, never()).hybridSearchWithTrace(anyString(), anyInt(), anyBoolean());
+        verify(retrievalFacade, never()).retrieve(anyString(), anyInt(), anyBoolean());
         assertEquals(1, run.getCompletedCases());
         assertEquals("COMPLETED", run.getRunStatus());
         assertEquals(1.0, run.getAvgRecall());

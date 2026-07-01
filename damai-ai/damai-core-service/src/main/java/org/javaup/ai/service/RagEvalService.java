@@ -17,6 +17,7 @@ import org.javaup.ai.mapper.AiRagEvalCaseMapper;
 import org.javaup.ai.mapper.AiRagEvalResultMapper;
 import org.javaup.ai.mapper.AiRagEvalRunMapper;
 import org.javaup.ai.mapper.RagChunkMapper;
+import org.javaup.ai.rag.RagRetrievalFacade;
 import org.javaup.ai.vo.RagEvalRunRequest;
 import org.javaup.ai.vo.RagSearchResultVo;
 import org.javaup.ai.vo.RagSourceVo;
@@ -75,7 +76,7 @@ public class RagEvalService {
     private final AiRagEvalCaseMapper caseMapper;
     private final AiRagEvalRunMapper runMapper;
     private final AiRagEvalResultMapper resultMapper;
-    private final HybridSearchService hybridSearchService;
+    private final RagRetrievalFacade retrievalFacade;
     private final RagEvalScorer ragEvalScorer;
     private final RagChunkMapper ragChunkMapper;
     private final EvalConfig evalConfig;
@@ -89,14 +90,14 @@ public class RagEvalService {
     public RagEvalService(AiRagEvalCaseMapper caseMapper,
                            AiRagEvalRunMapper runMapper,
                            AiRagEvalResultMapper resultMapper,
-                           HybridSearchService hybridSearchService,
+                           RagRetrievalFacade retrievalFacade,
                            RagEvalScorer ragEvalScorer,
                            RagChunkMapper ragChunkMapper,
                            EvalConfig evalConfig) {
         this.caseMapper = caseMapper;
         this.runMapper = runMapper;
         this.resultMapper = resultMapper;
-        this.hybridSearchService = hybridSearchService;
+        this.retrievalFacade = retrievalFacade;
         this.ragEvalScorer = ragEvalScorer;
         this.ragChunkMapper = ragChunkMapper;
         this.evalConfig = evalConfig;
@@ -769,6 +770,8 @@ public class RagEvalService {
         double answerRelevancy = 0;
         double answerCorrectness = 0;
         boolean hasGenerationEvaluation = false;
+        String contextJudgeRaw = null;
+        String generationJudgeRaw = null;
 
         // ---- Step 3 + 4 in parallel: generateAnswer + evaluateContext + chunkRelevance (independent) ----
         Future<String> answerFuture = EVAL_INNER_POOL.submit(() ->
@@ -820,7 +823,8 @@ public class RagEvalService {
             result.setContextRecall(contextRecall);
             result.setContextRelevance(contextRelevance);
             if (StringUtils.hasText(ctxResult.rawOutput())) {
-                result.setJudgeRawOutput(ctxResult.rawOutput());
+                contextJudgeRaw = ctxResult.rawOutput();
+                result.setJudgeRawOutput(contextJudgeRaw);
             }
             hasContextEvaluation = true;
         } catch (TimeoutException e) {
@@ -879,12 +883,31 @@ public class RagEvalService {
             result.setRefusalCorrectness(genResult.refusalCorrectness());
             result.setSafetyScore(genResult.safetyScore());
             if (StringUtils.hasText(genResult.rawOutput())) {
-                result.setJudgeRawOutput(mergeJudgeOutputs(result.getJudgeRawOutput(), genResult.rawOutput()));
+                generationJudgeRaw = genResult.rawOutput();
+                result.setJudgeRawOutput(mergeJudgeOutputs(result.getJudgeRawOutput(), generationJudgeRaw));
             }
             hasGenerationEvaluation = true;
         } catch (Exception e) {
             log.warn("Generation evaluation failed for caseId={}: {}", evalCase.getCaseId(), e.getMessage());
         }
+
+        StructuredJudgeReport structuredJudge = buildStructuredJudgeReport(
+                contextJudgeRaw,
+                generationJudgeRaw,
+                contextRelevance,
+                contextRecall,
+                faithfulness,
+                result.getCitationCoverage(),
+                result.getRefusalCorrectness(),
+                evalCase.getExpectedAnswer(),
+                generatedAnswer);
+        result.setJudgeRelevance(structuredJudge.relevance());
+        result.setJudgeCoverage(structuredJudge.coverage());
+        result.setJudgeContradiction(structuredJudge.contradiction());
+        result.setJudgeCitationSupport(structuredJudge.citationSupport());
+        result.setJudgeAnswerability(structuredJudge.answerability());
+        result.setJudgeRefusalReason(structuredJudge.refusalReason());
+        result.setJudgeStructuredOutput(JSON.toJSONString(structuredJudge.toMap()));
 
         result.setDenseHitsJson(JSON.toJSONString(toSourceMaps(retrievedChunks, retrievedDocs)));
         result.setFinalHitsJson(JSON.toJSONString(toSourceMaps(retrievedChunks, retrievedDocs)));
@@ -960,6 +983,195 @@ public class RagEvalService {
             return existing;
         }
         return existing + "\n---\n" + next;
+    }
+
+    private StructuredJudgeReport buildStructuredJudgeReport(String contextRaw,
+                                                             String generationRaw,
+                                                             double contextRelevance,
+                                                             double contextRecall,
+                                                             double faithfulness,
+                                                             Double citationCoverage,
+                                                             Double refusalCorrectness,
+                                                             String expectedAnswer,
+                                                             String generatedAnswer) {
+        Map<String, Object> context = parseJudgeJson(contextRaw);
+        Map<String, Object> generation = parseJudgeJson(generationRaw);
+        Double relevance = firstScore(context, generation,
+                "context_relevance_score", "answer_relevancy_score", "relevance_score");
+        Double coverage = firstScore(context, generation,
+                "coverage_score", "context_recall_score", "semantic_completeness", "required_fact_coverage");
+        Double contradiction = firstScore(generation, context,
+                "contradiction_score", "contradiction", "unsupported_claim_rate");
+        Double citationSupport = scoreFromRaw(generationRaw, "citation_support_score");
+        if (citationSupport == null) {
+            citationSupport = firstScore(generation, context,
+                "citation_support_score", "citation_coverage", "citation_precision");
+        }
+        Double answerability = firstScore(context, generation,
+                "answerability_score", "answerability", "refusal_correctness");
+
+        relevance = relevance != null ? relevance : clampScore(contextRelevance);
+        coverage = coverage != null ? coverage : clampScore(contextRecall);
+        contradiction = contradiction != null ? contradiction : clampScore(1.0 - faithfulness);
+        citationSupport = citationSupport != null
+                ? citationSupport
+                : citationCoverage != null ? clampScore(citationCoverage) : clampScore(faithfulness);
+        answerability = answerability != null
+                ? answerability
+                : refusalCorrectness != null ? clampScore(refusalCorrectness) : inferAnswerability(expectedAnswer, generatedAnswer);
+
+        String refusalReason = firstText(generation, context,
+                "refusal_reason", "refusalReason", "answerability_reason", "faithfulness_reason");
+        if (!StringUtils.hasText(refusalReason) && answerability < 0.5) {
+            refusalReason = "retrieved evidence is insufficient or answer should be refused";
+        }
+
+        List<String> issues = new ArrayList<>();
+        if (relevance < 0.7) {
+            issues.add("LOW_RELEVANCE");
+        }
+        if (coverage < 0.7) {
+            issues.add("LOW_COVERAGE");
+        }
+        if (contradiction > 0.2) {
+            issues.add("POSSIBLE_CONTRADICTION");
+        }
+        if (citationSupport < 0.7) {
+            issues.add("WEAK_CITATION_SUPPORT");
+        }
+        if (answerability < 0.5) {
+            issues.add("UNANSWERABLE_OR_REFUSAL_NEEDED");
+        }
+        return new StructuredJudgeReport(relevance, coverage, contradiction, citationSupport,
+                answerability, StringUtils.hasText(refusalReason) ? refusalReason : "", issues);
+    }
+
+    @SafeVarargs
+    private Double firstScore(Map<String, Object> first, Map<String, Object> second, String... keys) {
+        for (Map<String, Object> source : List.of(first, second)) {
+            for (String key : keys) {
+                Object value = source.get(key);
+                Double score = scoreValue(value);
+                if (score != null) {
+                    return score;
+                }
+            }
+        }
+        return null;
+    }
+
+    @SafeVarargs
+    private String firstText(Map<String, Object> first, Map<String, Object> second, String... keys) {
+        for (Map<String, Object> source : List.of(first, second)) {
+            for (String key : keys) {
+                Object value = source.get(key);
+                if (value != null && StringUtils.hasText(String.valueOf(value))) {
+                    return String.valueOf(value);
+                }
+            }
+        }
+        return "";
+    }
+
+    private Map<String, Object> parseJudgeJson(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return Map.of();
+        }
+        try {
+            return new LinkedHashMap<>(JSON.parseObject(raw));
+        } catch (Exception ignored) {
+            return Map.of();
+        }
+    }
+
+    private Double scoreValue(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Number number) {
+            return clampScore(number.doubleValue());
+        }
+        if (value instanceof Boolean bool) {
+            return bool ? 1.0 : 0.0;
+        }
+        String text = String.valueOf(value).trim();
+        if (!StringUtils.hasText(text)) {
+            return null;
+        }
+        if ("ANSWERABLE".equalsIgnoreCase(text) || "SUPPORTED".equalsIgnoreCase(text)) {
+            return 1.0;
+        }
+        if ("PARTIAL".equalsIgnoreCase(text)) {
+            return 0.5;
+        }
+        if ("UNANSWERABLE".equalsIgnoreCase(text) || "UNSUPPORTED".equalsIgnoreCase(text)) {
+            return 0.0;
+        }
+        try {
+            return clampScore(Double.parseDouble(text));
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private Double scoreFromRaw(String raw, String key) {
+        if (!StringUtils.hasText(raw) || !StringUtils.hasText(key)) {
+            return null;
+        }
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(
+                "\"" + java.util.regex.Pattern.quote(key) + "\"\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)");
+        java.util.regex.Matcher matcher = pattern.matcher(raw);
+        if (!matcher.find()) {
+            return null;
+        }
+        try {
+            return clampScore(Double.parseDouble(matcher.group(1)));
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private double inferAnswerability(String expectedAnswer, String generatedAnswer) {
+        if (!StringUtils.hasText(generatedAnswer)) {
+            return 0.0;
+        }
+        String normalized = generatedAnswer.toLowerCase();
+        boolean refusal = normalized.contains("未找到")
+                || normalized.contains("无法")
+                || normalized.contains("不能")
+                || normalized.contains("insufficient")
+                || normalized.contains("not found");
+        if (!StringUtils.hasText(expectedAnswer)) {
+            return refusal ? 1.0 : 0.5;
+        }
+        return refusal ? 0.4 : 1.0;
+    }
+
+    private double clampScore(double value) {
+        if (Double.isNaN(value) || Double.isInfinite(value)) {
+            return 0.0;
+        }
+        return Math.max(0.0, Math.min(1.0, value));
+    }
+
+    private record StructuredJudgeReport(Double relevance,
+                                         Double coverage,
+                                         Double contradiction,
+                                         Double citationSupport,
+                                         Double answerability,
+                                         String refusalReason,
+                                         List<String> issues) {
+        private Map<String, Object> toMap() {
+            Map<String, Object> report = new LinkedHashMap<>();
+            report.put("relevance", relevance);
+            report.put("coverage", coverage);
+            report.put("contradiction", contradiction);
+            report.put("citationSupport", citationSupport);
+            report.put("answerability", answerability);
+            report.put("refusalReason", refusalReason);
+            report.put("issues", issues);
+            return report;
+        }
     }
 
     private List<Map<String, Object>> toSourceMaps(List<String> chunkIds, List<Document> documents) {
@@ -1076,23 +1288,23 @@ public class RagEvalService {
                     return new EvalRetrievalSnapshot(chunkIds, documents, "production_orchestrator");
                 }
             } catch (Exception e) {
-                log.warn("Production retrieval path failed for eval caseId={}, fallback to hybrid search: {}",
+                log.warn("Production retrieval path failed for eval caseId={}, fallback to retrieval facade: {}",
                         evalCase.getCaseId(), e.getMessage());
             }
         }
 
-        RagSearchResultVo searchResult = hybridSearchService.hybridSearchWithTrace(
+        RagSearchResultVo searchResult = retrievalFacade.retrieve(
                 evalCase.getQuestion(), normalizedTopK, normalizedEnableRerank);
-        List<String> chunkIds = searchResult.getSources() != null
+        List<String> chunkIds = searchResult != null && searchResult.getSources() != null
                 ? searchResult.getSources().stream()
                 .map(RagSourceVo::getChunkId)
                 .filter(StringUtils::hasText)
                 .toList()
                 : List.of();
-        List<Document> documents = searchResult.getDocuments() != null
+        List<Document> documents = searchResult != null && searchResult.getDocuments() != null
                 ? searchResult.getDocuments()
                 : List.of();
-        return new EvalRetrievalSnapshot(chunkIds, documents, "hybrid_search_with_trace_fallback");
+        return new EvalRetrievalSnapshot(chunkIds, documents, "rag_retrieval_facade_fallback");
     }
 
     private record EvalRetrievalSnapshot(List<String> chunkIds, List<Document> documents, String retrievalPath) {}

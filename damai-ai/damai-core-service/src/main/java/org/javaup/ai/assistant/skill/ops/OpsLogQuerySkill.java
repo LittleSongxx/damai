@@ -25,6 +25,7 @@ import java.util.regex.Pattern;
 public class OpsLogQuerySkill implements AssistantSkill {
 
     private static final Pattern TRACE_PATTERN = Pattern.compile("trace(?:id)?[=: ]+([A-Za-z0-9\\-_]+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SPAN_PATTERN = Pattern.compile("span(?:id)?[=: ]+([A-Za-z0-9\\-_]+)", Pattern.CASE_INSENSITIVE);
     private static final Pattern SERVICE_PATTERN = Pattern.compile("([a-z-]+-service)");
 
     private final ChatClient unifiedOpsChatClient;
@@ -32,17 +33,20 @@ public class OpsLogQuerySkill implements AssistantSkill {
     private final LogGateway logGateway;
     private final TraceGateway traceGateway;
     private final AssistantMemoryKeyService memoryKeyService;
+    private final OpsRcaEvidenceService rcaEvidenceService;
 
     public OpsLogQuerySkill(@Qualifier("unifiedOpsChatClient") ChatClient unifiedOpsChatClient,
                             AssistantToolInvoker toolInvoker,
                             LogGateway logGateway,
                             TraceGateway traceGateway,
-                            AssistantMemoryKeyService memoryKeyService) {
+                            AssistantMemoryKeyService memoryKeyService,
+                            OpsRcaEvidenceService rcaEvidenceService) {
         this.unifiedOpsChatClient = unifiedOpsChatClient;
         this.toolInvoker = toolInvoker;
         this.logGateway = logGateway;
         this.traceGateway = traceGateway;
         this.memoryKeyService = memoryKeyService;
+        this.rcaEvidenceService = rcaEvidenceService;
     }
 
     @Override
@@ -100,7 +104,21 @@ public class OpsLogQuerySkill implements AssistantSkill {
                     () -> logGateway.searchLogsByKeyword(prompt, serviceName, "ERROR", 20));
         }
 
-        return generateAnswer(context, prompt, evidence);
+        OpsRcaRequest rcaRequest = new OpsRcaRequest();
+        rcaRequest.setQuery(prompt);
+        rcaRequest.setServiceName(serviceName);
+        rcaRequest.setTraceId(CommonUtils.extract(prompt, TRACE_PATTERN));
+        rcaRequest.setSpanId(CommonUtils.extract(prompt, SPAN_PATTERN));
+        Map<String, Object> evidenceBundle = toolInvoker.invoke(runId, "opsRcaEvidence", "ops",
+                CommonUtils.mapOf("query", prompt,
+                        "serviceName", serviceName == null ? "" : serviceName,
+                        "traceId", rcaRequest.getTraceId(),
+                        "spanId", rcaRequest.getSpanId()),
+                () -> rcaEvidenceService.buildEvidenceBundle(rcaRequest));
+
+        return generateAnswer(context, prompt, Map.of(
+                "primaryEvidence", evidence,
+                "evidenceBundle", evidenceBundle));
     }
 
     private AssistantSkillResult generateAnswer(AssistantSkillContext context, String prompt, Map<String, Object> evidence) {
@@ -118,8 +136,8 @@ public class OpsLogQuerySkill implements AssistantSkill {
 
                 输出要求：
                 1. 先概括当前发现。
-                2. 再指出最可能的问题位置。
-                3. 最后给出下一步排查建议。
+                2. 再指出最可能的问题位置，并说明证据链。
+                3. 最后给出下一步排查建议，必须引用 evidenceBundle 中的日志、指标或 trace 线索。
                 """.formatted(memorySummary(context), prompt, JSON.toJSONString(evidence));
         String answer = unifiedOpsChatClient.prompt()
                 .user(answerPrompt)

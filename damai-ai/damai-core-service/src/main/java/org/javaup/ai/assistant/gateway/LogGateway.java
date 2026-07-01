@@ -98,6 +98,7 @@ public class LogGateway {
             item.put("level", log.getLevel());
             item.put("message", log.getMessage());
             item.put("traceId", log.getTraceId());
+            item.put("spanId", log.getSpanId());
             item.put("sourceClass", log.getSourceClass());
             item.put("sourceMethod", log.getSourceMethod());
             item.put("sourceLine", log.getSourceLine());

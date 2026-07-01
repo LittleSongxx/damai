@@ -15,6 +15,7 @@ public class AiNl2SqlEvalCase extends BaseTableData {
     private String caseId;
     private String question;
     private String expectedSql;
+    private String expectedResultJson;
     private String expectedTableNames;
     private String category;
     private String difficulty;

@@ -9,11 +9,14 @@ import org.javaup.ai.mapper.AiRagBadCaseMapper;
 import org.javaup.ai.mapper.AiRagEvalCaseMapper;
 import org.javaup.ai.vo.RagBadCaseConvertRequest;
 import org.javaup.ai.vo.RagBadCaseRequest;
+import org.javaup.ai.vo.RagBadCaseReviewRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 @Service
@@ -88,6 +91,23 @@ public class RagBadCaseService {
                 .last("limit 1"));
     }
 
+    @Transactional(rollbackFor = Exception.class)
+    public AiRagBadCase reviewBadCase(String badCaseId, RagBadCaseReviewRequest request, Long reviewerId) {
+        AiRagBadCase badCase = getBadCase(badCaseId);
+        if (badCase == null) {
+            return null;
+        }
+        String nextStatus = normalizeReviewStatus(request == null ? null : request.getReviewStatus());
+        badCase.setReviewStatus(nextStatus);
+        badCase.setReviewNote(request == null ? null : request.getReviewNote());
+        badCase.setReviewedBy(reviewerId);
+        badCase.setReviewedAt(new Date());
+        badCase.setEditTime(new Date());
+        badCaseMapper.updateById(badCase);
+        return badCase;
+    }
+
+    @Transactional(rollbackFor = Exception.class)
     public AiRagEvalCase convertToEvalCase(String badCaseId, RagBadCaseConvertRequest request) {
         AiRagBadCase badCase = getBadCase(badCaseId);
         if (badCase == null) {
@@ -111,8 +131,32 @@ public class RagBadCaseService {
 
         badCase.setConvertedToEvalCase(1);
         badCase.setConvertedCaseId(evalCase.getCaseId());
+        badCase.setReviewStatus("CONVERTED");
+        badCase.setReviewedAt(new Date());
+        badCase.setReviewNote(appendReviewNote(badCase.getReviewNote(), "converted to eval case " + evalCase.getCaseId()));
         badCase.setEditTime(new Date());
         badCaseMapper.updateById(badCase);
         return evalCase;
+    }
+
+    private String normalizeReviewStatus(String reviewStatus) {
+        if (!StringUtils.hasText(reviewStatus)) {
+            return "CONFIRMED";
+        }
+        String normalized = reviewStatus.trim().toUpperCase(Locale.ROOT);
+        return switch (normalized) {
+            case "PENDING", "CONFIRMED", "IGNORED", "FIXED", "CONVERTED" -> normalized;
+            default -> throw new IllegalArgumentException("Unsupported bad case review status: " + reviewStatus);
+        };
+    }
+
+    private String appendReviewNote(String oldNote, String newNote) {
+        if (!StringUtils.hasText(oldNote)) {
+            return newNote;
+        }
+        if (!StringUtils.hasText(newNote)) {
+            return oldNote;
+        }
+        return oldNote + "\n" + newNote;
     }
 }
