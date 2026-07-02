@@ -2,7 +2,6 @@ package org.javaup.ai.assistant.skill.business;
 
 import com.alibaba.fastjson2.JSON;
 import lombok.RequiredArgsConstructor;
-import org.javaup.ai.ai.function.call.OrderCall;
 import org.javaup.ai.ai.function.call.UserCall;
 import org.javaup.ai.assistant.AssistantEventTypes;
 import org.javaup.ai.assistant.AssistantActionStatus;
@@ -16,6 +15,7 @@ import org.javaup.ai.vo.AssistantActionResultVo;
 import org.javaup.ai.vo.ProgramDetailVo;
 import org.javaup.ai.vo.TicketCategoryVo;
 import org.javaup.ai.vo.TicketUserVo;
+import org.javaup.ai.service.PurchaseReservationAuditService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,9 +29,11 @@ import java.util.Map;
 public class PurchaseActionService {
 
     private final AssistantRunService assistantRunService;
-    private final OrderCall orderCall;
     private final ProgramQueryService programQueryService;
     private final UserCall userCall;
+    private final TicketReservationGateway ticketReservationGateway;
+    private final PurchaseRiskPolicyService riskPolicyService;
+    private final PurchaseReservationAuditService reservationAuditService;
 
     @Transactional(rollbackFor = Exception.class)
     public AssistantActionResultVo approve(String runId, String actionId) {
@@ -78,13 +80,22 @@ public class PurchaseActionService {
         ));
         PurchaseActionSnapshot snapshot = parseSnapshot(action);
         AiRun run = assistantRunService.getRunInternal(runId);
+        TicketReservation reservation = null;
 
         try {
             assistantRunService.markActionOrdering(action);
             action = assistantRunService.getAction(runId, actionId);
+            riskPolicyService.validateBeforeApproval(snapshot, action);
             revalidateSnapshot(snapshot);
-            ProgramOrderCreateDto orderCreateDto = snapshot.getProgramOrderCreateDto();
-            String orderNumber = orderCall.createOrder(orderCreateDto, action.getIdempotencyKey());
+            String reservationIdempotencyKey = action.getIdempotencyKey() + ":reservation";
+            reservation = ticketReservationGateway.reserve(snapshot, reservationIdempotencyKey);
+            if (reservation == null || !reservation.locked() || reservation.reservationId() == null) {
+                throw new RuntimeException("库存预留失败，请稍后重试");
+            }
+            reservationAuditService.reserved(runId, actionId, snapshot, reservation, reservationIdempotencyKey);
+            String orderIdempotencyKey = action.getIdempotencyKey() + ":reservation:" + reservation.reservationId();
+            String orderNumber = ticketReservationGateway.confirm(snapshot, reservation, orderIdempotencyKey);
+            reservationAuditService.confirmed(reservation.reservationId(), orderNumber);
 
             AssistantActionResultVo resultVo = result(action.getActionId(), AssistantActionStatus.COMPLETED.name(), "订单已创建");
             resultVo.setOrderNumber(orderNumber);
@@ -96,6 +107,7 @@ public class PurchaseActionService {
                     "toolName", "createOrder",
                     "toolType", "business",
                     "status", "COMPLETED",
+                    "reservationId", reservation.reservationId(),
                     "orderNumber", orderNumber
             ));
             assistantRunService.markCompleted(run, "ACTION_APPROVED", "订单已创建");
@@ -105,6 +117,10 @@ public class PurchaseActionService {
             ));
             return resultVo;
         } catch (RuntimeException ex) {
+            releaseReservation(reservation, "ORDER_CREATE_FAILED:" + ex.getMessage());
+            if (reservation != null) {
+                reservationAuditService.failed(reservation.reservationId(), ex.getMessage());
+            }
             AssistantActionResultVo failed = result(action.getActionId(), AssistantActionStatus.FAILED.name(), ex.getMessage());
             assistantRunService.markActionFailed(action, "ORDER_CREATE_FAILED", ex.getMessage(), failed);
             failRun(runId, "ACTION_FAILED", ex.getMessage());
@@ -113,6 +129,7 @@ public class PurchaseActionService {
                     "toolName", "createOrder",
                     "toolType", "business",
                     "status", "FAILED",
+                    "reservationId", reservation == null ? "" : reservation.reservationId(),
                     "message", ex.getMessage()
             ));
             return failed;
@@ -137,6 +154,7 @@ public class PurchaseActionService {
         }
         if (isExpired(action)) {
             AssistantActionResultVo expiredResult = result(action.getActionId(), AssistantActionStatus.EXPIRED.name(), "该下单请求已经过期");
+            releaseReservation(parseSnapshot(action), "ACTION_EXPIRED");
             assistantRunService.markActionExpired(action, expiredResult);
             return expiredResult;
         }
@@ -147,6 +165,7 @@ public class PurchaseActionService {
         AssistantActionResultVo resultVo = result(action.getActionId(), AssistantActionStatus.REJECTED.name(), "已取消本次下单请求");
         // Dify 风格智能重新提问: 拒绝后提供替代方案，而非仅告知"已取消"
         resultVo.setSuggestedAlternatives(buildRejectionAlternatives(action));
+        releaseReservation(parseSnapshot(action), "ACTION_REJECTED");
         assistantRunService.markActionRejected(action, resultVo);
         AiRun run = assistantRunService.getRunInternal(runId);
         assistantRunService.markCompleted(run, "ACTION_REJECTED", "用户取消下单");
@@ -190,6 +209,21 @@ public class PurchaseActionService {
         if (remainNumber != null && remainNumber < snapshot.getTicketCount()) {
             throw new RuntimeException("当前余票不足，请重新生成购票预览");
         }
+    }
+
+    private void releaseReservation(PurchaseActionSnapshot snapshot, String reason) {
+        if (snapshot == null || snapshot.getReservationId() == null || snapshot.getReservationId().isBlank()) {
+            return;
+        }
+        ticketReservationGateway.release(snapshot.getReservationId(), reason);
+    }
+
+    private void releaseReservation(TicketReservation reservation, String reason) {
+        if (reservation == null || reservation.reservationId() == null || reservation.reservationId().isBlank()) {
+            return;
+        }
+        ticketReservationGateway.release(reservation.reservationId(), reason);
+        reservationAuditService.released(reservation.reservationId(), reason);
     }
 
     private AssistantActionResultVo statusAwareResult(AiAction action) {

@@ -1,5 +1,5 @@
 import { computed, nextTick, ref } from 'vue'
-import { aiOpsAdminAPI, assistantAPI, customerServiceAPI, ragEvalAPI } from '../api/api'
+import { aiOpsAdminAPI, assistantAPI, customerServiceAPI, dataOpsAdminAPI, ragEvalAPI } from '../api/api'
 
 function normalizeMessage(message, index) {
   return {
@@ -133,7 +133,7 @@ export function useAssistantRuntime() {
   const customerServiceCard = ref(null)
   const customerSuggestions = ref([])
   const customerSentiment = ref(null)
-  const customerEscalationTicket = ref(null)
+  const customerWorkItem = ref(null)
   const conversations = ref([])
   const runTimeline = ref([])
   const evidenceCards = ref([])
@@ -158,8 +158,11 @@ export function useAssistantRuntime() {
   const ragBadCases = ref([])
   const ragIngestionTasks = ref([])
   const ragLastReindexJob = ref(null)
-  const aiOpsFaultScenarios = ref([])
-  const aiOpsFaultResult = ref(null)
+  const opsProviderStatus = ref(null)
+  const opsRunbooks = ref([])
+  const opsEvidenceResult = ref(null)
+  const semanticCatalog = ref(null)
+  const metricsRebuildResult = ref(null)
   const adminWorkspaceError = ref('')
   const capabilities = ref({ admin: false, allowedRoutes: ['business', 'knowledge', 'general'], skills: [] })
   const seenEventIds = ref(new Set())
@@ -198,7 +201,7 @@ export function useAssistantRuntime() {
     customerServiceCard.value = null
     customerSuggestions.value = []
     customerSentiment.value = null
-    customerEscalationTicket.value = null
+    customerWorkItem.value = null
     runStatus.value = ''
     currentRoute.value = ''
     currentSkillId.value = ''
@@ -372,7 +375,11 @@ export function useAssistantRuntime() {
       ragBadCases.value = []
       ragIngestionTasks.value = []
       ragLastReindexJob.value = null
-      aiOpsFaultScenarios.value = []
+      opsProviderStatus.value = null
+      opsRunbooks.value = []
+      opsEvidenceResult.value = null
+      semanticCatalog.value = null
+      metricsRebuildResult.value = null
     }
   }
 
@@ -420,10 +427,24 @@ export function useAssistantRuntime() {
     }
 
     try {
-      const scenarios = await aiOpsAdminAPI.listFaultScenarios()
-      aiOpsFaultScenarios.value = Array.isArray(scenarios?.data) ? scenarios.data : []
+      const providers = await aiOpsAdminAPI.listProviders()
+      opsProviderStatus.value = providers?.data || null
     } catch (error) {
-      aiOpsFaultScenarios.value = []
+      opsProviderStatus.value = null
+    }
+
+    try {
+      const runbooks = await aiOpsAdminAPI.listRunbooks()
+      opsRunbooks.value = Array.isArray(runbooks?.data) ? runbooks.data : []
+    } catch (error) {
+      opsRunbooks.value = []
+    }
+
+    try {
+      const catalog = await dataOpsAdminAPI.getCatalog()
+      semanticCatalog.value = catalog?.data || null
+    } catch (error) {
+      semanticCatalog.value = null
     }
   }
 
@@ -513,39 +534,36 @@ export function useAssistantRuntime() {
     return result
   }
 
-  const injectAiOpsFaultScenario = async (scenario) => {
-    if (!scenario?.scenarioId) {
-      return null
-    }
-    const result = await aiOpsAdminAPI.injectFaultScenario(scenario.scenarioId, {
-      query: scenario.rcaPrompt,
-      serviceName: scenario.serviceName,
-      windowMinutes: scenario.windowMinutes,
-      traceId: scenario.injectedSignals?.traceId,
-      releaseVersion: `${scenario.scenarioId}-release-20260630`,
-      configKey: `${scenario.scenarioId}.feature-flag`,
-      changeWindowMinutes: Math.max(60, Number(scenario.windowMinutes || 30) * 2)
+  const buildOpsRcaEvidence = async (payload = {}) => {
+    const result = await aiOpsAdminAPI.buildRcaEvidence({
+      query: payload.query || opsEvidenceResult.value?.assistantPrompt || 'diagnose recent production incident',
+      serviceName: payload.serviceName || opsEvidenceResult.value?.evidenceBundle?.serviceName || 'order-service',
+      traceId: payload.traceId || opsEvidenceResult.value?.evidenceBundle?.traceId || '',
+      windowMinutes: payload.windowMinutes || 30,
+      releaseVersion: payload.releaseVersion || '',
+      configKey: payload.configKey || '',
+      changeWindowMinutes: payload.changeWindowMinutes || Math.max(60, Number(payload.windowMinutes || 30) * 2)
     })
-    aiOpsFaultResult.value = result?.data || null
+    opsEvidenceResult.value = {
+      status: 'RCA_EVIDENCE',
+      assistantPrompt: `RCA evidence bundle for ${result?.data?.serviceName || payload.serviceName || 'order-service'}`,
+      evidenceBundle: result?.data || null
+    }
+    await loadAdminWorkspace()
     return result
   }
 
-  const buildAiOpsRcaEvidence = async (scenario = null) => {
-    const scenarioPayload = scenario || aiOpsFaultScenarios.value[0] || {}
-    const result = await aiOpsAdminAPI.buildRcaEvidence({
-      query: scenarioPayload.rcaPrompt || aiOpsFaultResult.value?.assistantPrompt || 'diagnose recent production incident',
-      serviceName: scenarioPayload.serviceName || aiOpsFaultResult.value?.evidenceBundle?.serviceName || 'order-service',
-      traceId: scenarioPayload.injectedSignals?.traceId || aiOpsFaultResult.value?.evidenceBundle?.traceId || '',
-      windowMinutes: scenarioPayload.windowMinutes || 30,
-      releaseVersion: `${scenarioPayload.scenarioId || 'manual'}-release-20260630`,
-      configKey: `${scenarioPayload.scenarioId || 'manual'}.feature-flag`,
-      changeWindowMinutes: Math.max(60, Number(scenarioPayload.windowMinutes || 30) * 2)
-    })
-    aiOpsFaultResult.value = {
-      status: 'RCA_EVIDENCE',
-      assistantPrompt: `RCA evidence bundle for ${result?.data?.serviceName || scenarioPayload.serviceName || 'order-service'}`,
-      evidenceBundle: result?.data || null
-    }
+  const reloadSemanticCatalog = async () => {
+    const result = await dataOpsAdminAPI.reloadCatalog()
+    semanticCatalog.value = result?.data || semanticCatalog.value
+    await loadAdminWorkspace()
+    return result
+  }
+
+  const rebuildOpsMetrics = async (payload = {}) => {
+    const result = await dataOpsAdminAPI.rebuildMetrics(payload)
+    metricsRebuildResult.value = result?.data || null
+    await loadAdminWorkspace()
     return result
   }
 
@@ -553,7 +571,7 @@ export function useAssistantRuntime() {
     const result = await assistantAPI.readMcpResource({
       resourceUri,
       runId: currentRunId.value,
-      traceId: aiOpsFaultResult.value?.evidenceBundle?.traceId || '',
+      traceId: opsEvidenceResult.value?.evidenceBundle?.traceId || '',
       confirmed: true,
       ...overrides
     })
@@ -564,8 +582,8 @@ export function useAssistantRuntime() {
   const renderMcpPrompt = async (promptName = 'ops.rca', overrides = {}) => {
     const result = await assistantAPI.renderMcpPrompt({
       promptName,
-      serviceName: aiOpsFaultResult.value?.evidenceBundle?.serviceName || 'order-service',
-      traceId: aiOpsFaultResult.value?.evidenceBundle?.traceId || '',
+      serviceName: opsEvidenceResult.value?.evidenceBundle?.serviceName || 'order-service',
+      traceId: opsEvidenceResult.value?.evidenceBundle?.traceId || '',
       windowMinutes: 30,
       confirmed: true,
       ...overrides
@@ -761,8 +779,8 @@ export function useAssistantRuntime() {
         customerSuggestions.value = Array.isArray(data?.suggestions) ? data.suggestions : []
         recordTimeline(event, data, eventId)
         break
-      case 'customer.escalation.created':
-        customerEscalationTicket.value = data?.ticket || data || null
+      case 'customer.work_item.created':
+        customerWorkItem.value = data?.workItem || data?.ticket || data || null
         recordTimeline(event, data, eventId)
         break
       case 'run.completed':
@@ -892,7 +910,7 @@ export function useAssistantRuntime() {
       if (quickData) {
         customerSentiment.value = quickData.sentiment || null
         customerSuggestions.value = Array.isArray(quickData.suggestions) ? quickData.suggestions : []
-        customerEscalationTicket.value = quickData.escalationTicket || null
+        customerWorkItem.value = quickData.workItem || null
       }
       if (quickData?.hit && quickData.answerMode === 'CACHED_ANSWER') {
         const content = quickData.directAnswer || '已为你命中客服高频问题。'
@@ -915,8 +933,8 @@ export function useAssistantRuntime() {
         if (quickData.sentiment) {
           recordTimeline('customer.sentiment.detected', quickData.sentiment, `customer-sentiment-${Date.now()}`)
         }
-        if (quickData.escalationTicket) {
-          recordTimeline('customer.escalation.created', quickData.escalationTicket, `customer-escalation-${Date.now()}`)
+        if (quickData.workItem) {
+          recordTimeline('customer.work_item.created', quickData.workItem, `customer-work-item-${Date.now()}`)
         }
         await scrollToBottom()
         return
@@ -987,7 +1005,7 @@ export function useAssistantRuntime() {
     customerServiceCard,
     customerSuggestions,
     customerSentiment,
-    customerEscalationTicket,
+    customerWorkItem,
     conversations,
     runTimeline,
     orderedTimeline,
@@ -1013,8 +1031,11 @@ export function useAssistantRuntime() {
     ragBadCases,
     ragIngestionTasks,
     ragLastReindexJob,
-    aiOpsFaultScenarios,
-    aiOpsFaultResult,
+    opsProviderStatus,
+    opsRunbooks,
+    opsEvidenceResult,
+    semanticCatalog,
+    metricsRebuildResult,
     adminWorkspaceError,
     hasMessages,
     capabilities,
@@ -1037,8 +1058,9 @@ export function useAssistantRuntime() {
     createRagReindexJob,
     readMcpResource,
     renderMcpPrompt,
-    injectAiOpsFaultScenario,
-    buildAiOpsRcaEvidence,
+    buildOpsRcaEvidence,
+    reloadSemanticCatalog,
+    rebuildOpsMetrics,
     approveAction: () => resolveAction(pendingAction.value, 'approve'),
     rejectAction: () => resolveAction(pendingAction.value, 'reject')
   }

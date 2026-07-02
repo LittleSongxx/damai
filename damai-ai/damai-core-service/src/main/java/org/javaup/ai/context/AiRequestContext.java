@@ -16,7 +16,5 @@ public class AiRequestContext {
 
     private String runId;
 
-    private Integer chatType;
-
     private String requestType;
 }

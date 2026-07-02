@@ -32,7 +32,7 @@ public final class AssistantEventTypes {
     public static final String CUSTOMER_QUICK_ANSWER_MISS = "customer.quick_answer.miss";
     public static final String CUSTOMER_SENTIMENT_DETECTED = "customer.sentiment.detected";
     public static final String CUSTOMER_SUGGESTIONS_GENERATED = "customer.suggestions.generated";
-    public static final String CUSTOMER_ESCALATION_CREATED = "customer.escalation.created";
+    public static final String CUSTOMER_WORK_ITEM_CREATED = "customer.work_item.created";
     public static final String CUSTOMER_SERVICE_CARD = "customer.service.card";
     public static final String RUN_COMPLETED = "run.completed";
     public static final String RUN_FAILED = "run.failed";

@@ -1,14 +1,14 @@
-# damai-ai 前端
+# damai-ai 管理工作台前端
 
-智能助手对话前端，提供会话管理、消息流渲染、运行事件展示、Markdown/代码高亮、业务助手交互和登录态跳转能力。
+面向客服运营、知识运营、数据问数和运维治理的管理工作台。普通客户侧 AI 浮窗在 `damai-pro/vue3` 中运行；本前端聚焦坐席队列、知识缺口、RAG 质量、语义目录、Ops Evidence 和质量门禁。
 
 ```mermaid
 graph LR
-    User[用户] --> Vue[Vue 3 前端 :15174]
-    Vue -->|SSE /damai-ai-dev| Core[damai-core-service :6089<br/>含 MCP 工具]
+    User[客服/运营/管理员] --> Vue[Vue 3 前端 :15174]
+    Vue -->|/assistant/**| Core[damai-core-service :6089<br/>客服 / 知识 / DataOps / Ops Evidence]
     Core --> Models[大模型]
-    Core --> RAG[RAG / 业务工具]
-    Vue -->|登录跳转| Pro[damai-pro 用户端 :15173]
+    Core --> RAG[RAG / 语义目录 / 证据 Provider]
+    Core --> Pro[damai-pro 网关与 OpsEvent]
 ```
 
 ## 技术栈
@@ -60,10 +60,10 @@ npm run test:watch
 
 | 服务 | 用途 |
 | --- | --- |
-| `damai-core-service:6089` | 必须 — AI 核心服务 (含 MCP 运维工具) |
-| `damai-pro` 网关 `:6085` | 业务助手所需 |
+| `damai-core-service:6089` | 必须 — AI API 聚合服务 |
+| `damai-pro` 网关 `:6085` | 票务查询、内部 reservation 和业务事件来源 |
 | Qdrant + Embedding 模型 | RAG 知识问答所需 |
-| ES + Prometheus | MCP 运维工具数据源 |
+| ES + Prometheus + Alertmanager + SkyWalking | Ops Evidence 运维证据来源 |
 
 ## 常见问题
 

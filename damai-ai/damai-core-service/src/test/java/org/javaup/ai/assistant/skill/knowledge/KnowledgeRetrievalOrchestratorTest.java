@@ -114,4 +114,37 @@ class KnowledgeRetrievalOrchestratorTest {
         assertEquals("chunk-1", String.valueOf(context.answerDocuments().get(0).getMetadata().get("chunkId")));
         assertEquals("RagRetrievalFacade", context.searchResult().getMetadata().get("retrievalBoundary"));
     }
+
+    @Test
+    void simplePathWithoutEvidenceShouldBeNotAnswerable() {
+        RagRetrievalFacade retrievalFacade = mock(RagRetrievalFacade.class);
+        StructuredRuleSupportService structuredRuleSupportService = mock(StructuredRuleSupportService.class);
+        AdvancedQueryService advancedQueryService = mock(AdvancedQueryService.class);
+        KnowledgeRetrievalPlanner planner = new KnowledgeRetrievalPlanner(advancedQueryService);
+        KnowledgeRetrievalEvaluator evaluator = new KnowledgeRetrievalEvaluator(mock(ChatClient.class));
+        KnowledgeRetrievalTraceService retrievalTraceService = mock(KnowledgeRetrievalTraceService.class);
+        AssistantStageTraceService stageTraceService = mock(AssistantStageTraceService.class);
+
+        when(retrievalFacade.retrieveSimple(anyString(), anyInt())).thenReturn(RagSearchResultVo.builder()
+                .originalQuery("完全没有证据的问题")
+                .normalizedQuery("完全没有证据的问题")
+                .rewrittenQuery("完全没有证据的问题")
+                .sources(List.of())
+                .documents(List.of())
+                .build());
+        when(structuredRuleSupportService.lookup("完全没有证据的问题"))
+                .thenReturn(new StructuredRuleSupportService.SupportBundle(List.of(), List.of()));
+
+        KnowledgeRetrievalOrchestrator orchestrator = new KnowledgeRetrievalOrchestrator(
+                structuredRuleSupportService, planner, evaluator, advancedQueryService,
+                retrievalFacade, retrievalTraceService, stageTraceService);
+
+        KnowledgeRetrievalPlan plan = new KnowledgeRetrievalPlan(
+                "完全没有证据的问题", "完全没有证据的问题", 4, false, 6, 260, 4000,
+                List.of("完全没有证据的问题"), KnowledgeRetrievalPlan.Complexity.SIMPLE);
+        KnowledgeRetrievalContext context = orchestrator.retrieve(plan);
+
+        assertEquals("NOT_ANSWERABLE", context.assessment().answerabilityLevel());
+        assertEquals("INCORRECT", context.assessment().confidenceLevel());
+    }
 }

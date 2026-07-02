@@ -8,8 +8,10 @@ import com.baidu.fsg.uid.UidGenerator;
 import com.damai.BusinessThreadPool;
 import com.damai.client.OrderClient;
 import com.damai.common.ApiResponse;
+import com.damai.constant.Constant;
 import com.damai.core.RedisKeyManage;
 import com.damai.domain.OrderCreateMq;
+import com.damai.domain.OpsEvent;
 import com.damai.domain.PurchaseSeat;
 import com.damai.dto.DelayOrderCancelDto;
 import com.damai.dto.OrderCreateDto;
@@ -27,12 +29,14 @@ import com.damai.mapper.ProgramRecordTaskMapper;
 import com.damai.redis.RedisKeyBuild;
 import com.damai.service.delaysend.DelayOrderCancelSend;
 import com.damai.service.domain.CreateOrderTemporaryData;
+import com.damai.service.ops.OpsEventPublisher;
 import com.damai.service.rabbitmq.CreateOrderMqDomain;
 import com.damai.service.rabbitmq.CreateOrderSend;
 import com.damai.service.lua.ProgramCacheCreateOrderData;
 import com.damai.service.lua.ProgramCacheCreateOrderResolutionOperate;
 import com.damai.service.lua.ProgramCacheResolutionOperate;
 import com.damai.service.tool.SeatMatch;
+import com.damai.threadlocal.BaseParameterHolder;
 import com.damai.util.DateUtils;
 import com.damai.vo.ProgramVo;
 import com.damai.vo.SeatVo;
@@ -98,6 +102,9 @@ public class ProgramOrderService {
     
     @Autowired
     private ProgramRecordTaskMapper programRecordTaskMapper;
+
+    @Autowired
+    private OpsEventPublisher opsEventPublisher;
     
     public List<TicketCategoryVo> getTicketCategoryList(ProgramOrderCreateDto programOrderCreateDto, Date showTime){
         List<TicketCategoryVo> getTicketCategoryVoList = new ArrayList<>();
@@ -208,6 +215,72 @@ public class ProgramOrderService {
         CreateOrderTemporaryData createOrderTemporaryData = createOrderOperateProgramCacheResolution(programOrderCreateDto);
         //发送rabbitmq
         return doCreateV2(programOrderCreateDto,createOrderTemporaryData,orderVersion);
+    }
+
+    public CreateOrderTemporaryData reserveForAi(ProgramOrderCreateDto programOrderCreateDto) {
+        try {
+            CreateOrderTemporaryData temporaryData = createOrderOperateProgramCacheResolution(programOrderCreateDto);
+            opsEventPublisher.publish("ops.inventory.reserved", OpsEvent.of("INVENTORY_RESERVED", "damai-program-service")
+                    .withTrace(BaseParameterHolder.getParameter(Constant.TRACE_ID))
+                    .withUserId(programOrderCreateDto.getUserId())
+                    .withProgramId(programOrderCreateDto.getProgramId())
+                    .withCount(programOrderCreateDto.getTicketCount())
+                    .withStatus("SUCCESS")
+                    .putPayload("identifierId", temporaryData.getIdentifierId())
+                    .putPayload("ticketCategoryId", programOrderCreateDto.getTicketCategoryId()));
+            return temporaryData;
+        } catch (Exception ex) {
+            opsEventPublisher.publish("ops.inventory.reserve_failed", OpsEvent.of("INVENTORY_RESERVE_FAILED", "damai-program-service")
+                    .withTrace(BaseParameterHolder.getParameter(Constant.TRACE_ID))
+                    .withUserId(programOrderCreateDto == null ? null : programOrderCreateDto.getUserId())
+                    .withProgramId(programOrderCreateDto == null ? null : programOrderCreateDto.getProgramId())
+                    .withStatus("FAILED")
+                    .putPayload("errorMessage", ex.getMessage()));
+            throw ex;
+        }
+    }
+
+    public String createReservedOrder(ProgramOrderCreateDto programOrderCreateDto,
+                                      List<PurchaseSeat> purchaseSeatList,
+                                      Integer orderVersion) {
+        OrderCreateDto orderCreateDto = buildCreateOrderParamV2(programOrderCreateDto.getProgramId(),
+                programOrderCreateDto.getUserId(), purchaseSeatList, orderVersion);
+        List<SeatVo> purchaseSeatVoList = toSeatVoList(purchaseSeatList);
+        String orderNumber = createOrderByRpc(orderCreateDto, purchaseSeatVoList);
+        opsEventPublisher.publish("ops.order.created", OpsEvent.of("ORDER_CREATED", "damai-program-service")
+                .withTrace(BaseParameterHolder.getParameter(Constant.TRACE_ID))
+                .withUserId(programOrderCreateDto.getUserId())
+                .withProgramId(programOrderCreateDto.getProgramId())
+                .withOrderNumber(orderNumber)
+                .withAmount(orderCreateDto.getOrderPrice())
+                .withCount(purchaseSeatList == null ? null : purchaseSeatList.size())
+                .withStatus("SUCCESS"));
+
+        DelayOrderCancelDto delayOrderCancelDto = new DelayOrderCancelDto();
+        delayOrderCancelDto.setProgramId(programOrderCreateDto.getProgramId());
+        delayOrderCancelDto.setOrderNumber(orderCreateDto.getOrderNumber());
+        delayOrderCancelSend.sendMessage(delayOrderCancelDto);
+        return orderNumber;
+    }
+
+    public void releaseReservedSeats(Long programId, List<PurchaseSeat> purchaseSeatList) {
+        if (CollectionUtil.isEmpty(purchaseSeatList)) {
+            return;
+        }
+        updateProgramCacheDataResolution(programId, toSeatVoList(purchaseSeatList), OrderStatus.CANCEL);
+        opsEventPublisher.publish("ops.inventory.released", OpsEvent.of("INVENTORY_RELEASED", "damai-program-service")
+                .withTrace(BaseParameterHolder.getParameter(Constant.TRACE_ID))
+                .withProgramId(programId)
+                .withCount(purchaseSeatList.size())
+                .withStatus("SUCCESS"));
+    }
+
+    private List<SeatVo> toSeatVoList(List<PurchaseSeat> purchaseSeatList) {
+        return purchaseSeatList.stream().map(purchaseSeat -> {
+            SeatVo seatVo = new SeatVo();
+            BeanUtils.copyProperties(purchaseSeat, seatVo);
+            return seatVo;
+        }).collect(Collectors.toList());
     }
     
     public CreateOrderTemporaryData createOrderOperateProgramCacheResolution(ProgramOrderCreateDto programOrderCreateDto){
@@ -440,9 +513,25 @@ public class ProgramOrderService {
         createOrderMqDomain.orderNumber = String.valueOf(orderCreateMq.getOrderNumber());
         createOrderSend.sendMessage(JSON.toJSONString(orderCreateMq),sendResult -> {
             log.info("创建订单rabbitmq发送消息成功 exchange : {} routingKey : {}",sendResult.getExchange(),sendResult.getRoutingKey());
+            opsEventPublisher.publish("ops.mq.produced", OpsEvent.of("MQ_MESSAGE_PRODUCED", "damai-program-service")
+                    .withTrace(BaseParameterHolder.getParameter(Constant.TRACE_ID))
+                    .withUserId(orderCreateMq.getUserId())
+                    .withProgramId(orderCreateMq.getProgramId())
+                    .withOrderNumber(orderCreateMq.getOrderNumber())
+                    .withStatus("SUCCESS")
+                    .putPayload("exchange", sendResult.getExchange())
+                    .putPayload("routingKey", sendResult.getRoutingKey()));
             latch.countDown();
         },ex -> {
             log.error("创建订单rabbitmq发送消息失败 error",ex);
+            opsEventPublisher.publish("ops.mq.exception", OpsEvent.of("MQ_MESSAGE_EXCEPTION", "damai-program-service")
+                    .withTrace(BaseParameterHolder.getParameter(Constant.TRACE_ID))
+                    .withUserId(orderCreateMq.getUserId())
+                    .withProgramId(orderCreateMq.getProgramId())
+                    .withOrderNumber(orderCreateMq.getOrderNumber())
+                    .withStatus("FAILED")
+                    .putPayload("topic", "create_order")
+                    .putPayload("errorMessage", ex.getMessage()));
             List<SeatVo> purchaseSeatVoList = purchaseSeatList.stream().map(purchaseSeat -> {
                 SeatVo seatVo = new SeatVo();
                 BeanUtils.copyProperties(purchaseSeat,seatVo);

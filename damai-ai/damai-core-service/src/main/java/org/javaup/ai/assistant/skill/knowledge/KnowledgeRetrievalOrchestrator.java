@@ -59,10 +59,42 @@ public class KnowledgeRetrievalOrchestrator {
         var deduped = dedup(merged);
         List<Document> answerDocs = selectAnswerDocuments(
                 result.getDocuments(), supportBundle.documents(), deduped);
-        KnowledgeRetrievalAssessment assessment = new KnowledgeRetrievalAssessment(
-                0.75, "CORRECT", "simple", deduped,
-                "HIGH", "HIGH", false, "ANSWERABLE", "", List.of());
+        RagSearchResultVo assessedResult = RagSearchResultVo.builder()
+                .originalQuery(result.getOriginalQuery())
+                .normalizedQuery(result.getNormalizedQuery())
+                .rewrittenQuery(result.getRewrittenQuery())
+                .retrievalTraceId(result.getRetrievalTraceId())
+                .denseSources(result.getDenseSources())
+                .sparseSources(result.getSparseSources())
+                .fusedSources(result.getFusedSources())
+                .sources(deduped)
+                .documents(answerDocs)
+                .build();
+        KnowledgeRetrievalAssessment assessment = simpleAssessment(assessedResult, supportBundle, plan);
         return new KnowledgeRetrievalContext(plan, result, supportBundle, assessment, answerDocs);
+    }
+
+    private KnowledgeRetrievalAssessment simpleAssessment(RagSearchResultVo result,
+                                                          StructuredRuleSupportService.SupportBundle supportBundle,
+                                                          KnowledgeRetrievalPlan plan) {
+        if (result.getSources() == null || result.getSources().isEmpty()) {
+            return new KnowledgeRetrievalAssessment(
+                    0D, "INCORRECT", "simple_no_evidence", List.of(),
+                    "LOW", "LOW", false, "NOT_ANSWERABLE",
+                    "没有命中可用于回答的证据", List.of());
+        }
+        try {
+            return retrievalEvaluator.assess(result, supportBundle.sources(), "simple", plan);
+        } catch (RuntimeException ex) {
+            log.warn("simple retrieval assessment failed, using evidence-count fallback", ex);
+            double score = Math.min(0.85D, 0.35D + result.getSources().size() * 0.1D);
+            String level = result.getSources().size() >= Math.min(3, plan.topK()) ? "CORRECT" : "AMBIGUOUS";
+            String coverage = result.getSources().size() >= Math.min(3, plan.topK()) ? "MEDIUM" : "LOW";
+            String answerability = "CORRECT".equals(level) ? "ANSWERABLE" : "PARTIAL";
+            return new KnowledgeRetrievalAssessment(
+                    score, level, "simple_fallback", result.getSources(),
+                    "MEDIUM", coverage, false, answerability, "", List.of());
+        }
     }
 
     private RagSearchResultVo engineRetrieveSimple(String query, int topK) {
@@ -155,7 +187,7 @@ public class KnowledgeRetrievalOrchestrator {
                 break;
             }
             default:
-                // Legacy path: treat LOW/other as corrective trigger
+                // Treat LOW/other as corrective trigger.
                 if ("LOW".equals(assessment.confidenceLevel()) && assessment.sources().size() < 4) {
                     var correction = runAmbiguousRetrieval(firstPass, plan);
                     assessment = retrievalEvaluator.assess(

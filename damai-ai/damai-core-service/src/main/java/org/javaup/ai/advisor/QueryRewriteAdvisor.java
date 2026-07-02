@@ -14,7 +14,7 @@ import java.util.Map;
 
 /**
  * @program: 大麦-ai智能服务项目。 添加 阿星不是程序员 微信，添加时备注 ai 来获取项目的完整资料
- * @description: Query改写Advisor - 在检索前对用户问题进行优化，参考现有Advisor实现：{@link ChatTypeHistoryAdvisor} 
+ * @description: Query改写Advisor - 在检索前对用户问题进行优化。
  * @author: 阿星不是程序员
  **/
 @Slf4j

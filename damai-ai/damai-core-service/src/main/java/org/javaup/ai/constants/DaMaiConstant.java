@@ -138,8 +138,6 @@ public class DaMaiConstant {
     
     public static final String TICKET_USER_LIST_URL = resolveEnv("DAMAI_AI_TICKET_USER_LIST_URL", "http://127.0.0.1:6085/damai/user/ticket/user/list");
     
-    public static final String CREATE_ORDER_URL = resolveEnv("DAMAI_AI_CREATE_ORDER_URL", "http://127.0.0.1:6085/damai/program/program/order/create/v1");
-    
     public static final Integer CHAT_TYPE_HISTORY_ADVISOR_ORDER = Ordered.HIGHEST_PRECEDENCE + 998;
     
     public static final Integer MESSAGE_CHAT_MEMORY_ADVISOR_ORDER = Ordered.HIGHEST_PRECEDENCE + 1000;

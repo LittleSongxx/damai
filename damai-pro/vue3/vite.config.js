@@ -10,6 +10,7 @@ import {ElementPlusResolver} from 'unplugin-vue-components/resolvers'
 export default defineConfig(({mode}) => {
     const env = loadEnv(mode, process.cwd())
     const {VITE_APP_ENV, VITE_APP_BASE_API, VITE_APP_URL} = env
+    const aiProxyTarget = env.VITE_DAMAI_AI_PROXY_TARGET || 'http://127.0.0.1:6089'
     return {
         base: VITE_APP_ENV === 'production' ? '/' : '/',
         plugins: [
@@ -46,6 +47,11 @@ export default defineConfig(({mode}) => {
                         const realUrl = options.target + (options.rewrite ? options.rewrite(req.url) : '');
                         res.setHeader('A-Real-Url', realUrl); // 添加响应标头(A-Real-Url为自定义命名)，在浏览器中显示
                     },
+                },
+                '/damai-ai-dev': {
+                    target: aiProxyTarget,
+                    changeOrigin: true,
+                    rewrite: (p) => p.replace(/^\/damai-ai-dev/, ''),
                 },
             },
 

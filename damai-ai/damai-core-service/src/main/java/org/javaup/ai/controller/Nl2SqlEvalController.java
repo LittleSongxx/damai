@@ -16,7 +16,7 @@ import java.util.Map;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/nl2sql-eval")
+@RequestMapping("/assistant/admin/nl2sql-eval")
 @RequiredArgsConstructor
 public class Nl2SqlEvalController {
 

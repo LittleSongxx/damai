@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/admin/knowledge")
+@RequestMapping("/assistant/admin/knowledge")
 @RequiredArgsConstructor
 public class KnowledgeDocumentController {
 

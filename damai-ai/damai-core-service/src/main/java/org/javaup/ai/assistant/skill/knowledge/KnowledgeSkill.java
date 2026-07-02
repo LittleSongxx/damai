@@ -229,11 +229,11 @@ public class KnowledgeSkill implements AssistantSkill {
                 || "INCORRECT".equals(assessment.confidenceLevel())
                 || (assessment.hasContradictions() && assessment.sources().size() < 3)) {
             String answer = "我已经检索了当前的闭域规则库，但这轮命中的证据不够扎实或存在冲突，暂时不能直接给出确定结论。请补充具体场景、节目或关键词，我再基于规则继续检索。";
-            // Escalation: detect consecutive refusal rounds and suggest human takeover
-            if (shouldSuggestEscalation(context)) {
+            // Detect consecutive refusal rounds and suggest human takeover.
+            if (shouldSuggestHumanHandoff(context)) {
                 answer += "\n\n您已多次遇到检索无结果的情况。建议您转人工客服获得更直接的帮助。";
                 assistantRunService.appendEvent(context.getRun().getRunId(),
-                        "ESCALATION_SUGGESTED",
+                        "HUMAN_HANDOFF_SUGGESTED",
                         Map.of("reason", "consecutive_refusal",
                                 "conversationId", context.getRun().getConversationId()));
             }
@@ -310,9 +310,9 @@ public class KnowledgeSkill implements AssistantSkill {
 
     /**
      * Checks recent runs in the same conversation for consecutive refusal/fallback patterns.
-     * Suggests escalation when ≥2 consecutive runs ended without a successful answer.
+     * Suggests human handoff when at least 2 consecutive runs ended without a successful answer.
      */
-    private boolean shouldSuggestEscalation(AssistantSkillContext context) {
+    private boolean shouldSuggestHumanHandoff(AssistantSkillContext context) {
         if (context.getRun() == null || context.getRun().getConversationId() == null) return false;
         var wrapper = new LambdaQueryWrapper<AiRun>()
                 .eq(AiRun::getConversationId, context.getRun().getConversationId())

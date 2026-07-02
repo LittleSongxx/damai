@@ -66,7 +66,7 @@ public class AssistantEvalRunService {
                 .resultType("RAG_EVAL_RUN")
                 .qualityGate(Map.of("status", "RUNNING", "message", "RAG eval started; poll report or quality gate for final metrics"))
                 .nextActions(List.of(
-                        "Poll /api/rag-eval/status/" + run.getEvalRunId(),
+                        "Poll /assistant/admin/rag-eval/status/" + run.getEvalRunId(),
                         "Review bad cases after completion",
                         "Compare with baseline before prompt/config release"))
                 .build();
@@ -88,7 +88,7 @@ public class AssistantEvalRunService {
                 .resultType("NL2SQL_EVAL_RUN")
                 .qualityGate(Map.of("status", "RUNNING", "message", "NL2SQL eval started; inspect execution accuracy and unsafe rejection rate"))
                 .nextActions(List.of(
-                        "Poll /api/nl2sql-eval/status/" + run.getEvalRunId(),
+                        "Poll /assistant/admin/nl2sql-eval/status/" + run.getEvalRunId(),
                         "Inspect schema-link precision/recall",
                         "Block release if unsafe rejection or execution accuracy regresses"))
                 .build();

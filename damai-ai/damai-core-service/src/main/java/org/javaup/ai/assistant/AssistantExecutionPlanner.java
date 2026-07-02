@@ -5,7 +5,7 @@ import org.javaup.ai.dto.AssistantRunCreateRequest;
 import org.javaup.ai.entity.AiRun;
 import org.javaup.ai.security.AiPermissionService;
 import org.javaup.ai.service.DialogueStateManager;
-import org.javaup.ai.service.EscalationService;
+import org.javaup.ai.service.CustomerWorkItemService;
 import org.javaup.ai.service.SentimentAnalysisService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -24,20 +24,20 @@ public class AssistantExecutionPlanner {
     private final AssistantSkillSelector skillSelector;
     private final SentimentAnalysisService sentimentAnalysisService;
     private final DialogueStateManager dialogueStateManager;
-    private final EscalationService escalationService;
+    private final CustomerWorkItemService workItemService;
 
     public AssistantExecutionPlanner(AssistantRouteService routeService,
                                      AiPermissionService aiPermissionService,
                                      @Autowired(required = false) AssistantSkillSelector skillSelector,
                                      @Autowired(required = false) SentimentAnalysisService sentimentAnalysisService,
                                      @Autowired(required = false) DialogueStateManager dialogueStateManager,
-                                     @Autowired(required = false) EscalationService escalationService) {
+                                     @Autowired(required = false) CustomerWorkItemService workItemService) {
         this.routeService = routeService;
         this.aiPermissionService = aiPermissionService;
         this.skillSelector = skillSelector;
         this.sentimentAnalysisService = sentimentAnalysisService;
         this.dialogueStateManager = dialogueStateManager;
-        this.escalationService = escalationService;
+        this.workItemService = workItemService;
     }
 
     public AssistantExecutionPlan plan(AiRun run, AiUserContext user, AssistantRunCreateRequest request) {
@@ -56,8 +56,8 @@ public class AssistantExecutionPlanner {
             sentimentLabel = sentiment.sentiment();
             sentimentIntensity = sentiment.intensity();
             emotionTags = sentiment.emotionTags();
-            if (sentiment.shouldEscalate() && escalationService != null) {
-                escalationService.escalate(run.getRunId(), run.getConversationId(), run.getUserId(),
+            if (sentiment.shouldEscalate() && workItemService != null) {
+                workItemService.handoffFromRuntime(run.getRunId(), run.getConversationId(), run.getUserId(),
                         "SENTIMENT", sentiment.escalationReason(),
                         "用户情绪:" + sentiment.sentiment() + " 强度:" + sentiment.intensity());
             }

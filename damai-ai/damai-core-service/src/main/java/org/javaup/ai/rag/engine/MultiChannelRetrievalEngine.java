@@ -22,10 +22,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Multi-channel retrieval engine: runs parallel search channels, merges results
- * with RRF fusion, then applies ordered post-processors. Provides the same
- * API surface as HybridSearchService but with pluggable extensibility.
- *
- * Inspired by ragent's MultiChannelRetrievalEngine.
+ * with RRF fusion, then applies ordered post-processors.
  */
 @Slf4j
 @Service
@@ -125,7 +122,7 @@ public class MultiChannelRetrievalEngine {
                 .sparseSources(allSparseSources)
                 .fusedSources(fusedSources)
                 .sources(finalSources)
-                .documents(List.of()) // resolve documents in caller (HybridSearchService/KnowledgeRetrievalOrchestrator)
+                .documents(List.of()) // resolve documents in facade/orchestrator
                 .build();
     }
 

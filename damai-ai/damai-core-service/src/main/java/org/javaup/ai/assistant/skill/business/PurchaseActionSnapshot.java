@@ -40,5 +40,11 @@ public class PurchaseActionSnapshot {
 
     private Date expiresAt;
 
+    private String reservationId;
+
+    private Date reservationExpiresAt;
+
+    private Boolean reservationLocked;
+
     private ProgramOrderCreateDto programOrderCreateDto;
 }

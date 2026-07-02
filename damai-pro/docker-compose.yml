@@ -164,7 +164,7 @@ services:
     image: prom/prometheus:${DAMAI_PROMETHEUS_VERSION:-v2.54.1}
     restart: unless-stopped
     profiles:
-      - ai
+      - ai-ops
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -173,9 +173,72 @@ services:
       - "${DAMAI_PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/ai-ops/prometheus-alerts.yml:/etc/prometheus/rules/ai-ops-alerts.yml:ro
       - damai-prometheus-data:/prometheus
     extra_hosts:
       - host.docker.internal:host-gateway
+    networks:
+      - damai
+
+  alertmanager:
+    image: prom/alertmanager:${DAMAI_ALERTMANAGER_VERSION:-v0.27.0}
+    restart: unless-stopped
+    profiles:
+      - ai-ops
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    ports:
+      - "${DAMAI_ALERTMANAGER_PORT:-9093}:9093"
+    volumes:
+      - ./docker/ai-ops/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - damai-alertmanager-data:/alertmanager
+    networks:
+      - damai
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:${DAMAI_OTEL_COLLECTOR_VERSION:-0.103.1}
+    restart: unless-stopped
+    profiles:
+      - ai-ops
+    command:
+      - --config=/etc/otelcol-contrib/config.yml
+    ports:
+      - "${DAMAI_OTEL_GRPC_PORT:-4317}:4317"
+      - "${DAMAI_OTEL_HTTP_PORT:-4318}:4318"
+      - "${DAMAI_OTEL_METRICS_PORT:-8889}:8889"
+    volumes:
+      - ./docker/ai-ops/otel-collector.yml:/etc/otelcol-contrib/config.yml:ro
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    networks:
+      - damai
+
+  skywalking-oap:
+    image: apache/skywalking-oap-server:${DAMAI_SKYWALKING_VERSION:-10.0.1}
+    restart: unless-stopped
+    profiles:
+      - ai-ops
+    environment:
+      SW_STORAGE: h2
+      SW_HEALTH_CHECKER: default
+    ports:
+      - "${DAMAI_SKYWALKING_OAP_GRPC_PORT:-11800}:11800"
+      - "${DAMAI_SKYWALKING_OAP_HTTP_PORT:-12800}:12800"
+    networks:
+      - damai
+
+  skywalking-ui:
+    image: apache/skywalking-ui:${DAMAI_SKYWALKING_VERSION:-10.0.1}
+    restart: unless-stopped
+    profiles:
+      - ai-ops
+    depends_on:
+      - skywalking-oap
+    environment:
+      SW_OAP_ADDRESS: http://skywalking-oap:12800
+    ports:
+      - "${DAMAI_SKYWALKING_UI_PORT:-18080}:8080"
     networks:
       - damai
 
@@ -222,5 +285,6 @@ volumes:
   damai-rabbitmq-data:
   damai-es-data:
   damai-prometheus-data:
+  damai-alertmanager-data:
   damai-qdrant-data:
   damai-ollama-data:

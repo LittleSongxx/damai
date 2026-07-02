@@ -13,6 +13,14 @@
     <description>damai-ai</description>
     
     <modules>
+        <module>damai-ai-domain</module>
+        <module>damai-ai-infra</module>
+        <module>damai-ai-runtime</module>
+        <module>damai-ai-business</module>
+        <module>damai-ai-knowledge</module>
+        <module>damai-ai-ops</module>
+        <module>damai-ai-customer</module>
+        <module>damai-ai-governance</module>
         <module>damai-core-service</module>
     </modules>
     
@@ -53,6 +61,46 @@
                 <version>${spring-ai.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.javaup</groupId>
+                <artifactId>damai-ai-domain</artifactId>
+                <version>${revision}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.javaup</groupId>
+                <artifactId>damai-ai-infra</artifactId>
+                <version>${revision}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.javaup</groupId>
+                <artifactId>damai-ai-runtime</artifactId>
+                <version>${revision}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.javaup</groupId>
+                <artifactId>damai-ai-business</artifactId>
+                <version>${revision}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.javaup</groupId>
+                <artifactId>damai-ai-knowledge</artifactId>
+                <version>${revision}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.javaup</groupId>
+                <artifactId>damai-ai-ops</artifactId>
+                <version>${revision}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.javaup</groupId>
+                <artifactId>damai-ai-customer</artifactId>
+                <version>${revision}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.javaup</groupId>
+                <artifactId>damai-ai-governance</artifactId>
+                <version>${revision}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

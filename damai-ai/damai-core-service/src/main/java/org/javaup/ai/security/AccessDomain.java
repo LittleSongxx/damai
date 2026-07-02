@@ -8,8 +8,7 @@ public enum AccessDomain {
     ADMIN_KNOWLEDGE_GOVERNANCE(true),
     ADMIN_OBSERVABILITY(true),
     ADMIN_DATA_QUERY(true),
-    ADMIN_AI_GOVERNANCE(true),
-    INTERNAL_DEV(true);
+    ADMIN_AI_GOVERNANCE(true);
 
     private final boolean adminOnly;
 

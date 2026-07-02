@@ -1,27 +1,19 @@
 package org.javaup.ai.assistant;
 
-import org.javaup.ai.enums.ChatType;
-
 public enum AssistantRouteType {
-    BUSINESS("business", ChatType.ASSISTANT),
-    KNOWLEDGE("knowledge", ChatType.MARKDOWN),
-    GENERAL("general", ChatType.ASSISTANT),
-    OPS("ops", ChatType.ANALYSIS);
+    BUSINESS("business"),
+    KNOWLEDGE("knowledge"),
+    GENERAL("general"),
+    OPS("ops");
 
     private final String code;
-    private final ChatType legacyChatType;
 
-    AssistantRouteType(String code, ChatType legacyChatType) {
+    AssistantRouteType(String code) {
         this.code = code;
-        this.legacyChatType = legacyChatType;
     }
 
     public String getCode() {
         return code;
-    }
-
-    public ChatType getLegacyChatType() {
-        return legacyChatType;
     }
 
     public static AssistantRouteType fromCode(String code) {

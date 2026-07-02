@@ -13,7 +13,7 @@ import java.util.Map;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/admin/faq")
+@RequestMapping("/assistant/admin/faq")
 @RequiredArgsConstructor
 public class FaqController {
 

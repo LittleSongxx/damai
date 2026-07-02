@@ -2,6 +2,7 @@ package org.javaup.ai.controller;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.javaup.ai.context.AiRequestContextHolder;
 import org.javaup.ai.entity.AiFeedback;
 import org.javaup.ai.service.FeedbackAnalysisService;
 import org.javaup.ai.service.FeedbackService;
@@ -12,18 +13,18 @@ import java.util.Map;
 
 @Slf4j
 @RestController
-@RequestMapping("/api/feedback")
+@RequestMapping("/assistant")
 @RequiredArgsConstructor
 public class FeedbackController {
 
     private final FeedbackService feedbackService;
     private final FeedbackAnalysisService feedbackAnalysisService;
 
-    @PostMapping
+    @PostMapping("/customer-service/feedback")
     public ResponseEntity<Map<String, Object>> submit(@RequestBody Map<String, Object> body) {
         String runId = (String) body.get("runId");
         String conversationId = (String) body.get("conversationId");
-        Long userId = body.get("userId") != null ? Long.valueOf(body.get("userId").toString()) : 0L;
+        Long userId = AiRequestContextHolder.getRequiredUser().getUserId();
         String rating = (String) body.get("rating");
         String comment = (String) body.get("comment");
 
@@ -45,7 +46,7 @@ public class FeedbackController {
         ));
     }
 
-    @GetMapping("/knowledge-gaps")
+    @GetMapping("/admin/customer-service/feedback/knowledge-gaps")
     public ResponseEntity<Map<String, Object>> getKnowledgeGaps(@RequestParam(defaultValue = "10") int limit) {
         return ResponseEntity.ok(Map.of(
                 "code", 0,

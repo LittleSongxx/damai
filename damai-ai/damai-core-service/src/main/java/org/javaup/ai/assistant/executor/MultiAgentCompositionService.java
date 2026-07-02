@@ -34,7 +34,7 @@ import java.util.function.Predicate;
  * <p>LangGraph 子图组合: 每个 Agent 可视为一个子图节点，
  * 编排器负责节点间的边（顺序、并行、条件）。
  *
- * <p>增强项（相比旧版 executeSequence）:
+ * <p>组合能力:
  * <ul>
  *   <li>并行执行: {@link #executeParallel}</li>
  *   <li>条件分支: {@link CompositionStep} 支持 skipWhen 条件</li>
@@ -54,7 +54,7 @@ public class MultiAgentCompositionService {
             r -> { Thread t = new Thread(r, "multi-agent-parallel"); t.setDaemon(true); return t; });
 
     /**
-     * 顺序执行（兼容旧 API）。
+     * 顺序执行。
      */
     public String executeSequence(String runId, String chatId, List<String> skillIds,
                                    AssistantSkillContext baseContext) {

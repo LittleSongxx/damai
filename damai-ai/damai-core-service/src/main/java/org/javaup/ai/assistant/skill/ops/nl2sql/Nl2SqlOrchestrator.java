@@ -12,6 +12,10 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -70,8 +74,9 @@ public class Nl2SqlOrchestrator {
             return finalizeResponse(evidence);
         }
         try {
+            String userScope = userScope(conversationKey);
             Nl2SqlSchemaContext schemaContext = toolInvoker.invoke(runId, "nl2sql.schemaRetrieve", "nl2sql",
-                    Map.of("question", question), () -> schemaService.retrieve(question));
+                    Map.of("question", question, "userScope", userScope), () -> schemaService.retrieve(question, userScope));
             evidence.put("schema", schemaContext.formattedSchema());
             evidence.put("schemaLinkingEvidence", Map.of(
                     "tables", schemaContext.tables().stream().map(Nl2SqlProperties.Table::getName).toList(),
@@ -126,7 +131,8 @@ public class Nl2SqlOrchestrator {
                     "repairAttempts", properties.getRepairAttempts()
             ));
 
-            String cachedResult = cacheManager.getNl2sqlResult(validatedSql.sql());
+            String executionCacheKey = executionCacheKey(validatedSql.sql(), userScope);
+            String cachedResult = cacheManager.getNl2sqlResult(executionCacheKey);
             if (cachedResult != null) {
                 Nl2SqlExecutionResult cachedExecution = com.alibaba.fastjson2.JSON.parseObject(cachedResult, Nl2SqlExecutionResult.class);
                 evidence.put("execution", cachedExecution);
@@ -149,7 +155,7 @@ public class Nl2SqlOrchestrator {
                     .toList());
             evidence.put("status", execution.skipped() ? "SQL_READY" : "COMPLETED");
             if (!execution.skipped()) {
-                cacheManager.putNl2sqlResult(validatedSql.sql(), com.alibaba.fastjson2.JSON.toJSONString(execution));
+                cacheManager.putNl2sqlResult(executionCacheKey, com.alibaba.fastjson2.JSON.toJSONString(execution));
             }
             return finalizeResponse(evidence);
         } catch (Nl2SqlException ex) {
@@ -308,6 +314,41 @@ public class Nl2SqlOrchestrator {
         }
         plan.putAll(existing);
         return plan;
+    }
+
+    private String executionCacheKey(String sql, String userScope) {
+        return "nl2sql:result:"
+                + "sql:" + sha256(sql)
+                + ":scope:" + sha256(StringUtils.hasText(userScope) ? userScope : "global")
+                + ":policy:" + policyHash();
+    }
+
+    private String userScope(String conversationKey) {
+        return StringUtils.hasText(conversationKey) ? conversationKey : "global";
+    }
+
+    private String policyHash() {
+        Map<String, Object> policy = new LinkedHashMap<>();
+        policy.put("maxRows", properties.getMaxRows());
+        policy.put("queryTimeoutMs", properties.getQueryTimeoutMs());
+        policy.put("allowJoins", properties.isAllowJoins());
+        policy.put("allowSubqueries", properties.isAllowSubqueries());
+        policy.put("allowCte", properties.isAllowCte());
+        policy.put("allowSetOperations", properties.isAllowSetOperations());
+        policy.put("allowWindowFunctions", properties.isAllowWindowFunctions());
+        policy.put("costGuardEnabled", properties.getCostGuard().isEnabled());
+        policy.put("maxEstimatedRows", properties.getCostGuard().getMaxEstimatedRows());
+        policy.put("maxQueryCost", properties.getCostGuard().getMaxQueryCost());
+        return sha256(com.alibaba.fastjson2.JSON.toJSONString(policy));
+    }
+
+    private String sha256(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest((value == null ? "" : value).getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 algorithm is not available", ex);
+        }
     }
 
     private Object resultPreview(Map<String, Object> response) {

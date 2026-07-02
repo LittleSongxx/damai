@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p>当前实现: 基于内存的实时计数（ConcurrentHashMap + AtomicLong），
  * 按天分区，每次 LLM 调用后更新，支持流式过程中的实时检查。
  *
- * <p>相比旧版 isDailyBudgetExceeded (每次查 DB):
+ * <p>实时预算检查:
  * <ul>
  *   <li>延迟: ~0μs vs ~5ms (DB 查询)</li>
  *   <li>精度: 实时 vs 写入后可见</li>

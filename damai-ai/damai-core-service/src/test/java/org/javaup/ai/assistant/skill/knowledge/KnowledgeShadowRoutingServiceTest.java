@@ -19,7 +19,7 @@ class KnowledgeShadowRoutingServiceTest {
     void shouldRankRelevantScopesAndDocuments() {
         MarkdownLoader markdownLoader = mock(MarkdownLoader.class);
         KnowledgeRoutingProperties properties = new KnowledgeRoutingProperties();
-        when(markdownLoader.loadMarkdowns()).thenReturn(List.of(
+        when(markdownLoader.loadMarkdownsFlat()).thenReturn(List.of(
                 new Document("问题：退票多久到账", Map.of(
                         "label", "退票退款",
                         "docTitle", "退票退款完整操作指南",

@@ -5,9 +5,9 @@ import com.alibaba.fastjson2.JSONObject;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import lombok.RequiredArgsConstructor;
 import org.javaup.ai.entity.AiCustomerServiceMetricEvent;
-import org.javaup.ai.entity.EscalationTicket;
+import org.javaup.ai.entity.CustomerWorkItem;
 import org.javaup.ai.mapper.AiCustomerServiceMetricEventMapper;
-import org.javaup.ai.mapper.EscalationTicketMapper;
+import org.javaup.ai.mapper.CustomerWorkItemMapper;
 import org.javaup.ai.vo.CustomerServiceDashboardVo;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -27,14 +27,14 @@ public class CustomerServiceMetricsService {
     public static final String QUICK_ANSWER_MISS = "quick_answer_miss";
     public static final String CACHE_HIT = "cache_hit";
     public static final String RAG_HIT = "rag_hit";
-    public static final String ESCALATION_CREATED = "escalation_created";
+    public static final String WORK_ITEM_CREATED = "work_item_created";
     public static final String NEGATIVE_SENTIMENT = "negative_sentiment";
     public static final String FIRST_RESPONSE_LATENCY = "first_response_latency";
     public static final String COMPLETE_ANSWER_LATENCY = "complete_answer_latency";
     public static final String SATISFACTION = "satisfaction";
 
     private final AiCustomerServiceMetricEventMapper metricEventMapper;
-    private final EscalationTicketMapper escalationTicketMapper;
+    private final CustomerWorkItemMapper workItemMapper;
 
     public void record(String runId,
                        String conversationId,
@@ -69,7 +69,7 @@ public class CustomerServiceMetricsService {
         long quickMiss = count(events, QUICK_ANSWER_MISS);
         long cacheHit = count(events, CACHE_HIT);
         long ragHit = count(events, RAG_HIT);
-        long escalation = count(events, ESCALATION_CREATED);
+        long workItemCreated = count(events, WORK_ITEM_CREATED);
         long negative = count(events, NEGATIVE_SENTIMENT);
         double satisfactionRate = satisfactionRate(events);
         return CustomerServiceDashboardVo.builder()
@@ -81,8 +81,8 @@ public class CustomerServiceMetricsService {
                 .cacheHitRate(rate(cacheHit, total))
                 .ragHits(ragHit)
                 .ragHitRate(rate(ragHit, total))
-                .escalations(escalation)
-                .escalationRate(rate(escalation, total))
+                .workItems(workItemCreated)
+                .workItemRate(rate(workItemCreated, total))
                 .negativeSentiments(negative)
                 .negativeSentimentRate(rate(negative, total))
                 .avgFirstResponseLatencyMs(avgLatency(events, FIRST_RESPONSE_LATENCY))
@@ -119,27 +119,29 @@ public class CustomerServiceMetricsService {
     }
 
     public List<Map<String, Object>> unresolvedCases() {
-        List<EscalationTicket> tickets;
+        List<CustomerWorkItem> items;
         try {
-            tickets = escalationTicketMapper.selectList(
-                    Wrappers.lambdaQuery(EscalationTicket.class)
-                            .in(EscalationTicket::getTicketStatus, List.of("OPEN", "ASSIGNED", "IN_PROGRESS"))
-                            .eq(EscalationTicket::getStatus, 1)
-                            .orderByDesc(EscalationTicket::getCreateTime)
+            items = workItemMapper.selectList(
+                    Wrappers.lambdaQuery(CustomerWorkItem.class)
+                            .in(CustomerWorkItem::getWorkStatus, List.of("OPEN", "ASSIGNED", "IN_PROGRESS"))
+                            .eq(CustomerWorkItem::getStatus, 1)
+                            .orderByDesc(CustomerWorkItem::getCreateTime)
                             .last("limit 20"));
         } catch (Exception ignored) {
-            tickets = List.of();
+            items = List.of();
         }
-        return tickets.stream().map(ticket -> {
-            Map<String, Object> item = new LinkedHashMap<>();
-            item.put("ticketId", ticket.getTicketId());
-            item.put("priority", ticket.getPriority());
-            item.put("sentiment", ticket.getSentiment());
-            item.put("intentCode", ticket.getIntentCode());
-            item.put("dialogueSummary", ticket.getDialogueSummary());
-            item.put("suggestedReply", ticket.getSuggestedReply());
-            item.put("createTime", ticket.getCreateTime());
-            return item;
+        return items.stream().map(workItem -> {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("workItemId", workItem.getWorkItemId());
+            row.put("priority", workItem.getPriority());
+            row.put("skillGroup", workItem.getSkillGroup());
+            row.put("workStatus", workItem.getWorkStatus());
+            row.put("takeoverStatus", workItem.getTakeoverStatus());
+            row.put("slaDueAt", workItem.getSlaDueAt());
+            row.put("assignedTo", workItem.getAssignedTo());
+            row.put("context", workItem.getExtJson());
+            row.put("createTime", workItem.getCreateTime());
+            return row;
         }).toList();
     }
 
@@ -149,7 +151,7 @@ public class CustomerServiceMetricsService {
         snapshot.put("totalEvents", dashboard.getTotalEvents());
         snapshot.put("quickAnswerHitRate", dashboard.getQuickAnswerHitRate());
         snapshot.put("cacheHitRate", dashboard.getCacheHitRate());
-        snapshot.put("escalationRate", dashboard.getEscalationRate());
+        snapshot.put("workItemRate", dashboard.getWorkItemRate());
         snapshot.put("negativeSentimentRate", dashboard.getNegativeSentimentRate());
         snapshot.put("satisfactionRate", dashboard.getSatisfactionRate());
         snapshot.put("avgFirstResponseLatencyMs", dashboard.getAvgFirstResponseLatencyMs());

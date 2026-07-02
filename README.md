@@ -15,8 +15,8 @@ graph TB
         AIVue[AI 助手 Vue 3<br/>:15174]
     end
 
-    subgraph AI["damai-ai · 智能助手"]
-        AICore[Core Service :6089<br/>Skill 引擎 / RAG / Tool Calling<br/>MCP 日志/指标/运维工具]
+    subgraph AI["damai-ai · 外围 AI 能力"]
+        AICore[Core Service :6089<br/>Assistant Runtime / RAG / DataOps / Ops Evidence]
     end
 
     subgraph Pro["damai-pro · 票务微服务"]
@@ -46,6 +46,7 @@ graph TB
     AICore --> Qdrant
     AICore --> ES
     AICore --> Prometheus
+    Pro -.OpsEvent / Reservation.-> AICore
 ```
 
 ## 项目结构
@@ -57,9 +58,17 @@ damai/
 │   ├── damai-*-framework/  # 公共框架模块
 │   ├── vue3/           #   用户端前端
 │   └── docker-compose.yml
-├── damai-ai/           # AI 智能助手平台
-│   ├── damai-core-service/   # AI 核心服务 (含 MCP 工具)
-│   └── vue/            #   AI 前端
+├── damai-ai/           # damai-pro 的外围 AI 能力
+│   ├── damai-ai-domain/      # 领域模型与通用契约
+│   ├── damai-ai-infra/       # 基础设施适配与网关
+│   ├── damai-ai-runtime/     # Assistant Run / Skill SPI / 运行时边界
+│   ├── damai-ai-business/    # 票务业务 AI 编排边界
+│   ├── damai-ai-knowledge/   # 知识库 / RAG / 评测边界
+│   ├── damai-ai-ops/         # Ops Evidence / DataOps / NL2SQL 边界
+│   ├── damai-ai-customer/    # 客服工单与反馈闭环边界
+│   ├── damai-ai-governance/  # Prompt / 质量门禁 / 治理边界
+│   ├── damai-core-service/   # Spring Boot 启动与 Web/API 聚合
+│   └── vue/                  # 客服、知识、问数、运维治理工作台
 ├── scripts/            # 工作区级启动脚本
 └── pom.xml             # Maven 聚合
 ```
@@ -77,14 +86,14 @@ damai/
 
 **技术栈**: Java 17 · Spring Boot 3.3 · Spring Cloud 2023 · Nacos · Sentinel · ShardingSphere · MyBatis Plus
 
-### [damai-ai](damai-ai/) — 票务智能助手平台
+### [damai-ai](damai-ai/) — 票务 AI 客服、问数与运维治理层
 
-基于 Spring AI 构建的智能助手平台（483+ 源文件，40 单元测试），五大核心能力：
-- **Hybrid RAG** — Corrective RAG 流水线，Qdrant + ES BM25 + RRF 融合 + Rerank
-- **Tool Calling** — LLM 自主编排购票工具，人在环审批
-- **联网搜索** — Tavily/博查联网证据 + LLM 生成
-- **NL2SQL** — 自然语言运维查询，AST 七层安全校验
-- **内置 MCP 运维** — 日志/指标工具治理，LLM 汇总诊断建议
+`damai-ai` 不替代 `damai-pro` 的核心交易系统，而是围绕售票平台提供外围 AI 能力：
+- **客户侧智能客服** — FAQ/RAG 问答、票务处理、购票预览、人在环审批、转人工和反馈闭环
+- **知识治理** — 版本化知识发布、证据引用、坏例沉淀、RAG 评测与质量门禁
+- **运营问数 DataOps** — 基于 `damai-pro` 业务事件沉淀只读指标视图，NL2SQL 默认禁用并受语义目录与安全策略约束
+- **智能运维 Ops Evidence** — 聚合日志、指标、Trace、告警、变更、拓扑、Runbook 和业务事件，缺证据时显式降级
+- **平台治理** — Prompt、Skill、路由、质量评测、权限和审计统一收敛到 `/assistant/**`
 
 **技术栈**: Java 17 · Spring Boot 3.5 · Spring AI 1.0 · Qdrant · Vue 3 · Naive UI
 

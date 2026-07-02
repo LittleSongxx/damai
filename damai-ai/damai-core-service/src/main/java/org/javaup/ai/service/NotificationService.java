@@ -78,7 +78,7 @@ public class NotificationService {
                                           String city, String onSaleTime, String programId) {
         String title = "你关注的演出即将开票";
         String content = String.format("《%s》（%s）将于 %s 开始售票，记得准时来抢票！", programName, city, onSaleTime);
-        String actionUrl = "/program/" + programId;
+        String actionUrl = "/assistant?programId=" + programId;
 
         createNotification(userId, "TICKET_ON_SALE", title, content, actionUrl, "查看详情", "in_app");
     }

@@ -10,11 +10,12 @@ graph LR
         Vue3[用户端 :15173]
     end
     subgraph AI["damai-ai"]
-        Core[核心服务 :6089<br/>含 MCP 工具]
+        Core[核心服务 :6089<br/>客服 / 知识 / DataOps / Ops Evidence]
         VueAI[AI 前端 :15174]
     end
     VueAI --> Core
-    Core --> Backend
+    Core -->|内部 reservation / 业务查询| Backend
+    Backend -.OpsEvent / 日志 / 指标 / Trace.-> Core
     Vue3 --> Backend
 ```
 
@@ -36,7 +37,7 @@ cp ../damai-ai/vue/.env.example ../damai-ai/vue/.env
 
 > 仅用 Ollama 时可留空上述 Key，确保 `DAMAI_AI_OLLAMA_BASE_URL` 可访问即可。
 
-为关闭旧的 `no_verify` 网关绕过，请同时设置：
+`damai-ai` 调用 `damai-pro` 内部接口时必须使用共享内部令牌，请同时设置：
 
 ```env
 # damai-pro/.env
@@ -44,16 +45,15 @@ DAMAI_INTERNAL_ACCESS_TOKEN=__CHANGE_ME_SHARED_INTERNAL_TOKEN__
 
 # damai-ai/.env
 DAMAI_INTERNAL_ACCESS_TOKEN=__CHANGE_ME_SHARED_INTERNAL_TOKEN__
-DAMAI_ALLOW_UNSAFE_NO_VERIFY_FALLBACK=false
 ```
 
 ## 2) 启动 Docker 依赖
 
 ```bash
-docker compose --env-file .env --profile ai up -d
+docker compose --env-file .env --profile ai --profile ai-ops up -d
 ```
 
-启动内容：MySQL · Redis · Nacos · RabbitMQ · ES · Seata · Sentinel · Prometheus · Qdrant · Ollama。
+启动内容：MySQL · Redis · Nacos · RabbitMQ · ES · Seata · Sentinel · Qdrant · Ollama，以及 `ai-ops` profile 下的 Prometheus、Alertmanager、OpenTelemetry Collector、SkyWalking。
 
 ## 3) 初始化数据库
 
@@ -105,5 +105,5 @@ cd damai-ai/vue && npm install && npm run dev -- --port 15174 --strictPort
 | --- | --- |
 | 401 / 鉴权失败 | `DAMAI_AI_*_API_KEY` 是否填写正确、无多余空格 |
 | AI 无法下单 | `DAMAI_AI_*_URL` 是否指向 `damai-pro` 网关 |
-| 指标查询为空 | `docker compose --profile ai ps` 中 prometheus 状态 |
+| 指标查询为空 | `docker compose --profile ai-ops ps` 中 Prometheus / Alertmanager / OTel / SkyWalking 状态 |
 | ES 查询失败 | `DAMAI_ES_ADDR` / 账号密码与 `damai-pro/.env` 一致性 |

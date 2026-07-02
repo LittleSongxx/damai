@@ -103,7 +103,7 @@ public class AnalyticsService {
                 ? (double) resolvedRuns / totalConversations * 100 : 0;
         double csat = totalFeedback > 0
                 ? (double) positiveFeedback / totalFeedback * 100 : 0;
-        double escalationRate = totalConversations > 0
+        double workItemRate = totalConversations > 0
                 ? (double) escalatedRuns / totalConversations * 100 : 0;
         double failureRate = totalConversations > 0
                 ? (double) failedRuns / totalConversations * 100 : 0;
@@ -113,7 +113,7 @@ public class AnalyticsService {
                 positiveFeedback, negativeFeedback,
                 Math.round(resolutionRate * 100.0) / 100.0,
                 Math.round(csat * 100.0) / 100.0,
-                Math.round(escalationRate * 100.0) / 100.0,
+                Math.round(workItemRate * 100.0) / 100.0,
                 Math.round(failureRate * 100.0) / 100.0,
                 Math.round(avgConfidence * 10000.0) / 10000.0,
                 faqTotalHits
@@ -239,7 +239,7 @@ public class AnalyticsService {
 
     public record DashboardMetrics(long totalConversations, long resolvedRuns, long escalatedRuns,
                                     long failedRuns, long positiveFeedback, long negativeFeedback,
-                                    double resolutionRate, double csat, double escalationRate,
+                                    double resolutionRate, double csat, double workItemRate,
                                     double failureRate, double avgConfidence, long faqTotalHits) {}
 
     public record TopQuestion(String question, String category, long hitCount) {}

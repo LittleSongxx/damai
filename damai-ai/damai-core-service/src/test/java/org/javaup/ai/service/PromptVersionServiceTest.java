@@ -3,7 +3,9 @@ package org.javaup.ai.service;
 import org.javaup.ai.entity.AiPromptReleaseRecord;
 import org.javaup.ai.entity.AiPromptVersion;
 import org.javaup.ai.assistant.mcp.McpGovernanceProperties;
-import org.javaup.ai.assistant.skill.ops.AiOpsFaultInjectionService;
+import org.javaup.ai.assistant.skill.ops.OpsEvidenceProvider;
+import org.javaup.ai.assistant.skill.ops.OpsProviderRegistry;
+import org.javaup.ai.assistant.skill.ops.OpsRcaRequest;
 import org.javaup.ai.entity.AiNl2SqlEvalRun;
 import org.javaup.ai.entity.AiRagEvalRun;
 import org.javaup.ai.mapper.AiNl2SqlEvalRunMapper;
@@ -14,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.RedisTemplate;
 
 import com.alibaba.fastjson2.JSON;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -121,7 +124,7 @@ class PromptVersionServiceTest {
         CustomerServiceMetricsService metricsService = mock(CustomerServiceMetricsService.class);
         when(metricsService.qualitySnapshot()).thenReturn(passingCustomerServiceSnapshot());
         AiQualityGateService qualityGateService = new AiQualityGateService(
-                ragMapper, sqlMapper, new McpGovernanceProperties(), new AiOpsFaultInjectionService(), metricsService);
+                ragMapper, sqlMapper, new McpGovernanceProperties(), opsRegistry(), metricsService);
         PromptReleasePlanService releasePlanService = new PromptReleasePlanService(service, qualityGateService);
 
         List<AiPromptVersion> versions = new ArrayList<>();
@@ -149,7 +152,7 @@ class PromptVersionServiceTest {
         CustomerServiceMetricsService metricsService = mock(CustomerServiceMetricsService.class);
         when(metricsService.qualitySnapshot()).thenReturn(passingCustomerServiceSnapshot());
         AiQualityGateService qualityGateService = new AiQualityGateService(
-                ragMapper, sqlMapper, new McpGovernanceProperties(), new AiOpsFaultInjectionService(), metricsService);
+                ragMapper, sqlMapper, new McpGovernanceProperties(), opsRegistry(), metricsService);
         PromptReleasePlanService releasePlanService = new PromptReleasePlanService(service, qualityGateService);
 
         List<AiPromptVersion> versions = new ArrayList<>();
@@ -178,7 +181,7 @@ class PromptVersionServiceTest {
         CustomerServiceMetricsService metricsService = mock(CustomerServiceMetricsService.class);
         when(metricsService.qualitySnapshot()).thenReturn(Map.of("totalEvents", 0));
         AiQualityGateService qualityGateService = new AiQualityGateService(
-                ragMapper, sqlMapper, mcp, new AiOpsFaultInjectionService(), metricsService);
+                ragMapper, sqlMapper, mcp, opsRegistry(), metricsService);
         PromptReleasePlanService releasePlanService = new PromptReleasePlanService(service, qualityGateService);
 
         when(versionMapper.selectList(any())).thenReturn(List.of(version(2, "candidate", false, "DRAFT", 0)));
@@ -234,7 +237,7 @@ class PromptVersionServiceTest {
                 "totalEvents", 20,
                 "quickAnswerHitRate", 0.6,
                 "cacheHitRate", 0.5,
-                "escalationRate", 0.1,
+                "workItemRate", 0.1,
                 "negativeSentimentRate", 0.05,
                 "satisfactionRate", 0.9,
                 "avgFirstResponseLatencyMs", 120D);
@@ -252,5 +255,31 @@ class PromptVersionServiceTest {
         sqlRun.setUnsafeRejectionRate(1.0);
         sqlRun.setLowConfidenceClarificationRate(0.2);
         return sqlRun;
+    }
+
+    private OpsProviderRegistry opsRegistry() {
+        OpsProviderRegistry registry = new OpsProviderRegistry();
+        registry.setProviders(List.of(
+                provider("logs"), provider("metrics"), provider("traces"), provider("alerts"), provider("businessEvents")));
+        return registry;
+    }
+
+    private OpsEvidenceProvider provider(String signalType) {
+        return new OpsEvidenceProvider() {
+            @Override
+            public String name() {
+                return signalType + "-test";
+            }
+
+            @Override
+            public String signalType() {
+                return signalType;
+            }
+
+            @Override
+            public Map<String, Object> collect(OpsRcaRequest request, Instant start, Instant end) {
+                return Map.of("items", List.of("ok"));
+            }
+        };
     }
 }

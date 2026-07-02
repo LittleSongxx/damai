@@ -55,14 +55,11 @@ docker compose --env-file .env --profile ai up -d --remove-orphans
 
 ### damai-ai 内部调用令牌
 
-为避免继续依赖 `no_verify` 绕过签名校验，本地联调时请在 `damai-pro/.env` 和 `damai-ai/.env` 中设置同一个 `DAMAI_INTERNAL_ACCESS_TOKEN`。建议同时在 `damai-ai/.env` 中显式设置：
+本地联调时请在 `damai-pro/.env` 和 `damai-ai/.env` 中设置同一个 `DAMAI_INTERNAL_ACCESS_TOKEN`。`damai-ai` 访问 `damai-pro` 时只通过 `X-Internal-Token` 进入内部接口。
 
 ```env
 DAMAI_INTERNAL_ACCESS_TOKEN=__CHANGE_ME_SHARED_INTERNAL_TOKEN__
-DAMAI_ALLOW_UNSAFE_NO_VERIFY_FALLBACK=false
 ```
-
-这样 `damai-ai` 会优先通过 `X-Internal-Token` 访问网关，且不再回退到旧的 `no_verify` 旁路。
 
 ### 分库分表配置生成
 

@@ -36,6 +36,7 @@ public class FeedbackAnalysisService {
     private final NotificationService notificationService;
     private final AiSecurityProperties securityProperties;
     private final FaqEntryMapper faqEntryMapper;
+    private final FeedbackClusterer feedbackClusterer;
 
     public FeedbackAnalysisService(AiFeedbackMapper feedbackMapper,
                                     AiRunMapper runMapper,
@@ -43,7 +44,8 @@ public class FeedbackAnalysisService {
                                     @Qualifier("unifiedGeneralChatClient") ChatClient chatClient,
                                     NotificationService notificationService,
                                     AiSecurityProperties securityProperties,
-                                    FaqEntryMapper faqEntryMapper) {
+                                    FaqEntryMapper faqEntryMapper,
+                                    FeedbackClusterer feedbackClusterer) {
         this.feedbackMapper = feedbackMapper;
         this.runMapper = runMapper;
         this.analysisMapper = analysisMapper;
@@ -51,6 +53,7 @@ public class FeedbackAnalysisService {
         this.notificationService = notificationService;
         this.securityProperties = securityProperties;
         this.faqEntryMapper = faqEntryMapper;
+        this.feedbackClusterer = feedbackClusterer;
     }
 
     /**
@@ -70,7 +73,12 @@ public class FeedbackAnalysisService {
         FeedbackAnalysisResult analysis = analyzeWithLLM(run, feedback);
 
         // 查找同类问题聚类
-        String clusterKey = generateClusterKey(analysis.issueCategory, run.getRouteType());
+        String clusterKey = feedbackClusterer.clusterKey(new FeedbackClusterInput(
+                run.getRouteType(),
+                analysis.issueCategory,
+                run.getUserMessage(),
+                run.getResponseSummary(),
+                feedback.getComment()));
 
         // 计算同类问题数量
         int affectedCount = countSimilarIssues(clusterKey);
@@ -144,10 +152,6 @@ public class FeedbackAnalysisService {
                 "用户不满意AI回答", "人工审核该回答");
     }
 
-    private String generateClusterKey(String issueCategory, String routeType) {
-        return (issueCategory != null ? issueCategory : "unknown") + ":" + (routeType != null ? routeType : "unknown");
-    }
-
     private int countSimilarIssues(String clusterKey) {
         Long count = analysisMapper.selectCount(
                 Wrappers.lambdaQuery(FeedbackAnalysis.class)
@@ -180,7 +184,7 @@ public class FeedbackAnalysisService {
             try {
                 Long adminUserId = Long.parseLong(adminIdStr.trim());
                 notificationService.createNotification(adminUserId, "KNOWLEDGE_GAP",
-                        title, content, "/admin/knowledge/documents?action=create",
+                        title, content, "/assistant/admin/knowledge/documents?action=create",
                         "补充知识", "in_app");
             } catch (NumberFormatException ignored) {
                 // Skip invalid admin user IDs

@@ -1,0 +1,84 @@
+groups:
+  - name: damai-service-golden-signals
+    rules:
+      - alert: DamaiServiceHighErrorRate
+        expr: sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) by (application, service, route) / clamp_min(sum(rate(http_server_requests_seconds_count[5m])) by (application, service, route), 1) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          domain: api
+        annotations:
+          summary: "服务错误率升高"
+          description: "{{ $labels.service }} {{ $labels.route }} 5xx 比例超过 5%。"
+
+      - alert: DamaiServiceP95LatencyHigh
+        expr: histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket[5m])) by (le, application, service, route)) > 2
+        for: 10m
+        labels:
+          severity: warning
+          domain: api
+        annotations:
+          summary: "接口 P95 延迟升高"
+          description: "{{ $labels.service }} {{ $labels.route }} P95 延迟超过 2 秒。"
+
+      - alert: DamaiJvmCpuPressure
+        expr: process_cpu_usage > 0.85 or system_cpu_usage > 0.85
+        for: 10m
+        labels:
+          severity: warning
+          domain: runtime
+        annotations:
+          summary: "JVM/CPU 压力升高"
+          description: "{{ $labels.application }} CPU 使用率持续偏高。"
+
+  - name: damai-business-slo
+    rules:
+      - alert: DamaiOrderSuccessRateLow
+        expr: sum(rate(damai_order_created_total[5m])) / clamp_min(sum(rate(damai_order_attempt_total[5m])), 1) < 0.95
+        for: 5m
+        labels:
+          severity: critical
+          domain: order
+        annotations:
+          summary: "下单成功率下降"
+          description: "订单创建成功率低于 95%，需要联动库存、支付和 MQ 证据。"
+
+      - alert: DamaiSeatLockFailureHigh
+        expr: sum(rate(damai_inventory_reserve_failed_total[5m])) / clamp_min(sum(rate(damai_inventory_reserve_attempt_total[5m])), 1) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          domain: inventory
+        annotations:
+          summary: "锁座失败率升高"
+          description: "锁座失败率超过 5%，需要检查库存、座位状态和并发控制。"
+
+      - alert: DamaiPaymentSuccessRateLow
+        expr: sum(rate(damai_payment_success_total[5m])) / clamp_min(sum(rate(damai_payment_attempt_total[5m])), 1) < 0.97
+        for: 10m
+        labels:
+          severity: warning
+          domain: payment
+        annotations:
+          summary: "支付成功率下降"
+          description: "支付成功率低于 97%，需要检查支付网关和订单状态流转。"
+
+      - alert: DamaiAiReservationConfirmFailureHigh
+        expr: sum(rate(damai_ai_reservation_confirm_failed_total[5m])) / clamp_min(sum(rate(damai_ai_reservation_confirm_attempt_total[5m])), 1) > 0.03
+        for: 5m
+        labels:
+          severity: critical
+          domain: reservation
+        annotations:
+          summary: "AI reservation confirm 失败率升高"
+          description: "AI 购票确认链路异常，需要检查 reservation、订单创建和幂等键。"
+
+      - alert: DamaiMqConsumerFailureHigh
+        expr: sum(rate(damai_mq_message_exception_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          domain: mq
+        annotations:
+          summary: "MQ 消费异常"
+          description: "MQ 异常事件持续出现，需要检查死信、重试和消费积压。"

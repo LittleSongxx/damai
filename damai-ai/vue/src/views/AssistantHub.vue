@@ -88,7 +88,7 @@
         </div>
 
         <aside class="meta-pane">
-          <section v-if="customerServiceCard || customerSentiment || customerEscalationTicket || customerSuggestions.length" class="meta-card">
+          <section v-if="customerServiceCard || customerSentiment || customerWorkItem || customerSuggestions.length" class="meta-card">
             <p class="eyebrow">Customer Service</p>
             <h3>客服状态</h3>
             <div v-if="customerServiceCard" class="quality-status" :class="customerServiceCard.hit ? 'quality-status--pass' : 'quality-status--warn'">
@@ -99,14 +99,14 @@
               <span>情绪</span>
               <strong>{{ customerSentiment.sentiment || 'NEUTRAL' }} · {{ customerSentiment.intensity ?? 0 }}</strong>
             </div>
-            <div v-if="customerEscalationTicket" class="fault-section">
+            <div v-if="customerWorkItem" class="detail-section">
               <span class="memory-label">工单</span>
               <div class="pill-list">
-                <span class="detail-pill">{{ customerEscalationTicket.ticketId }}</span>
-                <span class="detail-pill">{{ customerEscalationTicket.priority || 'MEDIUM' }}</span>
-                <span class="detail-pill">{{ customerEscalationTicket.ticketStatus || 'OPEN' }}</span>
+                <span class="detail-pill">{{ customerWorkItem.workItemId }}</span>
+                <span class="detail-pill">{{ customerWorkItem.priority || 'MEDIUM' }}</span>
+                <span class="detail-pill">{{ customerWorkItem.workStatus || 'OPEN' }}</span>
               </div>
-              <p>{{ customerEscalationTicket.suggestedReply || '人工客服会结合上下文继续处理。' }}</p>
+              <p>{{ customerWorkItem.conclusion || '人工客服会结合上下文继续处理。' }}</p>
             </div>
             <div v-if="customerSuggestions.length" class="clarification-list">
               <button
@@ -179,12 +179,12 @@
             </template>
           </section>
 
-          <section v-if="capabilities?.skills?.length" class="meta-card">
+          <section v-if="primarySkillItems.length" class="meta-card">
             <p class="eyebrow">Skills</p>
-            <h3>直选 Skill</h3>
+            <h3>客服主线 Skill</h3>
             <div class="skill-list">
               <button
-                v-for="skill in capabilities?.skills"
+                v-for="skill in primarySkillItems"
                 :key="skill.skillId"
                 class="skill-chip"
                 :class="{ active: currentSkillId === skill.skillId }"
@@ -196,14 +196,21 @@
             </div>
           </section>
 
-          <section v-if="capabilities?.admin && qualityGate" class="meta-card">
+          <div v-if="capabilities?.admin" class="workspace-group workspace-group--governance">
+            <div class="workspace-group__header">
+              <p class="eyebrow">Knowledge & Data Ops</p>
+              <h3>知识与问数治理</h3>
+              <p>只承载知识库质量、RAG 评测和 NL2SQL 合约，不干扰普通客服入口。</p>
+            </div>
+
+          <section v-if="qualityGate" class="meta-card">
             <p class="eyebrow">Quality Gate</p>
             <h3>治理门禁</h3>
             <div class="quality-status" :class="qualityGateClass">
               <strong>{{ qualityGate.status }}</strong>
               <span>RAG {{ qualityGate.latestRagRunId || '-' }} · NL2SQL {{ qualityGate.latestNl2SqlRunId || '-' }}</span>
             </div>
-            <div class="fault-section">
+            <div class="detail-section">
               <div class="card-title-row">
                 <span class="memory-label">Eval Control</span>
                 <div class="rag-job-actions">
@@ -258,7 +265,7 @@
             <div v-if="qualityCoverageDomains.length" class="pill-list">
               <span v-for="domain in qualityCoverageDomains" :key="domain" class="detail-pill">{{ domain }}</span>
             </div>
-            <div v-if="qualityRagClosure" class="fault-section">
+            <div v-if="qualityRagClosure" class="detail-section">
               <span class="memory-label">RAG Closure</span>
               <div class="pill-list">
                 <span class="detail-pill">{{ qualityRagClosure.status || 'UNKNOWN' }}</span>
@@ -269,7 +276,7 @@
                 <li v-for="action in qualityRagClosureActions" :key="action">{{ action }}</li>
               </ul>
             </div>
-            <div v-if="qualityNl2SqlContract" class="fault-section">
+            <div v-if="qualityNl2SqlContract" class="detail-section">
               <span class="memory-label">NL2SQL Contract</span>
               <div class="pill-list">
                 <span class="detail-pill">{{ qualityNl2SqlContract.status || 'UNKNOWN' }}</span>
@@ -280,7 +287,7 @@
               </div>
               <p>{{ qualityNl2SqlContractFields }}</p>
             </div>
-            <div v-if="qualityCapabilityEvidence.length" class="fault-section">
+            <div v-if="qualityCapabilityEvidence.length" class="detail-section">
               <span class="memory-label">Capability Evidence</span>
               <ul class="detail-list">
                 <li v-for="item in qualityCapabilityEvidence" :key="item.capability">
@@ -297,7 +304,7 @@
                 <strong :class="gate.statusClass">{{ gate.status }}</strong>
               </li>
             </ul>
-            <div v-if="qualityFailureSamples.length" class="fault-section">
+            <div v-if="qualityFailureSamples.length" class="detail-section">
               <span class="memory-label">Failure Samples</span>
               <ul class="detail-list">
                 <li v-for="sample in qualityFailureSamples" :key="sample.gate">
@@ -307,75 +314,7 @@
             </div>
           </section>
 
-          <section v-if="capabilities?.admin && mcpGovernance" class="meta-card">
-            <p class="eyebrow">MCP</p>
-            <h3>协议边界</h3>
-            <div class="quality-status" :class="mcpGovernanceClass">
-              <strong>{{ mcpGovernance.status }}</strong>
-              <span>tools {{ mcpGovernance.allowlistSize || 0 }} · resources {{ mcpGovernance.resourceAllowlistSize || 0 }} · prompts {{ mcpGovernance.promptAllowlistSize || 0 }}</span>
-            </div>
-            <div class="meta-stat">
-              <span>Admin</span>
-              <strong>{{ mcpGovernance.requireAdmin ? 'ON' : 'OFF' }}</strong>
-            </div>
-            <div class="meta-stat">
-              <span>Confirm</span>
-              <strong>{{ mcpGovernance.requireHighRiskConfirmation ? 'ON' : 'OFF' }}</strong>
-            </div>
-            <div class="meta-stat">
-              <span>NL2SQL</span>
-              <strong>{{ mcpGovernance.exposeNl2Sql ? 'EXPOSED' : 'BLOCKED' }}</strong>
-            </div>
-            <ul class="tool-boundary-list">
-              <li v-for="tool in mcpAllowlistedTools" :key="tool.toolName">
-                <div>
-                  <strong>{{ tool.toolName }}</strong>
-                  <p>{{ tool.scope }} · {{ tool.reason }}</p>
-                </div>
-                <span class="trace-status" :class="tool.riskLevel === 'HIGH' ? 'trace-status--error' : 'trace-status--ok'">
-                  {{ tool.riskLevel }}
-                </span>
-              </li>
-            </ul>
-            <div v-if="mcpHighRiskTools.length" class="fault-section">
-              <span class="memory-label">High Risk Tools</span>
-              <div class="pill-list">
-                <span v-for="tool in mcpHighRiskTools" :key="tool.toolName" class="detail-pill">
-                  {{ tool.toolName }} · {{ tool.exposed ? 'exposed' : 'blocked' }}
-                </span>
-              </div>
-            </div>
-            <div v-if="mcpAllowlistedResources.length" class="fault-section">
-              <span class="memory-label">Resources</span>
-              <div class="pill-list">
-                <span v-for="resource in mcpAllowlistedResources" :key="resource.name" class="detail-pill">
-                  {{ resource.name }} · {{ resource.riskLevel }}
-                </span>
-              </div>
-            </div>
-            <div v-if="mcpAllowlistedPrompts.length" class="fault-section">
-              <span class="memory-label">Prompts</span>
-              <div class="pill-list">
-                <span v-for="prompt in mcpAllowlistedPrompts" :key="prompt.name" class="detail-pill">
-                  {{ prompt.name }} · {{ prompt.riskLevel }}
-                </span>
-              </div>
-            </div>
-            <div class="panel-actions panel-actions--compact">
-              <button class="ghost-button ghost-button--tiny" @click="readMcpResource()">Read Resource</button>
-              <button class="ghost-button ghost-button--tiny" @click="renderMcpPrompt()">Render Prompt</button>
-            </div>
-            <div v-if="mcpBoundaryResult" class="fault-section">
-              <span class="memory-label">Boundary Result</span>
-              <div class="pill-list">
-                <span class="detail-pill">{{ mcpBoundaryResult.surface }} · {{ mcpBoundaryResult.name }}</span>
-                <span class="detail-pill">{{ mcpBoundaryResult.policy }}</span>
-              </div>
-              <p class="empty-text">{{ mcpBoundaryPreview }}</p>
-            </div>
-          </section>
-
-          <section v-if="capabilities?.admin" class="meta-card">
+          <section class="meta-card">
             <div class="card-title-row">
               <div>
                 <p class="eyebrow">RAG EvalOps</p>
@@ -401,7 +340,7 @@
               <strong>{{ ragEvalComparison.baselineRunId }}</strong>
               <p>{{ comparisonSummaryText }}</p>
             </div>
-            <div class="fault-section">
+            <div class="detail-section">
               <div class="card-title-row">
                 <span class="memory-label">Reindex Jobs</span>
                 <div class="rag-job-actions">
@@ -441,90 +380,171 @@
               </li>
             </ul>
           </section>
+          </div>
 
-          <section v-if="capabilities?.admin" class="meta-card">
-            <p class="eyebrow">AIOps Lab</p>
-            <h3>故障演练</h3>
-            <p v-if="!aiOpsScenarioItems.length" class="empty-text">暂无故障场景。</p>
-            <ul v-else class="admin-action-list">
-              <li v-for="scenario in aiOpsScenarioItems" :key="scenario.scenarioId">
+          <div v-if="capabilities?.admin && hasExperimentalWorkspace" class="workspace-group workspace-group--experimental">
+            <div class="workspace-group__header">
+              <p class="eyebrow">Governance</p>
+              <h3>AI 治理工作台</h3>
+              <p>MCP 边界、Ops Evidence 和 Red Team 属于管理员治理能力，默认不进入客服主线。</p>
+            </div>
+
+          <section v-if="mcpGovernance" class="meta-card">
+            <p class="eyebrow">MCP</p>
+            <h3>协议边界</h3>
+            <div class="quality-status" :class="mcpGovernanceClass">
+              <strong>{{ mcpGovernance.status }}</strong>
+              <span>tools {{ mcpGovernance.allowlistSize || 0 }} · resources {{ mcpGovernance.resourceAllowlistSize || 0 }} · prompts {{ mcpGovernance.promptAllowlistSize || 0 }}</span>
+            </div>
+            <div class="meta-stat">
+              <span>Admin</span>
+              <strong>{{ mcpGovernance.requireAdmin ? 'ON' : 'OFF' }}</strong>
+            </div>
+            <div class="meta-stat">
+              <span>Confirm</span>
+              <strong>{{ mcpGovernance.requireHighRiskConfirmation ? 'ON' : 'OFF' }}</strong>
+            </div>
+            <div class="meta-stat">
+              <span>NL2SQL</span>
+              <strong>{{ mcpGovernance.exposeNl2Sql ? 'EXPOSED' : 'BLOCKED' }}</strong>
+            </div>
+            <ul class="tool-boundary-list">
+              <li v-for="tool in mcpAllowlistedTools" :key="tool.toolName">
                 <div>
-                  <strong>{{ scenario.name }}</strong>
-                  <p>{{ scenario.serviceName }} · {{ scenario.severity }}</p>
+                  <strong>{{ tool.toolName }}</strong>
+                  <p>{{ tool.scope }} · {{ tool.reason }}</p>
                 </div>
-                <div class="aiops-actions">
-                  <button class="ghost-button ghost-button--tiny" @click="injectAiOpsFaultScenario(scenario)">Inject</button>
-                  <button class="ghost-button ghost-button--tiny" @click="buildAiOpsRcaEvidence(scenario)">Build RCA</button>
-                </div>
+                <span class="trace-status" :class="tool.riskLevel === 'HIGH' ? 'trace-status--error' : 'trace-status--ok'">
+                  {{ tool.riskLevel }}
+                </span>
               </li>
             </ul>
-            <div v-if="aiOpsFaultResult" class="fault-result">
-              <strong>{{ aiOpsFaultResult.evidenceBundle?.suspectedCause || aiOpsFaultResult.status }}</strong>
-              <p>{{ aiOpsFaultResult.assistantPrompt }}</p>
-              <div v-if="aiOpsSloSummary" class="fault-section">
-                <span class="memory-label">SLO / Alert</span>
-                <div class="pill-list">
-                  <span class="detail-pill">{{ aiOpsSloSummary.severity || 'UNKNOWN' }}</span>
-                  <span class="detail-pill">burn {{ aiOpsSloSummary.burnRate ?? 'n/a' }}x</span>
-                  <span class="detail-pill">budget {{ aiOpsSloBudgetText }}</span>
-                  <span v-if="aiOpsAlertContext?.triggered" class="detail-pill">{{ aiOpsAlertContext.name || 'alert' }}</span>
-                </div>
-                <p v-if="aiOpsAlertContext">
-                  {{ aiOpsAlertContext.serviceName }} · {{ aiOpsAlertContext.routingHint }} · {{ aiOpsAlertContext.primarySignal }}
-                </p>
+            <div v-if="mcpHighRiskTools.length" class="detail-section">
+              <span class="memory-label">High Risk Tools</span>
+              <div class="pill-list">
+                <span v-for="tool in mcpHighRiskTools" :key="tool.toolName" class="detail-pill">
+                  {{ tool.toolName }} · {{ tool.exposed ? 'exposed' : 'blocked' }}
+                </span>
               </div>
-              <div v-if="aiOpsEvidenceTopology" class="fault-section">
-                <span class="memory-label">Topology</span>
-                <p>{{ aiOpsEvidenceTopology.rootService }} -> {{ aiOpsEvidenceTopology.suspectService }}</p>
-                <div class="pill-list">
-                  <span
-                    v-for="edge in aiOpsEvidenceEdges"
-                    :key="`${edge.from}-${edge.to}`"
-                    class="detail-pill"
-                  >
-                    {{ edge.from }} -> {{ edge.to }}
+            </div>
+            <div v-if="mcpAllowlistedResources.length" class="detail-section">
+              <span class="memory-label">Resources</span>
+              <div class="pill-list">
+                <span v-for="resource in mcpAllowlistedResources" :key="resource.name" class="detail-pill">
+                  {{ resource.name }} · {{ resource.riskLevel }}
+                </span>
+              </div>
+            </div>
+            <div v-if="mcpAllowlistedPrompts.length" class="detail-section">
+              <span class="memory-label">Prompts</span>
+              <div class="pill-list">
+                <span v-for="prompt in mcpAllowlistedPrompts" :key="prompt.name" class="detail-pill">
+                  {{ prompt.name }} · {{ prompt.riskLevel }}
+                </span>
+              </div>
+            </div>
+            <div class="panel-actions panel-actions--compact">
+              <button class="ghost-button ghost-button--tiny" @click="readMcpResource()">Read Resource</button>
+              <button class="ghost-button ghost-button--tiny" @click="renderMcpPrompt()">Render Prompt</button>
+            </div>
+            <div v-if="mcpBoundaryResult" class="detail-section">
+              <span class="memory-label">Boundary Result</span>
+              <div class="pill-list">
+                <span class="detail-pill">{{ mcpBoundaryResult.surface }} · {{ mcpBoundaryResult.name }}</span>
+                <span class="detail-pill">{{ mcpBoundaryResult.policy }}</span>
+              </div>
+              <p class="empty-text">{{ mcpBoundaryPreview }}</p>
+            </div>
+          </section>
+
+          <section class="meta-card">
+            <p class="eyebrow">Ops Evidence</p>
+            <h3>运维证据工作台</h3>
+            <div class="panel-actions panel-actions--compact">
+              <button class="ghost-button ghost-button--tiny" @click="buildOpsRcaEvidence()">Build RCA</button>
+            </div>
+            <div v-if="opsProviderItems.length" class="detail-section">
+              <span class="memory-label">Providers</span>
+              <ul class="admin-action-list">
+                <li v-for="provider in opsProviderItems" :key="provider.name || provider.providerType">
+                  <div>
+                    <strong>{{ provider.name || provider.providerType }}</strong>
+                    <p>{{ provider.status || 'UNKNOWN' }} · {{ provider.reason || provider.message || 'read-only evidence provider' }}</p>
+                  </div>
+                  <span :class="['trace-status', provider.available ? 'trace-status--ok' : 'trace-status--error']">
+                    {{ provider.available ? 'ready' : 'missing' }}
                   </span>
-                </div>
-              </div>
-              <div v-if="aiOpsSignalCorrelation" class="fault-section">
-                <span class="memory-label">Correlation</span>
+                </li>
+              </ul>
+            </div>
+            <p v-else class="empty-text">暂无可用证据 Provider；RCA 将以缺证据状态降级。</p>
+            <div v-if="opsEvidenceResult" class="evidence-result">
+              <strong>{{ opsEvidenceResult.evidenceBundle?.rcaSummary || opsEvidenceResult.status }}</strong>
+              <p>{{ opsEvidenceResult.assistantPrompt }}</p>
+              <div class="detail-section">
+                <span class="memory-label">Coverage</span>
                 <div class="pill-list">
-                  <span class="detail-pill">{{ aiOpsSignalCorrelation.evidenceCompleteness || 'UNKNOWN' }}</span>
-                  <span class="detail-pill">score {{ aiOpsCorrelationScore }}</span>
-                  <span class="detail-pill">span {{ aiOpsCorrelationSpanId }}</span>
+                  <span class="detail-pill">{{ opsEvidenceCoverage }}</span>
+                  <span class="detail-pill">{{ opsEvidenceResult.evidenceBundle?.confidence || 'UNKNOWN' }}</span>
+                  <span v-if="opsEvidenceResult.evidenceBundle?.humanReviewRequired" class="detail-pill">human review</span>
                 </div>
-                <p>{{ aiOpsCorrelationSignals }}</p>
+                <p v-if="opsMissingProviders.length">Missing: {{ opsMissingProviders.join(' / ') }}</p>
               </div>
-              <div v-if="aiOpsRecentChanges.length" class="fault-section">
-                <span class="memory-label">Recent Changes</span>
+              <div v-if="opsLinkedSignals.length" class="detail-section">
+                <span class="memory-label">Linked Signals</span>
                 <ul class="detail-list">
-                  <li v-for="change in aiOpsRecentChanges" :key="`${change.type}-${change.serviceName}-${change.version || change.configKey}`">
-                    {{ change.type }} · {{ change.serviceName }} · {{ change.version || change.configKey || change.risk }}
-                  </li>
+                  <li v-for="signal in opsLinkedSignals" :key="signal">{{ signal }}</li>
                 </ul>
               </div>
-              <div v-if="aiOpsEvidenceTimeline.length" class="fault-section">
-                <span class="memory-label">Evidence Timeline</span>
+              <div v-if="opsRecommendedRunbooks.length" class="detail-section">
+                <span class="memory-label">Recommended Runbooks</span>
                 <ul class="detail-list">
-                  <li v-for="item in aiOpsEvidenceTimeline" :key="`${item.kind}-${item.service}-${item.summary}`">
-                    {{ item.kind }} · {{ item.service }} · {{ item.summary }}
-                  </li>
+                  <li v-for="runbook in opsRecommendedRunbooks" :key="runbook">{{ runbook }}</li>
                 </ul>
               </div>
-              <div v-if="aiOpsSuggestedActions.length" class="fault-section">
+              <div v-if="opsSuggestedActions.length" class="detail-section">
                 <span class="memory-label">Actions</span>
                 <ul class="detail-list">
-                  <li v-for="action in aiOpsSuggestedActions" :key="action">{{ action }}</li>
-                </ul>
-              </div>
-              <div v-if="aiOpsPlaybookHints.length" class="fault-section">
-                <span class="memory-label">Playbook</span>
-                <ul class="detail-list">
-                  <li v-for="hint in aiOpsPlaybookHints" :key="hint">{{ hint }}</li>
+                  <li v-for="action in opsSuggestedActions" :key="action">{{ action }}</li>
                 </ul>
               </div>
             </div>
           </section>
+
+          <section class="meta-card">
+            <p class="eyebrow">DataOps</p>
+            <h3>数据问数治理</h3>
+            <div class="panel-actions panel-actions--compact">
+              <button class="ghost-button ghost-button--tiny" @click="reloadSemanticCatalog()">Reload Catalog</button>
+              <button class="ghost-button ghost-button--tiny" @click="rebuildOpsMetrics()">Rebuild Metrics</button>
+            </div>
+            <div class="detail-section">
+              <span class="memory-label">Semantic Catalog</span>
+              <div class="pill-list">
+                <span class="detail-pill">version {{ semanticCatalogVersion }}</span>
+                <span class="detail-pill">{{ semanticCatalogItems.length }} items</span>
+                <span class="detail-pill">{{ semanticCatalogStatus }}</span>
+              </div>
+            </div>
+            <ul v-if="semanticCatalogItems.length" class="admin-action-list">
+              <li v-for="item in semanticCatalogItems" :key="item.catalogId || item.viewName || item.metricName">
+                <div>
+                  <strong>{{ item.metricName || item.viewName || item.catalogId }}</strong>
+                  <p>{{ item.viewName || item.datasetName || 'semantic view' }} · {{ item.securityLevel || 'NORMAL' }}</p>
+                </div>
+                <span class="detail-pill">{{ item.status || 'ACTIVE' }}</span>
+              </li>
+            </ul>
+            <p v-else class="empty-text">暂无 active 语义目录；NL2SQL 仅生成并校验 SQL。</p>
+            <div v-if="metricsRebuildResult" class="detail-section">
+              <span class="memory-label">Metrics Rebuild</span>
+              <div class="pill-list">
+                <span class="detail-pill">{{ metricsRebuildResult.status || 'SUBMITTED' }}</span>
+                <span class="detail-pill">{{ metricsRebuildResult.rebuiltRows ?? 0 }} rows</span>
+              </div>
+            </div>
+          </section>
+          </div>
 
           <section class="meta-card">
             <p class="eyebrow">Timeline</p>
@@ -577,7 +597,7 @@
                 <strong>{{ runGraph.checkpointStage }}</strong>
                 <span>{{ runGraph.checkpointId }}</span>
               </div>
-              <div v-if="runGraphRecoveryPlan" class="fault-section">
+              <div v-if="runGraphRecoveryPlan" class="detail-section">
                 <span class="memory-label">Recovery Plan</span>
                 <div class="pill-list">
                   <span class="detail-pill">{{ runGraphRecoveryPlan.resumeFromStage || 'NO_CHECKPOINT' }}</span>
@@ -592,7 +612,7 @@
                   <li v-for="action in runGraphRecoveryActions" :key="action">{{ action }}</li>
                 </ul>
               </div>
-              <div v-if="runGraphAuditTrail.length" class="fault-section">
+              <div v-if="runGraphAuditTrail.length" class="detail-section">
                 <span class="memory-label">Replay Audit</span>
                 <ul class="detail-list">
                   <li v-for="event in runGraphAuditTrail" :key="`${event.eventOrder}-${event.eventType}`">
@@ -600,7 +620,7 @@
                   </li>
                 </ul>
               </div>
-              <div v-if="runGraphHighRiskNodes.length" class="fault-section">
+              <div v-if="runGraphHighRiskNodes.length" class="detail-section">
                 <span class="memory-label">Risk Nodes</span>
                 <div class="pill-list">
                   <span v-for="node in runGraphHighRiskNodes" :key="node.id" class="detail-pill">
@@ -787,7 +807,7 @@ const {
   customerServiceCard,
   customerSuggestions,
   customerSentiment,
-  customerEscalationTicket,
+  customerWorkItem,
   conversations,
   orderedTimeline,
   evidenceCards,
@@ -812,8 +832,11 @@ const {
   ragBadCases,
   ragIngestionTasks,
   ragLastReindexJob,
-  aiOpsFaultScenarios,
-  aiOpsFaultResult,
+  opsProviderStatus,
+  opsRunbooks,
+  opsEvidenceResult,
+  semanticCatalog,
+  metricsRebuildResult,
   hasMessages,
   capabilities,
   canUseOps,
@@ -835,8 +858,9 @@ const {
   createRagReindexJob,
   readMcpResource,
   renderMcpPrompt,
-  injectAiOpsFaultScenario,
-  buildAiOpsRcaEvidence,
+  buildOpsRcaEvidence,
+  reloadSemanticCatalog,
+  rebuildOpsMetrics,
   approveAction,
   rejectAction
 } = useAssistantRuntime()
@@ -861,6 +885,21 @@ const retrievalLabels = {
 }
 
 const starterPrompts = computed(() => customerStarterPrompts.value.length ? customerStarterPrompts.value : fallbackStarterPrompts)
+
+const primarySkillIds = new Set([
+  'business.unified',
+  'business.purchase.prepare',
+  'knowledge.policy.qa',
+  'general.web.search'
+])
+
+const primarySkillItems = computed(() => Array.isArray(capabilities.value?.skills)
+  ? capabilities.value.skills.filter(skill => primarySkillIds.has(skill.skillId))
+  : [])
+
+const hasExperimentalWorkspace = computed(() => Array.isArray(capabilities.value?.experimentalWorkspaces)
+  ? capabilities.value.experimentalWorkspaces.length > 0
+  : false)
 
 const sendStarterPrompt = (prompt) => {
   const queryText = prompt?.queryText || prompt?.displayText || String(prompt || '')
@@ -1026,60 +1065,65 @@ const ragTaskStatusClass = (task) => {
   return 'trace-status--running'
 }
 
-const aiOpsScenarioItems = computed(() => Array.isArray(aiOpsFaultScenarios.value)
-  ? aiOpsFaultScenarios.value.slice(0, 5)
+const opsProviderItems = computed(() => {
+  const providers = Array.isArray(opsProviderStatus.value) ? opsProviderStatus.value : []
+  return providers.map(item => ({
+    ...item,
+    name: item.provider || item.name || item.signalType || item.providerType || 'provider',
+    providerType: item.signalType || item.providerType || item.name || 'provider',
+    available: item.available === true || item.healthy === true || item.status === 'ACTIVE'
+  }))
+})
+
+const opsEvidenceBundle = computed(() => opsEvidenceResult.value?.evidenceBundle || null)
+
+const opsMissingProviders = computed(() => Array.isArray(opsEvidenceBundle.value?.missingProviders)
+  ? opsEvidenceBundle.value.missingProviders
   : [])
 
-const aiOpsEvidenceBundle = computed(() => aiOpsFaultResult.value?.evidenceBundle || null)
-
-const aiOpsSloSummary = computed(() => aiOpsEvidenceBundle.value?.slo || null)
-
-const aiOpsAlertContext = computed(() => aiOpsEvidenceBundle.value?.alertContext || null)
-
-const aiOpsSloBudgetText = computed(() => {
-  const value = aiOpsSloSummary.value?.errorBudgetRemaining
-  if (value === undefined || value === null || Number.isNaN(Number(value))) {
-    return 'n/a'
+const opsEvidenceCoverage = computed(() => {
+  const value = opsEvidenceBundle.value?.evidenceCoverage?.coverageRatio
+    ?? opsEvidenceBundle.value?.evidenceCoverage
+    ?? ''
+  if (typeof value === 'number') {
+    return `coverage ${Math.round(value * 100)}%`
   }
-  return `${Math.round(Number(value) * 100)}%`
+  return value || 'coverage n/a'
 })
 
-const aiOpsEvidenceTopology = computed(() => aiOpsEvidenceBundle.value?.serviceTopology || null)
-
-const aiOpsEvidenceEdges = computed(() => Array.isArray(aiOpsEvidenceTopology.value?.dependencyEdges)
-  ? aiOpsEvidenceTopology.value.dependencyEdges
+const opsLinkedSignals = computed(() => Array.isArray(opsEvidenceBundle.value?.linkedSignals)
+  ? opsEvidenceBundle.value.linkedSignals.slice(0, 5)
   : [])
 
-const aiOpsSignalCorrelation = computed(() => aiOpsEvidenceBundle.value?.signalCorrelation || null)
-
-const aiOpsCorrelationScore = computed(() => {
-  const value = aiOpsSignalCorrelation.value?.coverageScore
-  return value == null ? 'n/a' : Number(value).toFixed(2)
+const opsRecommendedRunbooks = computed(() => {
+  if (Array.isArray(opsEvidenceBundle.value?.recommendedRunbooks)) {
+    return opsEvidenceBundle.value.recommendedRunbooks.slice(0, 4).map(item => item.title || item.runbookId || item)
+  }
+  return Array.isArray(opsRunbooks.value)
+    ? opsRunbooks.value.slice(0, 4).map(item => item.runbookName || item.title || item.runbookId)
+    : []
 })
 
-const aiOpsCorrelationSpanId = computed(() => aiOpsSignalCorrelation.value?.serviceLabels?.spanId
-  || aiOpsEvidenceBundle.value?.spanId
+const opsSuggestedActions = computed(() => Array.isArray(opsEvidenceBundle.value?.suggestedActions)
+  ? opsEvidenceBundle.value.suggestedActions.slice(0, 4)
+  : [])
+
+const semanticCatalogItems = computed(() => Array.isArray(semanticCatalog.value)
+  ? semanticCatalog.value.slice(0, 6)
+  : Array.isArray(semanticCatalog.value?.items)
+    ? semanticCatalog.value.items.slice(0, 6)
+    : [])
+
+const semanticCatalogVersion = computed(() => semanticCatalog.value?.schemaVersion
+  || semanticCatalogItems.value[0]?.schemaVersion
   || 'n/a')
 
-const aiOpsCorrelationSignals = computed(() => Array.isArray(aiOpsSignalCorrelation.value?.linkedSignals)
-  ? aiOpsSignalCorrelation.value.linkedSignals.slice(0, 5).join(' / ')
-  : '')
-
-const aiOpsRecentChanges = computed(() => Array.isArray(aiOpsEvidenceBundle.value?.recentChanges?.items)
-  ? aiOpsEvidenceBundle.value.recentChanges.items.slice(0, 3)
-  : [])
-
-const aiOpsEvidenceTimeline = computed(() => Array.isArray(aiOpsEvidenceBundle.value?.evidenceTimeline)
-  ? aiOpsEvidenceBundle.value.evidenceTimeline.slice(0, 4)
-  : [])
-
-const aiOpsSuggestedActions = computed(() => Array.isArray(aiOpsEvidenceBundle.value?.suggestedActions)
-  ? aiOpsEvidenceBundle.value.suggestedActions.slice(0, 3)
-  : [])
-
-const aiOpsPlaybookHints = computed(() => Array.isArray(aiOpsEvidenceBundle.value?.playbookHints)
-  ? aiOpsEvidenceBundle.value.playbookHints.slice(0, 3)
-  : [])
+const semanticCatalogStatus = computed(() => {
+  if (Array.isArray(semanticCatalog.value)) {
+    return semanticCatalog.value.length ? 'ACTIVE' : 'EMPTY'
+  }
+  return semanticCatalog.value?.status || 'UNKNOWN'
+})
 
 const comparisonSummaryText = computed(() => {
   const metricDiff = ragEvalComparison.value?.metricDiff || {}
@@ -1446,6 +1490,34 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.workspace-group {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xl);
+  background: rgba(255, 255, 255, 0.44);
+}
+
+.workspace-group--experimental {
+  background: rgba(18, 32, 63, 0.04);
+}
+
+.workspace-group__header {
+  display: grid;
+  gap: 6px;
+}
+
+.workspace-group__header h3,
+.workspace-group__header p {
+  margin: 0;
+}
+
+.workspace-group__header p:last-child {
+  color: var(--text-soft);
+  font-size: 0.9rem;
 }
 
 .meta-card {
@@ -1911,7 +1983,7 @@ onMounted(async () => {
 }
 
 .admin-action-list p,
-.fault-result p {
+.evidence-result p {
   margin: 4px 0 0;
   color: var(--text-soft);
   font-size: 0.82rem;
@@ -1925,7 +1997,7 @@ onMounted(async () => {
   max-width: 190px;
 }
 
-.aiops-actions {
+.ops-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -1933,7 +2005,7 @@ onMounted(async () => {
   max-width: 150px;
 }
 
-.fault-result {
+.evidence-result {
   margin-top: 14px;
   padding: 12px;
   border: 1px solid rgba(47, 128, 237, 0.18);
@@ -1941,7 +2013,7 @@ onMounted(async () => {
   background: rgba(47, 128, 237, 0.08);
 }
 
-.fault-section {
+.detail-section {
   margin-top: 12px;
   padding-top: 10px;
   border-top: 1px solid rgba(47, 128, 237, 0.16);

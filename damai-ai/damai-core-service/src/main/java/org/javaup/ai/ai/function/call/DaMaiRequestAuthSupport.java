@@ -11,16 +11,10 @@ public class DaMaiRequestAuthSupport {
     @Value("${damai.pro.internal-token:}")
     private String internalToken;
 
-    @Value("${damai.pro.allow-unsafe-no-verify-fallback:false}")
-    private boolean allowUnsafeNoVerifyFallback;
-
     public HttpRequest apply(HttpRequest request) {
         if (StringUtils.hasText(internalToken)) {
             return request.header("X-Internal-Token", internalToken);
         }
-        if (allowUnsafeNoVerifyFallback) {
-            return request.header("no_verify", "true");
-        }
-        throw new IllegalStateException("damai-pro internal token is required; set damai.pro.internal-token or explicitly enable damai.pro.allow-unsafe-no-verify-fallback for local development");
+        throw new IllegalStateException("damai-pro internal token is required; set damai.pro.internal-token or DAMAI_INTERNAL_ACCESS_TOKEN");
     }
 }

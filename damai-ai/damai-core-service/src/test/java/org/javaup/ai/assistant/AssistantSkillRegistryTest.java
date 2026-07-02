@@ -12,7 +12,7 @@ class AssistantSkillRegistryTest {
 
     @Test
     void shouldAllowMultipleSkillsOnSameRouteAndKeepPrimaryRouteSkill() {
-        AssistantSkill primary = skill("business.legacy", AssistantRouteType.BUSINESS, true);
+        AssistantSkill primary = skill("business.default", AssistantRouteType.BUSINESS, true);
         AssistantSkill search = skill("business.program.search", AssistantRouteType.BUSINESS, false);
 
         AssistantSkillRegistry registry = new AssistantSkillRegistry(List.of(primary, search));

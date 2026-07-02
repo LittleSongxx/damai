@@ -38,7 +38,7 @@ class MarkdownLoaderTest {
         MarkdownLoader loader = new MarkdownLoader(new PathMatchingResourcePatternResolver());
         ReflectionTestUtils.setField(loader, "documentPattern", file.toUri().toString());
 
-        List<Document> documents = loader.loadMarkdowns();
+        List<Document> documents = loader.loadMarkdownsFlat();
 
         assertEquals(2, documents.size());
         Document first = documents.get(0);
@@ -93,8 +93,8 @@ class MarkdownLoaderTest {
         MarkdownLoader secondLoader = new MarkdownLoader(new PathMatchingResourcePatternResolver());
         ReflectionTestUtils.setField(secondLoader, "documentPattern", secondFile.toUri().toString());
 
-        String firstChunkId = findChunkId(firstLoader.loadMarkdowns(), "电子票可以直接入场吗？");
-        String secondChunkId = findChunkId(secondLoader.loadMarkdowns(), "电子票可以直接入场吗？");
+        String firstChunkId = findChunkId(firstLoader.loadMarkdownsFlat(), "电子票可以直接入场吗？");
+        String secondChunkId = findChunkId(secondLoader.loadMarkdownsFlat(), "电子票可以直接入场吗？");
 
         assertNotEquals("", firstChunkId);
         assertEquals(firstChunkId, secondChunkId);
@@ -117,7 +117,7 @@ class MarkdownLoaderTest {
         ReflectionTestUtils.setField(loader, "minChunkSizeChars", 20);
         ReflectionTestUtils.setField(loader, "minDocLengthForTokenSplit", 100);
 
-        List<Document> documents = loader.loadMarkdowns();
+        List<Document> documents = loader.loadMarkdownsFlat();
 
         assertTrue(documents.size() > 1);
         assertTrue(documents.stream().allMatch(document -> "入场需要注意什么？".equals(document.getMetadata().get("question"))));
@@ -142,7 +142,7 @@ class MarkdownLoaderTest {
         MarkdownLoader loader = new MarkdownLoader(new PathMatchingResourcePatternResolver());
         ReflectionTestUtils.setField(loader, "documentPattern", file.toUri().toString());
 
-        List<Document> documents = loader.loadMarkdowns();
+        List<Document> documents = loader.loadMarkdownsFlat();
 
         assertEquals(1, documents.size());
         assertFalse(documents.get(0).getText().contains("空问题"));

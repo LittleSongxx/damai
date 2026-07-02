@@ -25,6 +25,12 @@ spring:
     url: ${DAMAI_AI_MYSQL_URL:jdbc:mysql://${DAMAI_MYSQL_HOST:127.0.0.1}:${DAMAI_MYSQL_PORT:13306}/damai_ai?serverTimezone=Asia/Shanghai&useSSL=false&useUnicode=true&characterEncoding=utf-8&zeroDateTimeBehavior=convertToNull&transformedBitIsBoolean=true&tinyInt1isBit=false&allowPublicKeyRetrieval=true&allowMultiQueries=true&useServerPrepStmts=false}
     username: ${DAMAI_AI_MYSQL_USERNAME:${DAMAI_MYSQL_USERNAME:root}}
     password: ${DAMAI_AI_MYSQL_PASSWORD:${DAMAI_MYSQL_PASSWORD:root}}
+  flyway:
+    enabled: ${DAMAI_AI_FLYWAY_ENABLED:false}
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 2
+    out-of-order: false
   rabbitmq:
     host: ${DAMAI_RABBITMQ_HOST:127.0.0.1}
     port: ${DAMAI_RABBITMQ_AMQP_PORT:5672}
@@ -133,7 +139,9 @@ management:
 damai:
   pro:
     internal-token: ${DAMAI_INTERNAL_ACCESS_TOKEN:}
-    allow-unsafe-no-verify-fallback: ${DAMAI_ALLOW_UNSAFE_NO_VERIFY_FALLBACK:false}
+    ai-reservation:
+      base-url: ${DAMAI_PRO_AI_RESERVATION_BASE_URL:http://127.0.0.1:6085/damai/program/ai/reservations}
+      ttl-seconds: ${DAMAI_PRO_AI_RESERVATION_TTL_SECONDS:900}
   ai:
     eval:
       degraded-mode: ${DAMAI_AI_EVAL_DEGRADED_MODE:false}
@@ -184,6 +192,11 @@ damai:
         model: ${DAMAI_AI_CROSS_ENCODER_MODEL:bge-reranker-v2-m3}
     prometheus:
       url: ${DAMAI_AI_PROMETHEUS_URL:http://127.0.0.1:9090}
+    ops:
+      alertmanager:
+        url: ${DAMAI_AI_ALERTMANAGER_URL:${DAMAI_AI_OPS_ALERTMANAGER_URL:}}
+      skywalking:
+        graphql-url: ${DAMAI_AI_SKYWALKING_GRAPHQL_URL:${DAMAI_AI_OPS_SKYWALKING_GRAPHQL_URL:}}
     qdrant:
       url: ${DAMAI_AI_QDRANT_URL:http://127.0.0.1:16333}
       grpc-host: ${DAMAI_AI_QDRANT_GRPC_HOST:127.0.0.1}
@@ -206,7 +219,7 @@ damai:
         explain-timeout-ms: ${DAMAI_AI_NL2SQL_EXPLAIN_TIMEOUT_MS:2000}
         max-estimated-rows: ${DAMAI_AI_NL2SQL_MAX_ESTIMATED_ROWS:10000}
         max-query-cost: ${DAMAI_AI_NL2SQL_MAX_QUERY_COST:100000}
-        fail-closed-on-explain-error: ${DAMAI_AI_NL2SQL_FAIL_CLOSED_ON_EXPLAIN_ERROR:false}
+        fail-closed-on-explain-error: ${DAMAI_AI_NL2SQL_FAIL_CLOSED_ON_EXPLAIN_ERROR:true}
       datasource:
         driver-class-name: ${DAMAI_AI_NL2SQL_DRIVER:com.mysql.cj.jdbc.Driver}
         url: ${DAMAI_AI_NL2SQL_URL:}

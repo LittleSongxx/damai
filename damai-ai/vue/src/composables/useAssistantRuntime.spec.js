@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAssistantRuntime } from './useAssistantRuntime'
 
-const { aiOpsAdminAPIMock, assistantAPIMock, customerServiceAPIMock, ragEvalAPIMock } = vi.hoisted(() => ({
+const { aiOpsAdminAPIMock, assistantAPIMock, customerServiceAPIMock, dataOpsAdminAPIMock, ragEvalAPIMock } = vi.hoisted(() => ({
   assistantAPIMock: {
     listConversations: vi.fn(),
     listMessages: vi.fn(),
@@ -23,8 +23,8 @@ const { aiOpsAdminAPIMock, assistantAPIMock, customerServiceAPIMock, ragEvalAPIM
   customerServiceAPIMock: {
     getStarterPrompts: vi.fn(),
     quickAnswer: vi.fn(),
-    createEscalation: vi.fn(),
-    getEscalation: vi.fn(),
+    createWorkItem: vi.fn(),
+    getWorkItem: vi.fn(),
     getDashboard: vi.fn(),
     getTopQuestions: vi.fn(),
     getUnresolvedCases: vi.fn()
@@ -39,9 +39,14 @@ const { aiOpsAdminAPIMock, assistantAPIMock, customerServiceAPIMock, ragEvalAPIM
     listIngestionTasks: vi.fn()
   },
   aiOpsAdminAPIMock: {
-    listFaultScenarios: vi.fn(),
-    injectFaultScenario: vi.fn(),
+    listProviders: vi.fn(),
+    listRunbooks: vi.fn(),
     buildRcaEvidence: vi.fn()
+  },
+  dataOpsAdminAPIMock: {
+    getCatalog: vi.fn(),
+    reloadCatalog: vi.fn(),
+    rebuildMetrics: vi.fn()
   }
 }))
 
@@ -49,7 +54,8 @@ vi.mock('../api/api', () => ({
   assistantAPI: assistantAPIMock,
   customerServiceAPI: customerServiceAPIMock,
   ragEvalAPI: ragEvalAPIMock,
-  aiOpsAdminAPI: aiOpsAdminAPIMock
+  aiOpsAdminAPI: aiOpsAdminAPIMock,
+  dataOpsAdminAPI: dataOpsAdminAPIMock
 }))
 
 function createEventStream(events) {
@@ -172,7 +178,7 @@ describe('useAssistantRuntime', () => {
         status: 'RUNNING',
         evalRunId: 'rag-eval-2',
         resultType: 'RAG_EVAL_RUN',
-        nextActions: ['Poll /api/rag-eval/status/rag-eval-2']
+        nextActions: ['Poll /assistant/admin/rag-eval/status/rag-eval-2']
       }
     })
     assistantAPIMock.getEvalRun.mockResolvedValue({
@@ -272,49 +278,61 @@ describe('useAssistantRuntime', () => {
         taskStatus: 'SUBMITTED'
       }
     })
-    aiOpsAdminAPIMock.listFaultScenarios.mockResolvedValue({
+    aiOpsAdminAPIMock.listProviders.mockResolvedValue({
       data: [
-        {
-          scenarioId: 'error-spike',
-          name: '错误率升高',
-          serviceName: 'order-service',
-          windowMinutes: 30,
-          injectedSignals: {
-            traceId: 'error-trace-002'
-          }
-        }
+        { signalType: 'logs', provider: 'logGateway', status: 'ACTIVE', healthy: true },
+        { signalType: 'metrics', provider: 'metricsGateway', status: 'ACTIVE', healthy: true },
+        { signalType: 'alerts', provider: '', status: 'MISSING', healthy: false }
       ]
     })
-    aiOpsAdminAPIMock.injectFaultScenario.mockResolvedValue({
-      data: {
-        status: 'SIMULATED',
-        evidenceBundle: {
-          suspectedCause: 'application error spike',
-          serviceName: 'order-service',
-          traceId: 'error-trace-002'
-        }
-      }
+    aiOpsAdminAPIMock.listRunbooks.mockResolvedValue({
+      data: [
+        { runbookId: 'rb_api_latency_spike', runbookName: '接口延迟升高排查', riskLevel: 'MEDIUM' }
+      ]
     })
     aiOpsAdminAPIMock.buildRcaEvidence.mockResolvedValue({
       data: {
         serviceName: 'order-service',
         traceId: 'error-trace-002',
-        suspectedCause: 'application error spike',
-        serviceTopology: {
-          rootService: 'gateway-service',
-          suspectService: 'order-service',
-          dependencyEdges: [{ from: 'gateway-service', to: 'order-service' }]
+        rcaSummary: 'order-service evidence bundle',
+        confidence: 'MEDIUM',
+        humanReviewRequired: true,
+        evidenceCoverage: {
+          coverageRatio: 0.625
         },
-        recentChanges: {
-          items: [{ type: 'release', serviceName: 'order-service', version: 'error-spike-release-20260630' }]
-        },
-        evidenceTimeline: [{ kind: 'trace', service: 'order-service', summary: 'first failing span' }],
-        suggestedActions: ['rollback risky release']
+        missingProviders: ['changes', 'topology', 'runbooks'],
+        linkedSignals: ['logs', 'metrics', 'traces'],
+        recommendedRunbooks: ['rb_api_latency_spike'],
+        suggestedActions: ['check alert and trace evidence']
+      }
+    })
+    dataOpsAdminAPIMock.getCatalog.mockResolvedValue({
+      data: [
+        {
+          catalogId: 'cat-order-daily',
+          schemaVersion: 'v5',
+          metricName: '订单日汇总',
+          viewName: 'v_order_daily_summary',
+          securityLevel: 'NORMAL',
+          status: 'ACTIVE'
+        }
+      ]
+    })
+    dataOpsAdminAPIMock.reloadCatalog.mockResolvedValue({
+      data: {
+        schemaVersion: 'v5',
+        tableCount: 8
+      }
+    })
+    dataOpsAdminAPIMock.rebuildMetrics.mockResolvedValue({
+      data: {
+        status: 'COMPLETED',
+        rebuiltRows: 42
       }
     })
   })
 
-  it('loads admin quality, RAG bad cases, and AIOps fault scenarios', async () => {
+  it('loads admin quality, RAG bad cases, and ops/dataops governance', async () => {
     const runtime = useAssistantRuntime()
 
     await runtime.loadCapabilities()
@@ -326,7 +344,9 @@ describe('useAssistantRuntime', () => {
     expect(runtime.ragBaselineRunId.value).toBe('rag-0')
     expect(runtime.ragBadCases.value[0].badCaseId).toBe('bad-1')
     expect(runtime.ragIngestionTasks.value[0].taskId).toBe('reindex-1')
-    expect(runtime.aiOpsFaultScenarios.value[0].scenarioId).toBe('error-spike')
+    expect(runtime.opsProviderStatus.value[0].signalType).toBe('logs')
+    expect(runtime.opsRunbooks.value[0].runbookId).toBe('rb_api_latency_spike')
+    expect(runtime.semanticCatalog.value[0].viewName).toBe('v_order_daily_summary')
 
     await runtime.compareRagEvalWithBaseline()
     expect(ragEvalAPIMock.compareRun).toHaveBeenCalledWith('rag-1', 'rag-0')
@@ -358,22 +378,25 @@ describe('useAssistantRuntime', () => {
     expect(runtime.evalSuiteResult.value.status).toBe('COMPLETED')
     expect(runtime.evalSuiteResult.value.metrics.avgRecall).toBe(0.86)
 
-    await runtime.injectAiOpsFaultScenario(runtime.aiOpsFaultScenarios.value[0])
-    expect(runtime.aiOpsFaultResult.value.evidenceBundle.suspectedCause).toBe('application error spike')
-    expect(aiOpsAdminAPIMock.injectFaultScenario).toHaveBeenCalledWith('error-spike', expect.objectContaining({
+    await runtime.buildOpsRcaEvidence({
+      serviceName: 'order-service',
       traceId: 'error-trace-002',
-      releaseVersion: 'error-spike-release-20260630',
-      configKey: 'error-spike.feature-flag'
-    }))
-
-    await runtime.buildAiOpsRcaEvidence(runtime.aiOpsFaultScenarios.value[0])
+      windowMinutes: 30
+    })
     expect(aiOpsAdminAPIMock.buildRcaEvidence).toHaveBeenCalledWith(expect.objectContaining({
       serviceName: 'order-service',
       traceId: 'error-trace-002',
-      releaseVersion: 'error-spike-release-20260630'
+      windowMinutes: 30
     }))
-    expect(runtime.aiOpsFaultResult.value.status).toBe('RCA_EVIDENCE')
-    expect(runtime.aiOpsFaultResult.value.evidenceBundle.serviceTopology.suspectService).toBe('order-service')
+    expect(runtime.opsEvidenceResult.value.status).toBe('RCA_EVIDENCE')
+    expect(runtime.opsEvidenceResult.value.evidenceBundle.confidence).toBe('MEDIUM')
+
+    await runtime.reloadSemanticCatalog()
+    expect(dataOpsAdminAPIMock.reloadCatalog).toHaveBeenCalled()
+
+    await runtime.rebuildOpsMetrics({ fromRaw: true })
+    expect(dataOpsAdminAPIMock.rebuildMetrics).toHaveBeenCalledWith({ fromRaw: true })
+    expect(runtime.metricsRebuildResult.value.rebuiltRows).toBe(42)
 
     await runtime.readMcpResource('assistant://runs/{runId}/graph', { runId: 'run-1' })
     expect(assistantAPIMock.readMcpResource).toHaveBeenCalledWith(expect.objectContaining({

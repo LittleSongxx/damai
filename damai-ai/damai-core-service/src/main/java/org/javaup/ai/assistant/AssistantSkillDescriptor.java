@@ -60,15 +60,15 @@ public class AssistantSkillDescriptor {
 
     private Boolean requiresMemory;
 
-    public static AssistantSkillDescriptor legacy(AssistantRouteType routeType, String skillName) {
+    public static AssistantSkillDescriptor defaultDescriptor(AssistantRouteType routeType, String skillName) {
         boolean ops = routeType == AssistantRouteType.OPS;
         return AssistantSkillDescriptor.builder()
-                .skillId(routeType.getCode() + ".legacy")
+                .skillId(routeType.getCode() + ".default")
                 .name(skillName)
-                .description("兼容旧版 " + routeType.getCode() + " 路由的默认 Skill")
+                .description(routeType.getCode() + " 路由的默认 Skill")
                 .version("1.0.0")
-                .goal("处理 " + routeType.getCode() + " 路由下暂未拆分到专用 Skill 的兼容请求")
-                .instructions("保持旧版路由行为，执行前仍需遵守统一权限、工具审计和审批策略。")
+                .goal("处理 " + routeType.getCode() + " 路由下的默认请求")
+                .instructions("执行前需遵守统一权限、工具审计和审批策略。")
                 .routeType(routeType)
                 .category(routeType.getCode())
                 .triggerKeywords(List.of())

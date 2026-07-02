@@ -17,6 +17,8 @@ import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -92,12 +94,14 @@ public class OpsLogQuerySkill implements AssistantSkill {
         String prompt = context.getMessage();
         String serviceName = CommonUtils.extract(prompt, SERVICE_PATTERN);
         Map<String, Object> evidence;
+        Instant end = Instant.now();
+        Instant start = end.minus(Duration.ofMinutes(30));
 
         if (prompt.toLowerCase().contains("trace")) {
             String traceId = CommonUtils.extract(prompt, TRACE_PATTERN);
             evidence = toolInvoker.invoke(runId, "traceGateway", "ops",
                     CommonUtils.mapOf("traceId", traceId),
-                    () -> traceGateway.getTrace(traceId));
+                    () -> traceGateway.getTrace(traceId, start, end));
         } else {
             evidence = toolInvoker.invoke(runId, "logGateway", "ops",
                     CommonUtils.mapOf("keyword", prompt, "serviceName", serviceName == null ? "" : serviceName),

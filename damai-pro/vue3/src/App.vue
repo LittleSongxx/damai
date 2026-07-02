@@ -1,7 +1,9 @@
 <template>
   <router-view :key="route.fullPath"/>
+  <AiCustomerWidget />
 </template>
 <script setup  >
-import {useRoute, useRouter} from 'vue-router'
+import {useRoute} from 'vue-router'
+import AiCustomerWidget from '@/components/aiCustomerWidget/index.vue'
 const route = useRoute();
 </script>

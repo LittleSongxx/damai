@@ -11,8 +11,7 @@ const toggleDark = useToggle(isDark)
 const capabilities = ref({ admin: false, allowedRoutes: ['business', 'knowledge', 'general'] })
 
 const navItems = [
-  { label: '统一助手', to: '/assistant' },
-  { label: '可观测性', to: '/ai-observability', adminOnly: true }
+  { label: '统一助手', to: '/assistant' }
 ]
 
 const activePath = computed(() => route.path)

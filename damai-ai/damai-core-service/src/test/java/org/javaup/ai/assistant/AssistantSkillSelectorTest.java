@@ -43,7 +43,7 @@ class AssistantSkillSelectorTest {
 
     @Test
     void shouldSelectKeywordMatchedSkillBeforePrimaryFallback() {
-        AssistantSkillDescriptor primary = descriptor("business.legacy", AssistantRouteType.BUSINESS, true, true, false, "演出");
+        AssistantSkillDescriptor primary = descriptor("business.default", AssistantRouteType.BUSINESS, true, true, false, "演出");
         AssistantSkillDescriptor purchase = descriptor("business.purchase.prepare", AssistantRouteType.BUSINESS, false, true, false, "买", "下单");
         AssistantSkillSelector selector = selector(List.of(skill(primary), skill(purchase)), primary, true);
 

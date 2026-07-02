@@ -32,11 +32,10 @@ public class PurchasePreparationService {
     private final ProgramQueryService programQueryService;
     private final UserCall userCall;
     private final AssistantRunService assistantRunService;
+    private final PurchaseRiskPolicyService riskPolicyService;
 
     public AssistantActionPreviewVo prepare(CreateOrderFunctionDto request) {
-        if (request.getMobile() != null && !request.getMobile().equals(AiRequestContextHolder.getRequiredUser().getMobile())) {
-            throw new RuntimeException("当前登录用户手机号与提交的手机号不一致");
-        }
+        riskPolicyService.validatePreviewRequest(request);
 
         ProgramSearchFunctionDto searchFunctionDto = new ProgramSearchFunctionDto();
         BeanUtils.copyProperties(request, searchFunctionDto);
@@ -132,7 +131,7 @@ public class PurchasePreparationService {
         snapshot.setGeneratedAt(generatedAt);
         snapshot.setExpiresAt(expiresAt);
         snapshot.setProgramOrderCreateDto(orderCreateDto);
-        snapshot.setPreviewSummary(String.format("节目《%s》, 票价%s, 数量%s, 购票人%s。请确认后再正式创建订单。",
+        snapshot.setPreviewSummary(String.format("节目《%s》, 票价%s, 数量%s, 购票人%s。本预览不锁定库存，仅供确认；审批通过后将先预留库存再正式创建订单。",
                 programDetailVo.getTitle(),
                 request.getTicketCategoryPrice(),
                 request.getTicketCount(),

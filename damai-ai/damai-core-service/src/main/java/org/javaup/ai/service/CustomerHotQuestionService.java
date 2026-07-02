@@ -4,10 +4,10 @@ import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import lombok.RequiredArgsConstructor;
-import org.javaup.ai.dto.CustomerEscalationRequest;
+import org.javaup.ai.dto.CustomerHandoffRequest;
 import org.javaup.ai.dto.CustomerQuickAnswerRequest;
 import org.javaup.ai.entity.AiCustomerHotQuestion;
-import org.javaup.ai.entity.EscalationTicket;
+import org.javaup.ai.entity.CustomerWorkItem;
 import org.javaup.ai.enums.CustomerServiceIntent;
 import org.javaup.ai.mapper.AiCustomerHotQuestionMapper;
 import org.javaup.ai.vo.CustomerHotQuestionVo;
@@ -32,7 +32,8 @@ public class CustomerHotQuestionService {
 
     private final AiCustomerHotQuestionMapper hotQuestionMapper;
     private final SentimentAnalysisService sentimentAnalysisService;
-    private final EscalationService escalationService;
+    private final CustomerIntentResolver intentResolver;
+    private final CustomerWorkItemService workItemService;
     private final CustomerServiceMetricsService metricsService;
 
     public List<CustomerHotQuestionVo> starterPrompts() {
@@ -46,7 +47,7 @@ public class CustomerHotQuestionService {
     public CustomerQuickAnswerResponse quickAnswer(CustomerQuickAnswerRequest request, Long userId) {
         long startedAt = System.currentTimeMillis();
         String message = StringUtils.hasText(request.getMessage()) ? request.getMessage().trim() : "";
-        CustomerServiceIntent intent = resolveIntent(request, message);
+        CustomerServiceIntent intent = intentResolver.resolve(request, message);
         SentimentAnalysisService.SentimentResult sentiment =
                 sentimentAnalysisService.quickAnalyze(message, null, request.getChatId(), userId);
 
@@ -64,10 +65,10 @@ public class CustomerHotQuestionService {
                 metricsService.record(null, request.getChatId(), userId,
                         CustomerServiceMetricsService.NEGATIVE_SENTIMENT, 1D, latency, dimensions);
             }
-            EscalationTicket ticket = createEscalationIfNeeded(request, userId, message, matched, sentiment);
-            if (ticket != null) {
+            CustomerWorkItem workItem = createWorkItemIfNeeded(request, userId, message, matched, sentiment);
+            if (workItem != null) {
                 metricsService.record(null, request.getChatId(), userId,
-                        CustomerServiceMetricsService.ESCALATION_CREATED, 1D, latency, dimensions);
+                        CustomerServiceMetricsService.WORK_ITEM_CREATED, 1D, latency, dimensions);
             }
             return CustomerQuickAnswerResponse.builder()
                     .hit(true)
@@ -76,12 +77,12 @@ public class CustomerHotQuestionService {
                     .intentCode(matched.intent().name())
                     .routeHint(matched.routeHint())
                     .directAnswer(withComfortPrefix(matched.directAnswer(), sentiment))
-                    .actionButtons(actionButtons(matched, ticket))
+                    .actionButtons(actionButtons(matched, workItem))
                     .sourceRefs(matched.sourceRefs())
                     .suggestions(suggestions(matched.questionId()))
                     .clientContext(clientContext(request, matched.intent(), matched.questionId(), matched.routeHint()))
                     .sentiment(sentimentPayload(sentiment))
-                    .escalationTicket(ticket)
+                    .workItem(workItem)
                     .latencyMs(latency)
                     .build();
         }
@@ -105,28 +106,28 @@ public class CustomerHotQuestionService {
                 .build();
     }
 
-    private EscalationTicket createEscalationIfNeeded(CustomerQuickAnswerRequest request,
-                                                     Long userId,
-                                                     String message,
-                                                     HotQuestionDefinition matched,
-                                                     SentimentAnalysisService.SentimentResult sentiment) {
-        boolean handoff = CustomerServiceIntent.HUMAN_HANDOFF.equals(matched.intent());
+    private CustomerWorkItem createWorkItemIfNeeded(CustomerQuickAnswerRequest request,
+                                                   Long userId,
+                                                   String message,
+                                                   HotQuestionDefinition matched,
+                                                   SentimentAnalysisService.SentimentResult sentiment) {
+        boolean needsHandoff = CustomerServiceIntent.HUMAN_HANDOFF.equals(matched.intent());
         boolean complaint = CustomerServiceIntent.COMPLAINT.equals(matched.intent());
-        if (!handoff && !complaint && !sentiment.shouldEscalate()) {
+        if (!needsHandoff && !complaint && !sentiment.shouldEscalate()) {
             return null;
         }
-        CustomerEscalationRequest escalation = new CustomerEscalationRequest();
-        escalation.setConversationId(request.getChatId());
-        escalation.setUserQuestion(message);
-        escalation.setAiAnswer(matched.directAnswer());
-        escalation.setSentiment(sentiment.sentiment());
-        escalation.setSentimentIntensity(sentiment.intensity());
-        escalation.setIntentCode(matched.intent().name());
-        escalation.setSourceRefs(matched.sourceRefs());
-        escalation.setBusinessContext(businessContext(request));
-        escalation.setReason(sentiment.escalationReason() != null ? sentiment.escalationReason() : "用户请求转人工或售后协助");
-        escalation.setSuggestedReply("请先安抚用户，确认订单号、场次和票档，再依据平台规则给出可执行的售后路径。");
-        return escalationService.createCustomerEscalation(escalation, userId);
+        CustomerHandoffRequest handoffRequest = new CustomerHandoffRequest();
+        handoffRequest.setConversationId(request.getChatId());
+        handoffRequest.setUserQuestion(message);
+        handoffRequest.setAiAnswer(matched.directAnswer());
+        handoffRequest.setSentiment(sentiment.sentiment());
+        handoffRequest.setSentimentIntensity(sentiment.intensity());
+        handoffRequest.setIntentCode(matched.intent().name());
+        handoffRequest.setSourceRefs(matched.sourceRefs());
+        handoffRequest.setBusinessContext(businessContext(request));
+        handoffRequest.setReason(sentiment.escalationReason() != null ? sentiment.escalationReason() : "用户请求转人工或售后协助");
+        handoffRequest.setSuggestedReply("请先安抚用户，确认订单号、场次和票档，再依据平台规则给出可执行的售后路径。");
+        return workItemService.handoff(handoffRequest, userId);
     }
 
     private List<HotQuestionDefinition> activeDefinitions() {
@@ -186,12 +187,6 @@ public class CustomerHotQuestionService {
                     .findFirst()
                     .orElse(null);
         }
-        if (!CustomerServiceIntent.GENERAL_CHAT.equals(intent)) {
-            return definitions.stream()
-                    .filter(item -> intent.equals(item.intent()))
-                    .findFirst()
-                    .orElse(null);
-        }
         String normalized = message == null ? "" : message.trim();
         if (!StringUtils.hasText(normalized)) {
             return null;
@@ -200,48 +195,6 @@ public class CustomerHotQuestionService {
                 .filter(item -> normalized.equals(item.displayText()) || normalized.equals(item.queryText()))
                 .findFirst()
                 .orElse(null);
-    }
-
-    private CustomerServiceIntent resolveIntent(CustomerQuickAnswerRequest request, String message) {
-        if (StringUtils.hasText(request.getIntentHint())) {
-            return CustomerServiceIntent.from(request.getIntentHint());
-        }
-        if (StringUtils.hasText(request.getHotQuestionId())) {
-            return activeDefinitions().stream()
-                    .filter(item -> request.getHotQuestionId().equals(item.questionId()))
-                    .map(HotQuestionDefinition::intent)
-                    .findFirst()
-                    .orElse(CustomerServiceIntent.GENERAL_CHAT);
-        }
-        String text = message == null ? "" : message;
-        if (containsAny(text, "投诉", "12315", "315", "律师", "曝光", "报警", "欺诈")) {
-            return CustomerServiceIntent.COMPLAINT;
-        }
-        if (containsAny(text, "人工", "客服", "转人", "真人")) {
-            return CustomerServiceIntent.HUMAN_HANDOFF;
-        }
-        if (containsAny(text, "退票", "退款", "退订")) {
-            return CustomerServiceIntent.REFUND_RULE;
-        }
-        if (containsAny(text, "实名", "身份证", "证件")) {
-            return CustomerServiceIntent.REAL_NAME_RULE;
-        }
-        if (containsAny(text, "入场", "进场", "验票", "安检")) {
-            return CustomerServiceIntent.ENTRY_RULE;
-        }
-        if (containsAny(text, "票档", "座位", "价格", "余票")) {
-            return CustomerServiceIntent.TICKET_CATEGORY;
-        }
-        if (containsAny(text, "订单", "售后", "改地址", "纸质票", "电子票")) {
-            return CustomerServiceIntent.ORDER_AFTERSALE;
-        }
-        if (containsAny(text, "发票", "抬头")) {
-            return CustomerServiceIntent.INVOICE;
-        }
-        if (containsAny(text, "演出", "场次", "节目", "歌手", "脱口秀")) {
-            return CustomerServiceIntent.EVENT_SEARCH;
-        }
-        return CustomerServiceIntent.GENERAL_CHAT;
     }
 
     private List<CustomerHotQuestionVo> suggestions(String excludeQuestionId) {
@@ -306,13 +259,13 @@ public class CustomerHotQuestionService {
         return payload;
     }
 
-    private List<Map<String, Object>> actionButtons(HotQuestionDefinition item, EscalationTicket ticket) {
+    private List<Map<String, Object>> actionButtons(HotQuestionDefinition item, CustomerWorkItem workItem) {
         List<Map<String, Object>> buttons = new ArrayList<>(item.actionButtons());
-        if (ticket != null) {
+        if (workItem != null) {
             buttons.add(Map.of(
                     "label", "查看工单进度",
-                    "action", "view_escalation",
-                    "ticketId", ticket.getTicketId()
+                    "action", "view_work_item",
+                    "workItemId", workItem.getWorkItemId()
             ));
         }
         if (buttons.isEmpty()) {
@@ -333,7 +286,7 @@ public class CustomerHotQuestionService {
                 Map.of("label", "查演出", "action", "ask", "intentCode", CustomerServiceIntent.EVENT_SEARCH.name()),
                 Map.of("label", "问退票规则", "action", "ask", "intentCode", CustomerServiceIntent.REFUND_RULE.name()),
                 Map.of("label", "咨询订单售后", "action", "ask", "intentCode", CustomerServiceIntent.ORDER_AFTERSALE.name()),
-                Map.of("label", "转人工", "action", "create_escalation", "intentCode", CustomerServiceIntent.HUMAN_HANDOFF.name())
+                Map.of("label", "转人工", "action", "create_work_item", "intentCode", CustomerServiceIntent.HUMAN_HANDOFF.name())
         );
     }
 
@@ -364,18 +317,6 @@ public class CustomerHotQuestionService {
             case COMPLAINT, HUMAN_HANDOFF -> "human";
             case GENERAL_CHAT -> "general";
         };
-    }
-
-    private boolean containsAny(String text, String... keywords) {
-        if (!StringUtils.hasText(text)) {
-            return false;
-        }
-        for (String keyword : keywords) {
-            if (text.contains(keyword)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private JSONObject parseObject(String json) {
@@ -442,7 +383,7 @@ public class CustomerHotQuestionService {
                         List.of(
                                 button("查具体演出", "ask", CustomerServiceIntent.PROGRAM_DETAIL),
                                 button("咨询订单售后", "ask", CustomerServiceIntent.ORDER_AFTERSALE),
-                                button("转人工", "create_escalation", CustomerServiceIntent.HUMAN_HANDOFF)),
+                                button("转人工", "create_work_item", CustomerServiceIntent.HUMAN_HANDOFF)),
                         refs("平台规则知识库", "退票规则以项目页、订单页和售后政策为准"),
                         List.of("售后", "退票"), 10),
                 hot("real-name-entry", "实名入场", "实名入场要带什么证件", CustomerServiceIntent.REAL_NAME_RULE,
@@ -466,7 +407,7 @@ public class CustomerHotQuestionService {
                 hot("order-aftersale", "订单售后", "订单售后怎么处理", CustomerServiceIntent.ORDER_AFTERSALE,
                         "订单售后需要先确认订单号、演出场次、票品状态和诉求类型。退款、改地址、发票等高风险操作不会自动执行，我会先给你确认路径，必要时创建内部工单转人工处理。",
                         List.of(button("我有订单号", "ask", CustomerServiceIntent.ORDER_AFTERSALE),
-                                button("转人工", "create_escalation", CustomerServiceIntent.HUMAN_HANDOFF)),
+                                button("转人工", "create_work_item", CustomerServiceIntent.HUMAN_HANDOFF)),
                         refs("客服流程", "售后问题先收集订单上下文，再进入工单或确认流程"),
                         List.of("售后", "订单"), 50),
                 hot("human-handoff", "转人工", "我要转人工客服", CustomerServiceIntent.HUMAN_HANDOFF,

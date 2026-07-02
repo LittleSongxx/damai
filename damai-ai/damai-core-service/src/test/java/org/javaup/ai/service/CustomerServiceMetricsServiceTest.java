@@ -3,7 +3,7 @@ package org.javaup.ai.service;
 import com.alibaba.fastjson2.JSON;
 import org.javaup.ai.entity.AiCustomerServiceMetricEvent;
 import org.javaup.ai.mapper.AiCustomerServiceMetricEventMapper;
-import org.javaup.ai.mapper.EscalationTicketMapper;
+import org.javaup.ai.mapper.CustomerWorkItemMapper;
 import org.javaup.ai.vo.CustomerServiceDashboardVo;
 import org.junit.jupiter.api.Test;
 
@@ -22,8 +22,8 @@ class CustomerServiceMetricsServiceTest {
     @Test
     void recordShouldPersistMetricEvent() {
         AiCustomerServiceMetricEventMapper metricMapper = mock(AiCustomerServiceMetricEventMapper.class);
-        EscalationTicketMapper ticketMapper = mock(EscalationTicketMapper.class);
-        CustomerServiceMetricsService service = new CustomerServiceMetricsService(metricMapper, ticketMapper);
+        CustomerWorkItemMapper workItemMapper = mock(CustomerWorkItemMapper.class);
+        CustomerServiceMetricsService service = new CustomerServiceMetricsService(metricMapper, workItemMapper);
 
         service.record("run-1", "chat-1", 7L, CustomerServiceMetricsService.QUICK_ANSWER_HIT,
                 1D, 120L, Map.of("question", "退票规则"));
@@ -34,7 +34,7 @@ class CustomerServiceMetricsServiceTest {
     @Test
     void dashboardShouldAggregateCoreCustomerServiceMetrics() {
         AiCustomerServiceMetricEventMapper metricMapper = mock(AiCustomerServiceMetricEventMapper.class);
-        EscalationTicketMapper ticketMapper = mock(EscalationTicketMapper.class);
+        CustomerWorkItemMapper workItemMapper = mock(CustomerWorkItemMapper.class);
         when(metricMapper.selectList(any())).thenReturn(List.of(
                 event(CustomerServiceMetricsService.QUICK_ANSWER_HIT, 1D, 100L, Map.of("question", "退票规则", "intentCode", "REFUND_RULE")),
                 event(CustomerServiceMetricsService.QUICK_ANSWER_MISS, 1D, 400L, Map.of("question", "复杂售后", "intentCode", "ORDER_AFTERSALE")),
@@ -42,8 +42,8 @@ class CustomerServiceMetricsServiceTest {
                 event(CustomerServiceMetricsService.NEGATIVE_SENTIMENT, 1D, null, Map.of("question", "投诉")),
                 event(CustomerServiceMetricsService.SATISFACTION, 1D, null, Map.of("question", "退票规则"))
         ));
-        when(ticketMapper.selectList(any())).thenReturn(List.of());
-        CustomerServiceMetricsService service = new CustomerServiceMetricsService(metricMapper, ticketMapper);
+        when(workItemMapper.selectList(any())).thenReturn(List.of());
+        CustomerServiceMetricsService service = new CustomerServiceMetricsService(metricMapper, workItemMapper);
 
         CustomerServiceDashboardVo dashboard = service.dashboard();
 

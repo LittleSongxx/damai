@@ -736,7 +736,7 @@ public class DocumentIngestionService {
         return qdrantAlias;
     }
 
-    /** Exposed for HybridSearchService to lazy-load cache using the Spring-injected MarkdownLoader. */
+    /** Exposed for retrieval components to lazy-load cache using the Spring-injected MarkdownLoader. */
     public List<Document> loadMarkdownsForCache() {
         return markdownLoader.loadMarkdownsFlat();
     }

@@ -67,7 +67,9 @@ public class AssistantRuntimeService {
     private final CheckpointManager checkpointManager;
 
     public AssistantRunCreatedVo createRun(AssistantRunCreateRequest request) {
-        return runService.createRun(request);
+        AssistantRunCreatedVo created = runService.createRun(request);
+        scheduleRunProcessing(created.getRunId(), "createRun");
+        return created;
     }
 
     public AiUserCapabilitiesVo getCurrentUserCapabilities(AiUserContext user) {
@@ -77,6 +79,13 @@ public class AssistantRuntimeService {
                 .admin(admin)
                 .allowedRoutes(admin ? List.of("business", "knowledge", "general", "ops") : List.of("business", "knowledge", "general"))
                 .skills(skillManagementService.listCapabilities(user))
+                .primaryWorkspaces(List.of("customer-service"))
+                .governanceWorkspaces(admin
+                        ? List.of("knowledge-ops", "data-query", "quality-gates", "prompt-governance")
+                        : List.of())
+                .experimentalWorkspaces(admin
+                        ? List.of("mcp-boundary", "ops-evidence", "red-team", "agent-loop")
+                        : List.of())
                 .build();
     }
 
@@ -87,9 +96,7 @@ public class AssistantRuntimeService {
         }
         eventStreamService.ensureRunStream(runId);
         if (AssistantRunStatus.CREATED.name().equals(run.getRunStatus())) {
-            if (runService.claimRunForProcessing(runId)) {
-                launchProcess(runId, snapshotContext());
-            }
+            scheduleRunProcessing(runId, "streamRun");
         }
         List<AiRunEvent> events = runService.listEvents(runId);
         Flux<ServerSentEvent<String>> replay = Flux.fromIterable(events).map(this::toEvent);
@@ -102,6 +109,19 @@ public class AssistantRuntimeService {
                 .takeUntil(event -> isTerminalEvent(event.getEventType()))
                 .map(this::toEvent);
         return Flux.concat(replay, live);
+    }
+
+    private boolean scheduleRunProcessing(String runId, String source) {
+        if (runId == null || runId.isBlank()) {
+            return false;
+        }
+        if (!runService.claimRunForProcessing(runId)) {
+            return false;
+        }
+        eventStreamService.ensureRunStream(runId);
+        log.info("Scheduled assistant run processing: runId={}, source={}", runId, source);
+        launchProcess(runId, snapshotContext());
+        return true;
     }
 
     public List<org.javaup.ai.vo.AssistantConversationVo> listConversations() {
@@ -299,8 +319,7 @@ public class AssistantRuntimeService {
         }
 
         AssistantRouteDecision decision = plan.getRouteDecision();
-        AiRequestContextHolder.enrich(run.getConversationId(), run.getRunId(),
-                decision.getRouteType().getLegacyChatType().getCode(), decision.getRouteType().getCode());
+        AiRequestContextHolder.enrich(run.getConversationId(), run.getRunId(), decision.getRouteType().getCode());
         runService.startRun(run, decision.getRouteType(),
                 plan.getExecutionMode() == AssistantExecutionMode.CLARIFICATION ? "CLARIFYING" : "ROUTED");
         runService.appendEvent(run.getRunId(), AssistantEventTypes.RUN_STARTED, Map.of(
@@ -541,7 +560,6 @@ public class AssistantRuntimeService {
                 .user(context.getUser())
                 .conversationId(context.getConversationId())
                 .runId(context.getRunId())
-                .chatType(context.getChatType())
                 .requestType(context.getRequestType())
                 .build();
     }

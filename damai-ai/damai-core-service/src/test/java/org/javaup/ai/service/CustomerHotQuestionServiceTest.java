@@ -1,7 +1,7 @@
 package org.javaup.ai.service;
 
 import org.javaup.ai.dto.CustomerQuickAnswerRequest;
-import org.javaup.ai.entity.EscalationTicket;
+import org.javaup.ai.entity.CustomerWorkItem;
 import org.javaup.ai.mapper.AiCustomerHotQuestionMapper;
 import org.javaup.ai.vo.CustomerQuickAnswerResponse;
 import org.junit.jupiter.api.Test;
@@ -29,13 +29,14 @@ class CustomerHotQuestionServiceTest {
     void cachedHotQuestionShouldReturnDirectAnswerWithoutRuntimeFallback() {
         AiCustomerHotQuestionMapper hotQuestionMapper = mock(AiCustomerHotQuestionMapper.class);
         SentimentAnalysisService sentimentService = mock(SentimentAnalysisService.class);
-        EscalationService escalationService = mock(EscalationService.class);
+        CustomerIntentResolver intentResolver = new CustomerIntentResolver();
+        CustomerWorkItemService workItemService = mock(CustomerWorkItemService.class);
         CustomerServiceMetricsService metricsService = mock(CustomerServiceMetricsService.class);
         when(hotQuestionMapper.selectList(any())).thenReturn(java.util.List.of());
         when(sentimentService.quickAnalyze(anyString(), isNull(), anyString(), anyLong()))
                 .thenReturn(new SentimentAnalysisService.SentimentResult("NEUTRAL", 0D, false, java.util.List.of(), false, null));
         CustomerHotQuestionService service = new CustomerHotQuestionService(
-                hotQuestionMapper, sentimentService, escalationService, metricsService);
+                hotQuestionMapper, sentimentService, intentResolver, workItemService, metricsService);
 
         CustomerQuickAnswerRequest request = new CustomerQuickAnswerRequest();
         request.setChatId("chat-1");
@@ -49,7 +50,7 @@ class CustomerHotQuestionServiceTest {
         assertTrue(response.getDirectAnswer().contains("退票"));
         assertFalse(response.getSourceRefs().isEmpty());
         assertEquals("customer_service", response.getClientContext().get("scene"));
-        verify(escalationService, never()).createCustomerEscalation(any(), anyLong());
+        verify(workItemService, never()).handoff(any(), anyLong());
         verify(metricsService).record(isNull(), anyString(), anyLong(),
                 org.mockito.ArgumentMatchers.eq(CustomerServiceMetricsService.QUICK_ANSWER_HIT),
                 anyDouble(), anyLong(), anyMap());
@@ -59,13 +60,14 @@ class CustomerHotQuestionServiceTest {
     void unknownQuestionShouldReturnAssistantRuntimeContextAndClarificationButtons() {
         AiCustomerHotQuestionMapper hotQuestionMapper = mock(AiCustomerHotQuestionMapper.class);
         SentimentAnalysisService sentimentService = mock(SentimentAnalysisService.class);
-        EscalationService escalationService = mock(EscalationService.class);
+        CustomerIntentResolver intentResolver = new CustomerIntentResolver();
+        CustomerWorkItemService workItemService = mock(CustomerWorkItemService.class);
         CustomerServiceMetricsService metricsService = mock(CustomerServiceMetricsService.class);
         when(hotQuestionMapper.selectList(any())).thenReturn(java.util.List.of());
         when(sentimentService.quickAnalyze(anyString(), isNull(), anyString(), anyLong()))
                 .thenReturn(new SentimentAnalysisService.SentimentResult("NEUTRAL", 0D, false, java.util.List.of(), false, null));
         CustomerHotQuestionService service = new CustomerHotQuestionService(
-                hotQuestionMapper, sentimentService, escalationService, metricsService);
+                hotQuestionMapper, sentimentService, intentResolver, workItemService, metricsService);
 
         CustomerQuickAnswerRequest request = new CustomerQuickAnswerRequest();
         request.setChatId("chat-2");
@@ -83,20 +85,21 @@ class CustomerHotQuestionServiceTest {
     }
 
     @Test
-    void handoffHotQuestionShouldCreateEscalationTicket() {
+    void handoffHotQuestionShouldCreateWorkItem() {
         AiCustomerHotQuestionMapper hotQuestionMapper = mock(AiCustomerHotQuestionMapper.class);
         SentimentAnalysisService sentimentService = mock(SentimentAnalysisService.class);
-        EscalationService escalationService = mock(EscalationService.class);
+        CustomerIntentResolver intentResolver = new CustomerIntentResolver();
+        CustomerWorkItemService workItemService = mock(CustomerWorkItemService.class);
         CustomerServiceMetricsService metricsService = mock(CustomerServiceMetricsService.class);
         when(hotQuestionMapper.selectList(any())).thenReturn(java.util.List.of());
         when(sentimentService.quickAnalyze(anyString(), isNull(), anyString(), anyLong()))
                 .thenReturn(new SentimentAnalysisService.SentimentResult("NEGATIVE", 0.9D, true,
                         java.util.List.of("crisis_keyword"), true, "命中投诉/维权高危词"));
-        EscalationTicket ticket = new EscalationTicket();
-        ticket.setTicketId("ticket-1");
-        when(escalationService.createCustomerEscalation(any(), anyLong())).thenReturn(ticket);
+        CustomerWorkItem item = new CustomerWorkItem();
+        item.setWorkItemId("work-item-1");
+        when(workItemService.handoff(any(), anyLong())).thenReturn(item);
         CustomerHotQuestionService service = new CustomerHotQuestionService(
-                hotQuestionMapper, sentimentService, escalationService, metricsService);
+                hotQuestionMapper, sentimentService, intentResolver, workItemService, metricsService);
 
         CustomerQuickAnswerRequest request = new CustomerQuickAnswerRequest();
         request.setChatId("chat-3");
@@ -105,11 +108,11 @@ class CustomerHotQuestionServiceTest {
         CustomerQuickAnswerResponse response = service.quickAnswer(request, 9L);
 
         assertTrue(response.getHit());
-        assertEquals("ticket-1", response.getEscalationTicket().getTicketId());
+        assertEquals("work-item-1", response.getWorkItem().getWorkItemId());
         assertTrue(String.valueOf(response.getSentiment().get("emotionTags")).contains("crisis_keyword"));
-        verify(escalationService).createCustomerEscalation(any(), org.mockito.ArgumentMatchers.eq(9L));
+        verify(workItemService).handoff(any(), org.mockito.ArgumentMatchers.eq(9L));
         verify(metricsService).record(isNull(), anyString(), anyLong(),
-                org.mockito.ArgumentMatchers.eq(CustomerServiceMetricsService.ESCALATION_CREATED),
+                org.mockito.ArgumentMatchers.eq(CustomerServiceMetricsService.WORK_ITEM_CREATED),
                 anyDouble(), anyLong(), anyMap());
     }
 }

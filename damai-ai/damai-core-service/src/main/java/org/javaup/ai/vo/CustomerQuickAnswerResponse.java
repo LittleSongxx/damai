@@ -2,7 +2,7 @@ package org.javaup.ai.vo;
 
 import lombok.Builder;
 import lombok.Data;
-import org.javaup.ai.entity.EscalationTicket;
+import org.javaup.ai.entity.CustomerWorkItem;
 
 import java.util.List;
 import java.util.Map;
@@ -33,7 +33,7 @@ public class CustomerQuickAnswerResponse {
 
     private Map<String, Object> sentiment;
 
-    private EscalationTicket escalationTicket;
+    private CustomerWorkItem workItem;
 
     private Long latencyMs;
 }

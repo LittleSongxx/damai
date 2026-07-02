@@ -3,7 +3,7 @@ package org.javaup.ai.rag;
 import org.javaup.ai.rag.channel.SearchContext;
 import org.javaup.ai.rag.engine.MultiChannelRetrievalEngine;
 import org.javaup.ai.service.AdvancedQueryService;
-import org.javaup.ai.service.HybridSearchService;
+import org.javaup.ai.service.RagSearchBackendService;
 import org.javaup.ai.vo.RagSearchResultVo;
 import org.javaup.ai.vo.RagSourceVo;
 import org.junit.jupiter.api.Test;
@@ -25,8 +25,8 @@ class RagRetrievalFacadeTest {
     void shouldResolveDocumentsAndAttachBoundaryMetadataForFullRetrieval() {
         MultiChannelRetrievalEngine engine = mock(MultiChannelRetrievalEngine.class);
         AdvancedQueryService advancedQueryService = mock(AdvancedQueryService.class);
-        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
-        RagRetrievalFacade facade = new RagRetrievalFacade(engine, advancedQueryService, hybridSearchService);
+        RagSearchBackendService searchBackendService = mock(RagSearchBackendService.class);
+        RagRetrievalFacade facade = new RagRetrievalFacade(engine, advancedQueryService, searchBackendService);
         RagSourceVo source = source("chunk-1");
         Document document = new Document("退票规则正文", Map.of("chunkId", "chunk-1"));
 
@@ -42,7 +42,7 @@ class RagRetrievalFacadeTest {
                 .sources(List.of(source))
                 .documents(List.of())
                 .build());
-        when(hybridSearchService.resolveDocuments(List.of(source))).thenReturn(List.of(document));
+        when(searchBackendService.resolveDocuments(List.of(source))).thenReturn(List.of(document));
 
         RagSearchResultVo result = facade.retrieve("退票", 5, true);
 
@@ -50,7 +50,7 @@ class RagRetrievalFacadeTest {
         assertEquals("RagRetrievalFacade", result.getMetadata().get("retrievalBoundary"));
         assertEquals("full", result.getMetadata().get("retrievalMode"));
         assertEquals("MultiChannelRetrievalEngine", result.getMetadata().get("retrievalEngine"));
-        assertEquals("HybridSearchService.resolveDocuments", result.getMetadata().get("documentResolver"));
+        assertEquals("RagSearchBackendService.resolveDocuments", result.getMetadata().get("documentResolver"));
         assertEquals(true, result.getMetadata().get("documentResolvedByFacade"));
         assertEquals(1, result.getMetadata().get("finalHitCount"));
         verify(engine).retrieve(any(SearchContext.class));
@@ -60,8 +60,8 @@ class RagRetrievalFacadeTest {
     void shouldKeepSimpleRetrievalBehindSameFacadeBoundary() {
         MultiChannelRetrievalEngine engine = mock(MultiChannelRetrievalEngine.class);
         AdvancedQueryService advancedQueryService = mock(AdvancedQueryService.class);
-        HybridSearchService hybridSearchService = mock(HybridSearchService.class);
-        RagRetrievalFacade facade = new RagRetrievalFacade(engine, advancedQueryService, hybridSearchService);
+        RagSearchBackendService searchBackendService = mock(RagSearchBackendService.class);
+        RagRetrievalFacade facade = new RagRetrievalFacade(engine, advancedQueryService, searchBackendService);
         RagSourceVo source = source("chunk-2");
 
         when(engine.retrieveSimple(any(SearchContext.class))).thenReturn(RagSearchResultVo.builder()

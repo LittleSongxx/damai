@@ -32,14 +32,13 @@ public final class AiRequestContextHolder {
         return context.getUser();
     }
 
-    public static void enrich(String conversationId, String runId, Integer chatType, String requestType) {
+    public static void enrich(String conversationId, String runId, String requestType) {
         AiRequestContext current = HOLDER.get();
         AiUserContext user = current == null ? null : current.getUser();
         HOLDER.set(AiRequestContext.builder()
                 .user(user)
                 .conversationId(conversationId)
                 .runId(runId)
-                .chatType(chatType)
                 .requestType(requestType)
                 .build());
     }

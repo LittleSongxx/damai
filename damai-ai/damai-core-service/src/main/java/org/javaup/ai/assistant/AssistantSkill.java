@@ -5,7 +5,7 @@ public interface AssistantSkill {
     AssistantRouteType routeType();
 
     default AssistantSkillDescriptor descriptor() {
-        return AssistantSkillDescriptor.legacy(routeType(), getClass().getSimpleName());
+        return AssistantSkillDescriptor.defaultDescriptor(routeType(), getClass().getSimpleName());
     }
 
     AssistantSkillResult execute(AssistantSkillContext context);

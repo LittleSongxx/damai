@@ -145,19 +145,8 @@ public class MarkdownLoader {
         return new LoadResult(flatDocuments, documentMetadatas);
     }
 
-    /**
-     * Backward-compatible: returns flat document list only.
-     */
     public List<Document> loadMarkdownsFlat() {
         return loadMarkdownsWithMetadata().documents();
-    }
-
-    /**
-     * @deprecated use loadMarkdownsFlat() instead
-     */
-    @Deprecated
-    public List<Document> loadMarkdowns() {
-        return loadMarkdownsFlat();
     }
 
     /**

@@ -14,7 +14,7 @@ import org.javaup.ai.mapper.AiRagEvalCaseMapper;
 import org.javaup.ai.mapper.AiRagEvalDatasetMapper;
 import org.javaup.ai.mapper.AiRagEvalJudgeConfigMapper;
 import org.javaup.ai.mapper.AiRagEvalRetrievalConfigMapper;
-import org.javaup.ai.service.HybridSearchService;
+import org.javaup.ai.rag.RagRetrievalFacade;
 import org.javaup.ai.service.RagBadCaseService;
 import org.javaup.ai.service.RagEvalBaselineService;
 import org.javaup.ai.service.RagEvalReportService;
@@ -37,7 +37,7 @@ import java.util.Map;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/rag-eval")
+@RequestMapping("/assistant/admin/rag-eval")
 @RequiredArgsConstructor
 public class RagEvalController {
 
@@ -46,17 +46,11 @@ public class RagEvalController {
     private final AiRagEvalDatasetMapper datasetMapper;
     private final AiRagEvalRetrievalConfigMapper retrievalConfigMapper;
     private final AiRagEvalJudgeConfigMapper judgeConfigMapper;
-    private final HybridSearchService hybridSearchService;
+    private final RagRetrievalFacade ragRetrievalFacade;
     private final RagEvalReportService ragEvalReportService;
     private final RagEvalBaselineService ragEvalBaselineService;
     private final RagOnlineTraceService ragOnlineTraceService;
     private final RagBadCaseService ragBadCaseService;
-
-    @GetMapping("/debug-es")
-    public ResponseEntity<Map<String, Object>> debugEs(@RequestParam(defaultValue = "如何申请退票？") String query) {
-        var result = hybridSearchService.sparseSearch(query, 5);
-        return ResponseEntity.ok(Map.of("code", 0, "query", query, "hitCount", result.size(), "hits", result.stream().map(r -> Map.of("chunkId", r.getChunkId(), "score", r.getScore(), "title", r.getTitle() != null ? r.getTitle() : "")).toList()));
-    }
 
     @PostMapping("/preview")
     public ResponseEntity<Map<String, Object>> previewEval(@RequestBody(required = false) RagEvalRunRequest request) {
@@ -220,16 +214,6 @@ public class RagEvalController {
         return ResponseEntity.ok(Map.of("code", 0, "message", "deleted"));
     }
 
-    @PostMapping("/reindex")
-    public ResponseEntity<Map<String, Object>> triggerReindex() {
-        try {
-            Map<String, Object> result = hybridSearchService.reindexAll();
-            return ResponseEntity.ok(Map.of("code", 0, "result", result));
-        } catch (Exception e) {
-            return ResponseEntity.ok(Map.of("code", 1, "error", e.getMessage()));
-        }
-    }
-
     @PostMapping("/cases/refresh-expected-chunks")
     public ResponseEntity<Map<String, Object>> refreshExpectedChunks() {
         List<AiRagEvalCase> cases = caseMapper.selectList(
@@ -238,8 +222,7 @@ public class RagEvalController {
         List<String> errors = new ArrayList<>();
         for (AiRagEvalCase evalCase : cases) {
             try {
-                var searchResult = hybridSearchService.hybridSearchWithHyde(
-                        evalCase.getQuestion(), 5, true);
+                var searchResult = ragRetrievalFacade.retrieve(evalCase.getQuestion(), 5, true);
                 List<String> chunkIds = searchResult.getSources() != null
                         ? searchResult.getSources().stream()
                                 .map(org.javaup.ai.vo.RagSourceVo::getChunkId)

@@ -7,9 +7,7 @@ import org.javaup.ai.common.ApiResponse;
 import org.javaup.ai.context.AiRequestContext;
 import org.javaup.ai.context.AiRequestContextHolder;
 import org.javaup.ai.context.AiUserContext;
-import org.javaup.ai.security.AiPermissionService;
 import org.springframework.http.HttpMethod;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
@@ -25,9 +23,6 @@ public class AiAuthenticationInterceptor implements HandlerInterceptor {
     private static final Set<String> OPEN_PREFIXES = Set.of(
             "/error"
     );
-
-    @Value("${damai.ai.playground.enabled:false}")
-    private boolean playgroundEnabled;
 
     private final AiAuthenticationService authenticationService;
     private final AiPermissionService permissionService;
@@ -50,18 +45,10 @@ public class AiAuthenticationInterceptor implements HandlerInterceptor {
         if (OPEN_PREFIXES.stream().anyMatch(uri::startsWith)) {
             return true;
         }
-        if (playgroundEnabled && uri.startsWith("/simple/")) {
-            return true;
-        }
         try {
             String token = request.getHeader("token");
             AiUserContext userContext = authenticationService.authenticate(token);
             AiRequestContextHolder.set(AiRequestContext.builder().user(userContext).build());
-            if (accessDomainPolicyService.isInternalDev(uri) && !playgroundEnabled) {
-                writeError(response, HttpServletResponse.SC_FORBIDDEN, "当前接口仅用于内部调试，未开启 playground");
-                AiRequestContextHolder.clear();
-                return false;
-            }
             if (accessDomainPolicyService.requiresAdmin(uri) && !permissionService.isAdmin(userContext)) {
                 writeError(response, HttpServletResponse.SC_FORBIDDEN, "当前账号无权访问 AI 管理、评测、运维或索引治理接口");
                 AiRequestContextHolder.clear();

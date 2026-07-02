@@ -186,7 +186,7 @@ public class SkillExecutor implements AssistantExecutor {
         payload.put("skillName", descriptor == null ? skill.getClass().getSimpleName() : safe(descriptor.getName()));
         payload.put("version", descriptor == null ? "" : safe(descriptor.getVersion()));
         payload.put("riskLevel", descriptor == null || descriptor.getRiskLevel() == null ? "" : descriptor.getRiskLevel().name());
-        payload.put("selectionReason", skillDecision == null ? "legacy_route:" + decision.getRouteType().getCode() : safe(skillDecision.getReason()));
+        payload.put("selectionReason", skillDecision == null ? "route_default:" + decision.getRouteType().getCode() : safe(skillDecision.getReason()));
         if (durationMs != null) {
             payload.put("durationMs", durationMs);
         }

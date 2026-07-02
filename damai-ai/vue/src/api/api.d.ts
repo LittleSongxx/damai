@@ -16,10 +16,8 @@ export function createAbsoluteUrl(rawUrl: string): URL
 export function createSseIterator<T = unknown>(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncIterable<SseEvent<T> | null>
 export function parseSseChunk<T = unknown>(chunk: string): SseEvent<T> | null
 
-export const chatAPI: Record<string, (...args: any[]) => Promise<any>>
 export const assistantAPI: Record<string, (...args: any[]) => Promise<any>>
 export const customerServiceAPI: Record<string, (...args: any[]) => Promise<any>>
 export const ragEvalAPI: Record<string, (...args: any[]) => Promise<any>>
 export const aiOpsAdminAPI: Record<string, (...args: any[]) => Promise<any>>
 export const promptVersionAPI: Record<string, (...args: any[]) => Promise<any>>
-export const observabilityAPI: Record<string, (...args: any[]) => Promise<any>>

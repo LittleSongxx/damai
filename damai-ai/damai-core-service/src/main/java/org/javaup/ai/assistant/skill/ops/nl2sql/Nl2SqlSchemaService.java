@@ -3,10 +3,15 @@ package org.javaup.ai.assistant.skill.ops.nl2sql;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.cache.CacheManager;
+import org.javaup.ai.service.Nl2SqlSemanticCatalogService;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -22,21 +27,25 @@ public class Nl2SqlSchemaService {
 
     private final Nl2SqlProperties properties;
     private final CacheManager cacheManager;
+    private final Nl2SqlSemanticCatalogService semanticCatalogService;
 
     public Nl2SqlSchemaContext retrieve(String question) {
-        String dsKey = properties.getDatasource().getUrl() != null
-                ? properties.getDatasource().getUrl() : "default";
-        Nl2SqlSchemaContext cached = cacheManager.getNl2sqlSchema(dsKey);
+        return retrieve(question, "global");
+    }
+
+    public Nl2SqlSchemaContext retrieve(String question, String userScope) {
+        String cacheKey = schemaLinkingCacheKey(question, userScope);
+        Nl2SqlSchemaContext cached = cacheManager.getNl2sqlSchema(cacheKey);
         if (cached != null) {
             return cached;
         }
-        Nl2SqlSchemaContext context = doRetrieve(question);
-        cacheManager.putNl2sqlSchema(dsKey, context);
+        Nl2SqlSchemaContext context = doRetrieve(question, semanticCatalogService.activeSnapshot());
+        cacheManager.putNl2sqlSchema(cacheKey, context);
         return context;
     }
 
-    private Nl2SqlSchemaContext doRetrieve(String question) {
-        List<Nl2SqlProperties.Table> candidates = properties.getTables().stream()
+    private Nl2SqlSchemaContext doRetrieve(String question, Nl2SqlSemanticCatalogService.CatalogSnapshot catalog) {
+        List<Nl2SqlProperties.Table> candidates = catalog.tables().stream()
                 .filter(Nl2SqlProperties.Table::isAllowed)
                 .map(table -> new ScoredTable(table, score(table, question)))
                 .sorted(Comparator.comparingInt(ScoredTable::score).reversed())
@@ -45,17 +54,17 @@ public class Nl2SqlSchemaService {
                 .map(ScoredTable::table)
                 .collect(Collectors.toList());
         if (candidates.isEmpty()) {
-            candidates = properties.getTables().stream()
+            candidates = catalog.tables().stream()
                     .filter(Nl2SqlProperties.Table::isAllowed)
                     .limit(Math.max(1, properties.getSchemaTopK()))
                     .collect(Collectors.toList());
         }
-        List<Nl2SqlProperties.Example> examples = selectExamples(question);
-        return new Nl2SqlSchemaContext(candidates, properties.getTerms(), examples, formatSchema(candidates));
+        List<Nl2SqlProperties.Example> examples = selectExamples(question, catalog.examples());
+        return new Nl2SqlSchemaContext(candidates, catalog.terms(), examples, formatSchema(candidates));
     }
 
     public List<String> allowedTableNames() {
-        return properties.getTables().stream()
+        return semanticCatalogService.activeSnapshot().tables().stream()
                 .filter(Nl2SqlProperties.Table::isAllowed)
                 .map(Nl2SqlProperties.Table::getName)
                 .map(name -> name.toLowerCase(Locale.ROOT))
@@ -64,7 +73,7 @@ public class Nl2SqlSchemaService {
 
     public Map<String, Set<String>> allowedColumnsByTable() {
         Map<String, Set<String>> result = new LinkedHashMap<>();
-        for (Nl2SqlProperties.Table table : properties.getTables()) {
+        for (Nl2SqlProperties.Table table : semanticCatalogService.activeSnapshot().tables()) {
             if (!table.isAllowed() || !StringUtils.hasText(table.getName())) {
                 continue;
             }
@@ -82,14 +91,57 @@ public class Nl2SqlSchemaService {
         return result;
     }
 
-    private List<Nl2SqlProperties.Example> selectExamples(String question) {
+    private List<Nl2SqlProperties.Example> selectExamples(String question, List<Nl2SqlProperties.Example> examples) {
         String normalized = normalize(question);
-        return properties.getExamples().stream()
+        return examples.stream()
                 .map(example -> new ScoredExample(example, overlapScore(normalized, normalize(example.getQuestion()))))
                 .sorted(Comparator.comparingInt(ScoredExample::score).reversed())
                 .limit(3)
                 .map(ScoredExample::example)
                 .toList();
+    }
+
+    private String schemaLinkingCacheKey(String question, String userScope) {
+        Nl2SqlSemanticCatalogService.CatalogSnapshot catalog = semanticCatalogService.activeSnapshot();
+        return "nl2sql:schema-linking:"
+                + datasourceFingerprint(catalog.datasourceKey())
+                + ":schemaVersion:" + catalogFingerprint(catalog)
+                + ":topK:" + Math.max(1, properties.getSchemaTopK())
+                + ":question:" + sha256(normalize(question))
+                + ":scope:" + sha256(StringUtils.hasText(userScope) ? userScope : "global");
+    }
+
+    private String datasourceFingerprint(String datasourceKey) {
+        String url = StringUtils.hasText(datasourceKey)
+                ? datasourceKey
+                : "default";
+        return sha256(url);
+    }
+
+    private String catalogFingerprint(Nl2SqlSemanticCatalogService.CatalogSnapshot catalog) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("version:").append(catalog.schemaVersion()).append(';');
+        for (Nl2SqlProperties.Table table : catalog.tables()) {
+            builder.append(table.getName()).append('|')
+                    .append(table.isAllowed()).append('|')
+                    .append(table.getDescription()).append('|');
+            if (table.getColumns() != null) {
+                for (Nl2SqlProperties.Column column : table.getColumns()) {
+                    builder.append(column.getName()).append(':')
+                            .append(column.getType()).append(':')
+                            .append(column.getDescription()).append(':')
+                            .append(column.isSensitive()).append(',');
+                }
+            }
+            builder.append(';');
+        }
+        for (Nl2SqlProperties.Term term : catalog.terms()) {
+            builder.append("term:").append(term.getName()).append(':').append(term.getDescription()).append(';');
+        }
+        for (Nl2SqlProperties.Example example : catalog.examples()) {
+            builder.append("example:").append(example.getQuestion()).append(':').append(example.getSql()).append(';');
+        }
+        return sha256(builder.toString());
     }
 
     private int score(Nl2SqlProperties.Table table, String question) {
@@ -162,6 +214,15 @@ public class Nl2SqlSchemaService {
 
     private String nullToEmpty(String value) {
         return value == null ? "" : value;
+    }
+
+    private String sha256(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest((value == null ? "" : value).getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 algorithm is not available", ex);
+        }
     }
 
     private record ScoredTable(Nl2SqlProperties.Table table, int score) {

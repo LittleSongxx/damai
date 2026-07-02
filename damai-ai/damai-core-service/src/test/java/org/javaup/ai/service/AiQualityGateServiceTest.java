@@ -2,13 +2,17 @@ package org.javaup.ai.service;
 
 import com.alibaba.fastjson2.JSON;
 import org.javaup.ai.assistant.mcp.McpGovernanceProperties;
-import org.javaup.ai.assistant.skill.ops.AiOpsFaultInjectionService;
+import org.javaup.ai.assistant.skill.ops.OpsEvidenceProvider;
+import org.javaup.ai.assistant.skill.ops.OpsProviderRegistry;
+import org.javaup.ai.assistant.skill.ops.OpsRcaRequest;
 import org.javaup.ai.entity.AiNl2SqlEvalRun;
 import org.javaup.ai.entity.AiRagEvalRun;
 import org.javaup.ai.mapper.AiNl2SqlEvalRunMapper;
 import org.javaup.ai.mapper.AiRagEvalRunMapper;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -28,12 +32,12 @@ class AiQualityGateServiceTest {
                 "totalEvents", 20,
                 "quickAnswerHitRate", 0.6,
                 "cacheHitRate", 0.5,
-                "escalationRate", 0.1,
+                "workItemRate", 0.1,
                 "negativeSentimentRate", 0.05,
                 "satisfactionRate", 0.9,
                 "avgFirstResponseLatencyMs", 120D));
         AiQualityGateService service = new AiQualityGateService(
-                ragMapper, nl2SqlMapper, mcp, new AiOpsFaultInjectionService(), metricsService);
+                ragMapper, nl2SqlMapper, mcp, opsRegistry(), metricsService);
 
         AiRagEvalRun ragRun = new AiRagEvalRun();
         ragRun.setEvalRunId("rag-1");
@@ -98,7 +102,7 @@ class AiQualityGateServiceTest {
         mcp.setExposeNl2Sql(true);
         when(metricsService.qualitySnapshot()).thenReturn(Map.of("totalEvents", 0));
         AiQualityGateService service = new AiQualityGateService(
-                ragMapper, nl2SqlMapper, mcp, new AiOpsFaultInjectionService(), metricsService);
+                ragMapper, nl2SqlMapper, mcp, opsRegistry(), metricsService);
 
         AiNl2SqlEvalRun sqlRun = new AiNl2SqlEvalRun();
         sqlRun.setEvalRunId("sql-bad");
@@ -117,5 +121,31 @@ class AiQualityGateServiceTest {
         assertEquals(true, String.valueOf(gate.get("failureSamples")).contains("MCP_GOVERNANCE"));
         assertEquals("MISSING_EVAL", ((Map<?, ?>) gate.get("ragClosure")).get("status"));
         assertEquals("ACTION_REQUIRED", ((Map<?, ?>) gate.get("nl2SqlContract")).get("status"));
+    }
+
+    private OpsProviderRegistry opsRegistry() {
+        OpsProviderRegistry registry = new OpsProviderRegistry();
+        registry.setProviders(List.of(
+                provider("logs"), provider("metrics"), provider("traces"), provider("alerts"), provider("businessEvents")));
+        return registry;
+    }
+
+    private OpsEvidenceProvider provider(String signalType) {
+        return new OpsEvidenceProvider() {
+            @Override
+            public String name() {
+                return signalType + "-test";
+            }
+
+            @Override
+            public String signalType() {
+                return signalType;
+            }
+
+            @Override
+            public Map<String, Object> collect(OpsRcaRequest request, Instant start, Instant end) {
+                return Map.of("items", List.of("ok"));
+            }
+        };
     }
 }

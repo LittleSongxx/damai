@@ -60,41 +60,6 @@ public class StructuredOutputService {
     }
     
     /**
-     * 节目推荐 - 返回结构化的推荐结果
-     * 
-     * @param chatClient ChatClient实例
-     * @param userPreference 用户偏好描述
-     * @return 结构化的推荐结果
-     */
-    public ProgramRecommendation recommendPrograms(ChatClient chatClient, String userPreference) {
-        BeanOutputConverter<ProgramRecommendation> converter = new BeanOutputConverter<>(ProgramRecommendation.class);
-        
-        String prompt = """
-                根据用户的偏好，分析并生成节目推荐。
-                
-                用户偏好描述: %s
-                
-                请按照以下JSON格式返回推荐结果:
-                %s
-                
-                注意:
-                1. 分析用户可能喜欢的节目类型和地区
-                2. 推荐3-5个节目
-                3. 为每个推荐给出具体理由
-                4. 推荐指数范围1-5，5为最高
-                """.formatted(userPreference, converter.getFormat());
-        
-        String response = chatClient.prompt()
-                .user(prompt)
-                .call()
-                .content();
-        
-        log.debug("节目推荐原始响应: {}", response);
-        
-        return converter.convert(response);
-    }
-    
-    /**
      * 通用结构化输出 - 支持任意类型
      * 
      * @param chatClient ChatClient实例

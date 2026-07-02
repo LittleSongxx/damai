@@ -10,11 +10,43 @@
     </parent>
 
     <artifactId>damai-core-service</artifactId>
-    
+
     <name>damai-core-service</name>
     <description>大麦AI核心服务</description>
-    
+
     <dependencies>
+        <dependency>
+            <groupId>org.javaup</groupId>
+            <artifactId>damai-ai-domain</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.javaup</groupId>
+            <artifactId>damai-ai-infra</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.javaup</groupId>
+            <artifactId>damai-ai-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.javaup</groupId>
+            <artifactId>damai-ai-business</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.javaup</groupId>
+            <artifactId>damai-ai-knowledge</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.javaup</groupId>
+            <artifactId>damai-ai-ops</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.javaup</groupId>
+            <artifactId>damai-ai-customer</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.javaup</groupId>
+            <artifactId>damai-ai-governance</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
@@ -81,6 +113,14 @@
         <dependency>
             <groupId>com.mysql</groupId>
             <artifactId>mysql-connector-j</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-mysql</artifactId>
         </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>

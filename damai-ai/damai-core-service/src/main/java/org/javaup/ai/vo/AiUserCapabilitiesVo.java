@@ -16,4 +16,10 @@ public class AiUserCapabilitiesVo {
     private List<String> allowedRoutes;
 
     private List<AssistantSkillVo> skills;
+
+    private List<String> primaryWorkspaces;
+
+    private List<String> governanceWorkspaces;
+
+    private List<String> experimentalWorkspaces;
 }

@@ -4,7 +4,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.context.AiRequestContext;
 import org.javaup.ai.context.AiRequestContextHolder;
 import org.javaup.ai.entity.AiTrace;
-import org.javaup.ai.enums.ChatType;
 import org.javaup.ai.service.AiObservabilityService;
 import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
@@ -177,7 +176,7 @@ public class AiObservabilityAdvisor implements BaseChatMemoryAdvisor {
         private int order = Ordered.LOWEST_PRECEDENCE;
         private final AiObservabilityService observabilityService;
         private String modelName = "unknown";
-        private String requestType = ChatType.CHAT.getMsg();
+        private String requestType = "assistant";
         
         private Builder(AiObservabilityService observabilityService) {
             this.observabilityService = observabilityService;

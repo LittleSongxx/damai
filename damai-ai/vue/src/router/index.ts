@@ -20,19 +20,6 @@ const routes: RouteRecordRaw[] = [
     path: '/assistant/prompts',
     name: 'PromptGovernance',
     component: () => import('../views/PromptGovernance.vue')
-  },
-  {
-    path: '/damai-ai',
-    redirect: '/assistant'
-  },
-  {
-    path: '/damai-rag',
-    redirect: '/assistant'
-  },
-  {
-    path: '/ai-observability',
-    name: 'AiObservability',
-    component: () => import('../views/AiObservability.vue')
   }
 ]
 

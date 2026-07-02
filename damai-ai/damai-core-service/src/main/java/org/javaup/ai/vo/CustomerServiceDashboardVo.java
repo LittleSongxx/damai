@@ -26,9 +26,9 @@ public class CustomerServiceDashboardVo {
 
     private Double ragHitRate;
 
-    private Long escalations;
+    private Long workItems;
 
-    private Double escalationRate;
+    private Double workItemRate;
 
     private Long negativeSentiments;
 

@@ -9,10 +9,12 @@ import org.javaup.ai.assistant.skill.ops.nl2sql.Nl2SqlException;
 import org.javaup.ai.assistant.skill.ops.nl2sql.Nl2SqlProperties;
 import org.javaup.ai.assistant.skill.ops.nl2sql.Nl2SqlSafetyValidator;
 import org.javaup.ai.assistant.skill.ops.nl2sql.Nl2SqlSchemaService;
+import org.javaup.ai.assistant.skill.ops.nl2sql.Nl2SqlTestCatalog;
 import org.javaup.ai.cache.CacheManager;
 import org.javaup.ai.context.AiUserContext;
 import org.javaup.ai.dto.AssistantRunCreateRequest;
 import org.javaup.ai.entity.AiRun;
+import org.javaup.ai.service.Nl2SqlSemanticCatalogService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -20,6 +22,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class RedTeamRegressionTest {
 
@@ -29,8 +32,10 @@ class RedTeamRegressionTest {
     @BeforeEach
     void setUp() {
         Nl2SqlProperties properties = new Nl2SqlProperties();
+        Nl2SqlSemanticCatalogService catalogService = mock(Nl2SqlSemanticCatalogService.class);
+        when(catalogService.activeSnapshot()).thenReturn(Nl2SqlTestCatalog.snapshot());
         nl2SqlSafetyValidator = new Nl2SqlSafetyValidator(
-                properties, new Nl2SqlSchemaService(properties, mock(CacheManager.class)));
+                properties, new Nl2SqlSchemaService(properties, mock(CacheManager.class), catalogService));
     }
 
     @Test

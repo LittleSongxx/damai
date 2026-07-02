@@ -20,8 +20,9 @@ const runtimeState = vi.hoisted(() => ({
   createRagReindexJob: vi.fn(),
   readMcpResource: vi.fn(),
   renderMcpPrompt: vi.fn(),
-  injectAiOpsFaultScenario: vi.fn(),
-  buildAiOpsRcaEvidence: vi.fn(),
+  buildOpsRcaEvidence: vi.fn(),
+  reloadSemanticCatalog: vi.fn(),
+  rebuildOpsMetrics: vi.fn(),
   approveAction: vi.fn(),
   rejectAction: vi.fn()
 }))
@@ -58,11 +59,11 @@ vi.mock('../composables/useAssistantRuntime', () => ({
       sentiment: 'NEUTRAL',
       intensity: 0
     }),
-    customerEscalationTicket: ref({
-      ticketId: 'ticket-1',
+    customerWorkItem: ref({
+      workItemId: 'work-item-1',
       priority: 'MEDIUM',
-      ticketStatus: 'OPEN',
-      suggestedReply: '请先确认用户诉求和订单信息。'
+      workStatus: 'OPEN',
+      conclusion: '请先确认用户诉求和订单信息。'
     }),
     conversations: ref([
       { id: 'chat-9', title: '退票规则咨询', routeType: 'KNOWLEDGE', workflowStatus: 'COMPLETED' }
@@ -278,7 +279,7 @@ vi.mock('../composables/useAssistantRuntime', () => ({
           }
         },
         { name: 'MCP_GOVERNANCE', status: 'PASS' },
-        { name: 'AIOPS_LAB', status: 'PASS' }
+        { name: 'AIOPS_EVIDENCE', status: 'PASS' }
       ]
     }),
     mcpGovernance: ref({
@@ -355,7 +356,7 @@ vi.mock('../composables/useAssistantRuntime', () => ({
         avgFaithfulness: 0.91
       },
       nextActions: [
-        'Poll /api/rag-eval/status/rag-eval-2',
+        'Poll /assistant/admin/rag-eval/status/rag-eval-2',
         'Review bad cases after completion'
       ]
     }),
@@ -406,71 +407,54 @@ vi.mock('../composables/useAssistantRuntime', () => ({
       taskType: 'incremental',
       taskStatus: 'SUBMITTED'
     }),
-    aiOpsFaultScenarios: ref([
+    opsProviderStatus: ref([
+      { signalType: 'logs', provider: 'logGateway', status: 'ACTIVE', healthy: true },
+      { signalType: 'metrics', provider: 'metricsGateway', status: 'ACTIVE', healthy: true },
+      { signalType: 'alerts', provider: '', status: 'MISSING', healthy: false }
+    ]),
+    opsRunbooks: ref([
+      { runbookId: 'rb_api_latency_spike', runbookName: '接口延迟升高排查', riskLevel: 'MEDIUM' }
+    ]),
+    opsEvidenceResult: ref({
+        evidenceBundle: {
+          rcaSummary: 'order-service evidence bundle',
+          confidence: 'MEDIUM',
+          humanReviewRequired: true,
+          evidenceCoverage: {
+            coverageRatio: 0.625
+          },
+          missingProviders: ['changes', 'topology', 'runbooks'],
+          linkedSignals: ['logs', 'metrics', 'traces'],
+          recommendedRunbooks: ['rb_api_latency_spike'],
+          suggestedActions: ['check alert and trace evidence']
+      },
+      assistantPrompt: 'RCA evidence bundle for order-service'
+    }),
+    semanticCatalog: ref([
       {
-        scenarioId: 'error-spike',
-        name: '错误率升高',
-        serviceName: 'order-service',
-        severity: 'SEV1'
+        catalogId: 'cat-order-daily',
+        schemaVersion: 'v5',
+        metricName: '订单日汇总',
+        viewName: 'v_order_daily_summary',
+        securityLevel: 'NORMAL',
+        status: 'ACTIVE'
       }
     ]),
-    aiOpsFaultResult: ref({
-        evidenceBundle: {
-          suspectedCause: 'application error spike',
-          slo: {
-            severity: 'CRITICAL',
-            burnRate: 4.8,
-            errorBudgetRemaining: 0.14,
-            alertTriggered: true,
-            alertName: 'DamaiAiFaultInjectionSloBurn'
-          },
-          alertContext: {
-            triggered: true,
-            name: 'DamaiAiFaultInjectionSloBurn',
-            serviceName: 'order-service',
-            routingHint: 'oncall:order-service',
-            primarySignal: 'scenario=error-spike'
-          },
-          spanId: 'error-spike-span-001',
-          serviceTopology: {
-            rootService: 'gateway-service',
-            suspectService: 'order-service',
-          dependencyEdges: [
-            { from: 'gateway-service', to: 'order-service' },
-            { from: 'order-service', to: 'payment-service' }
-          ]
-        },
-        signalCorrelation: {
-          evidenceCompleteness: 'STRONG',
-          coverageScore: 1,
-          linkedSignals: ['logs', 'trace', 'metrics', 'promql-range', 'recent-changes'],
-          serviceLabels: {
-            service: 'order-service',
-            traceId: 'error-trace-002',
-            spanId: 'error-spike-span-001'
-          }
-        },
-        recentChanges: {
-          items: [
-            { type: 'release', serviceName: 'order-service', version: 'error-spike-release-20260630' },
-            { type: 'config', serviceName: 'order-service', configKey: 'error-spike.feature-flag' }
-          ]
-        },
-        evidenceTimeline: [
-          { kind: 'trace', service: 'order-service', summary: 'first failing span' },
-          { kind: 'log', service: 'order-service', summary: 'application error spike' }
-        ],
-        suggestedActions: ['rollback risky release'],
-        playbookHints: ['slo-playbook: track burn-rate recovery']
-      },
-      assistantPrompt: '请基于模拟故障证据诊断 order-service'
+    metricsRebuildResult: ref({
+      status: 'COMPLETED',
+      rebuiltRows: 42
     }),
     hasMessages: ref(false),
     canUseOps: ref(true),
     capabilities: ref({
       admin: true,
       allowedRoutes: ['business', 'knowledge', 'general', 'ops'],
-      skills: []
+      primaryWorkspaces: ['customer-service'],
+      governanceWorkspaces: ['knowledge-ops', 'data-query', 'quality-gates', 'prompt-governance'],
+      experimentalWorkspaces: ['mcp-boundary', 'ops-evidence', 'red-team'],
+      skills: [
+        { skillId: 'knowledge.policy.qa', name: '规则知识问答', riskLevel: 'LOW' }
+      ]
     }),
     adjustTextareaHeight: vi.fn(),
     ...runtimeState
@@ -505,7 +489,7 @@ describe('AssistantHub', () => {
     expect(wrapper.text()).toContain('退票规则')
     expect(wrapper.text()).toContain('客服状态')
     expect(wrapper.text()).toContain('秒答命中')
-    expect(wrapper.text()).toContain('ticket-1')
+    expect(wrapper.text()).toContain('work-item-1')
     expect(wrapper.text()).toContain('退票 FAQ')
     expect(wrapper.text()).toContain('确认是否提交订单')
     expect(wrapper.text()).toContain('请选择意图')
@@ -587,7 +571,7 @@ describe('AssistantHub', () => {
     expect(wrapper.text()).toContain('prompt · ops.rca')
     expect(wrapper.text()).toContain('explicit allowlist + admin + high-risk confirmation + audit')
     expect(wrapper.text()).toContain('Diagnose service=order-service')
-    expect(wrapper.text()).toContain('AIOPS_LAB')
+    expect(wrapper.text()).toContain('AIOPS_EVIDENCE')
     expect(wrapper.text()).toContain('评测闭环')
     expect(wrapper.text()).toContain('rag-0')
     expect(wrapper.text()).toContain('recall 0.040')
@@ -599,29 +583,26 @@ describe('AssistantHub', () => {
     expect(wrapper.text()).toContain('reindex-0')
     expect(wrapper.text()).toContain('COMPLETED')
     expect(wrapper.text()).toContain('退票答案没有引用证据')
-    expect(wrapper.text()).toContain('故障演练')
-    expect(wrapper.text()).toContain('错误率升高')
-    expect(wrapper.text()).toContain('application error spike')
-    expect(wrapper.text()).toContain('SLO / Alert')
-    expect(wrapper.text()).toContain('CRITICAL')
-    expect(wrapper.text()).toContain('burn 4.8x')
-    expect(wrapper.text()).toContain('budget 14%')
-    expect(wrapper.text()).toContain('oncall:order-service')
-    expect(wrapper.text()).toContain('scenario=error-spike')
-    expect(wrapper.text()).toContain('Topology')
-    expect(wrapper.text()).toContain('gateway-service -> order-service')
-    expect(wrapper.text()).toContain('Correlation')
-    expect(wrapper.text()).toContain('STRONG')
-    expect(wrapper.text()).toContain('score 1.00')
-    expect(wrapper.text()).toContain('span error-spike-span-001')
-    expect(wrapper.text()).toContain('logs / trace / metrics / promql-range / recent-changes')
-    expect(wrapper.text()).toContain('Recent Changes')
-    expect(wrapper.text()).toContain('error-spike-release-20260630')
-    expect(wrapper.text()).toContain('Evidence Timeline')
-    expect(wrapper.text()).toContain('first failing span')
-    expect(wrapper.text()).toContain('rollback risky release')
-    expect(wrapper.text()).toContain('Playbook')
-    expect(wrapper.text()).toContain('slo-playbook: track burn-rate recovery')
+    expect(wrapper.text()).toContain('运维证据工作台')
+    expect(wrapper.text()).toContain('logGateway')
+    expect(wrapper.text()).toContain('metricsGateway')
+    expect(wrapper.text()).toContain('missing')
+    expect(wrapper.text()).toContain('order-service evidence bundle')
+    expect(wrapper.text()).toContain('coverage 63%')
+    expect(wrapper.text()).toContain('MEDIUM')
+    expect(wrapper.text()).toContain('human review')
+    expect(wrapper.text()).toContain('Missing: changes / topology / runbooks')
+    expect(wrapper.text()).toContain('logs')
+    expect(wrapper.text()).toContain('metrics')
+    expect(wrapper.text()).toContain('traces')
+    expect(wrapper.text()).toContain('rb_api_latency_spike')
+    expect(wrapper.text()).toContain('check alert and trace evidence')
+    expect(wrapper.text()).toContain('数据问数治理')
+    expect(wrapper.text()).toContain('version v5')
+    expect(wrapper.text()).toContain('订单日汇总')
+    expect(wrapper.text()).toContain('v_order_daily_summary')
+    expect(wrapper.text()).toContain('COMPLETED')
+    expect(wrapper.text()).toContain('42 rows')
 
     await wrapper.get('.primary-button').trigger('click')
     expect(runtimeState.approveAction).toHaveBeenCalled()
@@ -655,10 +636,12 @@ describe('AssistantHub', () => {
     expect(runtimeState.convertBadCaseToEval).toHaveBeenCalled()
     await wrapper.findAll('button').find(item => item.text() === '已修复').trigger('click')
     expect(runtimeState.reviewBadCase).toHaveBeenCalled()
-    await wrapper.findAll('button').find(item => item.text() === 'Inject').trigger('click')
-    expect(runtimeState.injectAiOpsFaultScenario).toHaveBeenCalled()
     await wrapper.findAll('button').find(item => item.text() === 'Build RCA').trigger('click')
-    expect(runtimeState.buildAiOpsRcaEvidence).toHaveBeenCalled()
+    expect(runtimeState.buildOpsRcaEvidence).toHaveBeenCalled()
+    await wrapper.findAll('button').find(item => item.text() === 'Reload Catalog').trigger('click')
+    expect(runtimeState.reloadSemanticCatalog).toHaveBeenCalled()
+    await wrapper.findAll('button').find(item => item.text() === 'Rebuild Metrics').trigger('click')
+    expect(runtimeState.rebuildOpsMetrics).toHaveBeenCalled()
     await wrapper.findAll('button').find(item => item.text() === 'Replay').trigger('click')
     expect(runtimeState.replayRun).toHaveBeenCalled()
   })

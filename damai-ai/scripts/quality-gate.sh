@@ -274,7 +274,7 @@ cat > "$REPORT_FILE" <<JSON
     {
       "capability": "rag-reindex-jobs",
       "evidence": "Async knowledge-base reindex jobs with task history surfaced in the admin workspace",
-      "interfaces": ["POST /ai/rag/reindex-jobs", "GET /ai/rag/ingestion/tasks"],
+      "interfaces": ["POST /assistant/admin/knowledge/reindex-jobs", "GET /assistant/admin/knowledge/ingestion/tasks"],
       "tests": ["DocumentLifecycleServiceTest", "RagIngestionConsumerTest", "AssistantHub.spec.js"]
     },
     {
@@ -286,7 +286,7 @@ cat > "$REPORT_FILE" <<JSON
     {
       "capability": "rag-closure-plan",
       "evidence": "RAG EvalOps exposes baseline readiness, release blocking, candidate eval cases, and bad-case closure workflow",
-      "interfaces": ["GET /api/rag-eval/runs/{evalRunId}/report", "GET /assistant/admin/quality-gates/latest"],
+      "interfaces": ["GET /assistant/admin/rag-eval/runs/{evalRunId}/report", "GET /assistant/admin/quality-gates/latest"],
       "tests": ["RagEvalOpsServicesTest", "AiQualityGateServiceTest", "AssistantHub.spec.js"]
     },
     {
@@ -310,20 +310,20 @@ cat > "$REPORT_FILE" <<JSON
     {
       "capability": "prompt-release-plan",
       "evidence": "Prompt/config releases generate a quality-gate evidence plan before publish and persist baseline, rollout, rollback, and gate evidence in release records",
-      "interfaces": ["POST /api/prompt-versions/release-plan", "POST /api/prompt-versions/publish"],
+      "interfaces": ["POST /assistant/admin/prompt-versions/release-plan", "POST /assistant/admin/prompt-versions/publish"],
       "tests": ["PromptVersionServiceTest", "PromptGovernance.spec.js", "api.spec.js"]
     },
     {
       "capability": "security-red-team",
       "evidence": "Admin-gated governance endpoints and regression coverage for prompt injection, NL2SQL injection, and tool overreach",
-      "interfaces": ["/api/rag-eval/**", "/api/nl2sql-eval/**", "/assistant/evals/**", "/ai/rag/**"],
+      "interfaces": ["/assistant/admin/rag-eval/**", "/assistant/admin/nl2sql-eval/**", "/assistant/evals/**", "/assistant/admin/knowledge/**"],
       "tests": ["AiAuthenticationInterceptorTest", "RedTeamRegressionTest"]
     },
     {
       "capability": "aiops-rca",
-      "evidence": "Fault-injection scenarios and RCA evidence bundles correlate logs, metrics, traces, spanId, topology, changes, SLO, and suggested actions",
-      "interfaces": ["POST /assistant/admin/aiops/rca-evidence", "POST /assistant/admin/aiops/fault-scenarios/{scenarioId}/inject"],
-      "tests": ["OpsRcaEvidenceServiceTest", "AiOpsFaultInjectionServiceTest", "AssistantHub.spec.js"]
+      "evidence": "Provider-based RCA evidence bundles correlate logs, metrics, traces, alerts, topology, changes, runbooks, and business events with explicit missing-provider review",
+      "interfaces": ["POST /assistant/admin/ops/rca-evidence", "GET /assistant/admin/ops/providers", "GET /assistant/admin/ops/runbooks"],
+      "tests": ["OpsRcaEvidenceServiceTest", "AiQualityGateServiceTest", "AssistantHub.spec.js", "api.spec.js"]
     }
   ],
   "checks": $checks_json

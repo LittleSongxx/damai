@@ -43,7 +43,6 @@ public class RerankPostProcessor implements SearchResultPostProcessor {
             return sources;
         }
         try {
-            // Resolve documents directly from cache/DB — avoids circular dep on HybridSearchService
             Map<String, org.springframework.ai.document.Document> cache = documentIngestionService.getDocumentCache();
             List<Document> docs = new ArrayList<>();
             for (RagSourceVo s : sources) {

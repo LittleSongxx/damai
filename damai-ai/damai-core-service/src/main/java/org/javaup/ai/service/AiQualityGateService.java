@@ -4,8 +4,8 @@ import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import lombok.RequiredArgsConstructor;
-import org.javaup.ai.assistant.skill.ops.AiOpsFaultInjectionService;
 import org.javaup.ai.assistant.mcp.McpGovernanceProperties;
+import org.javaup.ai.assistant.skill.ops.OpsProviderRegistry;
 import org.javaup.ai.entity.AiNl2SqlEvalRun;
 import org.javaup.ai.entity.AiRagEvalRun;
 import org.javaup.ai.mapper.AiNl2SqlEvalRunMapper;
@@ -24,7 +24,7 @@ public class AiQualityGateService {
     private final AiRagEvalRunMapper ragEvalRunMapper;
     private final AiNl2SqlEvalRunMapper nl2SqlEvalRunMapper;
     private final McpGovernanceProperties mcpGovernanceProperties;
-    private final AiOpsFaultInjectionService aiOpsFaultInjectionService;
+    private final OpsProviderRegistry opsProviderRegistry;
     private final CustomerServiceMetricsService customerServiceMetricsService;
 
     public Map<String, Object> latestGate() {
@@ -35,7 +35,7 @@ public class AiQualityGateService {
                 nl2SqlGate(nl2SqlRun),
                 customerServiceGate(),
                 mcpGate(),
-                aiOpsLabGate(),
+                aiOpsEvidenceGate(),
                 redTeamGate());
         String status = rollupStatus(gates);
         Map<String, Object> report = new LinkedHashMap<>();
@@ -144,13 +144,16 @@ public class AiQualityGateService {
                 Map.of("testClass", "RedTeamRegressionTest"));
     }
 
-    private Map<String, Object> aiOpsLabGate() {
-        int scenarioCount = aiOpsFaultInjectionService.listScenarios().size();
-        boolean pass = scenarioCount >= 5;
-        return gate("AIOPS_LAB", pass ? "PASS" : "FAIL",
-                "AIOps fault injection must cover latency, error spike, DB slow query, downstream outage, and order/inventory anomaly",
-                Map.of("scenarioCount", scenarioCount,
-                        "requiredScenarioCount", 5));
+    private Map<String, Object> aiOpsEvidenceGate() {
+        List<Map<String, Object>> providers = opsProviderRegistry.providerStatuses();
+        long activeCount = providers.stream().filter(provider -> Boolean.TRUE.equals(provider.get("healthy"))).count();
+        boolean pass = activeCount >= 4 && providers.stream().anyMatch(provider -> "businessEvents".equals(provider.get("signalType"))
+                && Boolean.TRUE.equals(provider.get("healthy")));
+        return gate("AIOPS_EVIDENCE", pass ? "PASS" : "WARN",
+                "AIOps RCA must be based on real providers and explicit missing-provider review, not placeholder evidence",
+                Map.of("activeProviderCount", activeCount,
+                        "expectedProviders", OpsProviderRegistry.EXPECTED_PROVIDERS,
+                        "providers", providers));
     }
 
     private Map<String, Object> customerServiceGate() {
@@ -163,16 +166,16 @@ public class AiQualityGateService {
         long totalEvents = number(snapshot.get("totalEvents")).longValue();
         if (totalEvents == 0L) {
             return gate("CUSTOMER_SERVICE_EXPERIENCE", "WARN",
-                    "no customer-service experience metrics found; keep WARN until quick-answer, sentiment, escalation, and CSAT traffic is recorded",
+                    "no customer-service experience metrics found; keep WARN until quick-answer, sentiment, work item, and CSAT traffic is recorded",
                     Map.of("totalEvents", 0));
         }
         double quickAnswerHitRate = number(snapshot.get("quickAnswerHitRate")).doubleValue();
-        double escalationRate = number(snapshot.get("escalationRate")).doubleValue();
+        double workItemRate = number(snapshot.get("workItemRate")).doubleValue();
         double negativeSentimentRate = number(snapshot.get("negativeSentimentRate")).doubleValue();
         double satisfactionRate = number(snapshot.get("satisfactionRate")).doubleValue();
         String status = "PASS";
-        String message = "customer-service quick answer, sentiment, escalation, and experience metrics are within guardrail thresholds";
-        if (totalEvents >= 10 && (quickAnswerHitRate < 0.25D || escalationRate > 0.35D || negativeSentimentRate > 0.3D)) {
+        String message = "customer-service quick answer, sentiment, work item, and experience metrics are within guardrail thresholds";
+        if (totalEvents >= 10 && (quickAnswerHitRate < 0.25D || workItemRate > 0.35D || negativeSentimentRate > 0.3D)) {
             status = "WARN";
             message = "customer-service experience metrics need operational review";
         }
@@ -184,7 +187,7 @@ public class AiQualityGateService {
         details.put("totalEvents", totalEvents);
         details.put("quickAnswerHitRate", quickAnswerHitRate);
         details.put("cacheHitRate", number(snapshot.get("cacheHitRate")).doubleValue());
-        details.put("escalationRate", escalationRate);
+        details.put("workItemRate", workItemRate);
         details.put("negativeSentimentRate", negativeSentimentRate);
         details.put("satisfactionRate", satisfactionRate);
         details.put("avgFirstResponseLatencyMs", number(snapshot.get("avgFirstResponseLatencyMs")).doubleValue());
@@ -241,7 +244,7 @@ public class AiQualityGateService {
                 "RagEvalServiceTest",
                 "RagEvalOpsServicesTest",
                 "OpsRcaEvidenceServiceTest",
-                "AiOpsFaultInjectionServiceTest"));
+                "OpsRcaEvidenceServiceTest"));
         coverage.put("frontendTestFiles", List.of(
                 "AssistantHub.spec.js",
                 "PromptGovernance.spec.js",
@@ -262,7 +265,7 @@ public class AiQualityGateService {
                         List.of("AssistantEvalRunServiceTest", "AssistantHub.spec.js", "api.spec.js")),
                 capability("rag-reindex-jobs",
                         "Async knowledge-base reindex jobs with task history surfaced in the admin workspace",
-                        List.of("POST /ai/rag/reindex-jobs", "GET /ai/rag/ingestion/tasks"),
+                        List.of("POST /assistant/admin/knowledge/reindex-jobs", "GET /assistant/admin/knowledge/ingestion/tasks"),
                         List.of("DocumentLifecycleServiceTest", "RagIngestionConsumerTest", "AssistantHub.spec.js")),
                 capability("rag-retrieval-boundary",
                         "Knowledge retrieval, RAG evaluation fallback, and ingestion coverage checks call a single RagRetrievalFacade that owns MultiChannelRetrievalEngine access, document resolution, and retrieval metadata",
@@ -270,15 +273,15 @@ public class AiQualityGateService {
                         List.of("RagRetrievalFacadeTest", "KnowledgeRetrievalOrchestratorTest", "RagEvalServiceTest", "IngestionQualityServiceTest")),
                 capability("rag-closure-plan",
                         "RAG reports expose baseline readiness, release blocking, candidate eval cases, and bad-case closure workflow",
-                        List.of("GET /api/rag-eval/runs/{evalRunId}/report", "GET /assistant/admin/quality-gates/latest"),
+                        List.of("GET /assistant/admin/rag-eval/runs/{evalRunId}/report", "GET /assistant/admin/quality-gates/latest"),
                         List.of("RagEvalOpsServicesTest", "AiQualityGateServiceTest", "AssistantHub.spec.js")),
                 capability("nl2sql-response-contract",
                         "NL2SQL returns a stable status/sql/evidence/safetyReport/executionPlan/resultPreview/maskedColumns/repairTrace contract",
                         List.of("POST /assistant/evals/nl2sql/run", "GET /assistant/admin/quality-gates/latest"),
                         List.of("Nl2SqlOrchestratorPolicyTest", "Nl2SqlEvalServiceTest", "AiQualityGateServiceTest")),
                 capability("customer-service-experience",
-                        "Customer-service quick answers, sentiment triage, escalation tickets, and experience metrics are wired into the unified Assistant Runtime entry",
-                        List.of("GET /assistant/customer-service/starter-prompts", "POST /assistant/customer-service/quick-answer", "POST /assistant/customer-service/escalations", "GET /assistant/admin/customer-service/dashboard"),
+                        "Customer-service quick answers, sentiment triage, work items, and experience metrics are wired into the unified Assistant Runtime entry",
+                        List.of("GET /assistant/customer-service/starter-prompts", "POST /assistant/customer-service/quick-answer", "POST /assistant/customer-service/handoff", "GET /assistant/admin/customer-service/dashboard"),
                         List.of("CustomerHotQuestionServiceTest", "CustomerServiceMetricsServiceTest", "AssistantHub.spec.js", "api.spec.js")),
                 capability("run-graph-checkpoint",
                         "Run graph, checkpoint replay, risk nodes, and audit timeline for recoverable agent runs",
@@ -290,15 +293,15 @@ public class AiQualityGateService {
                         List.of("McpToolGovernanceServiceTest", "AiQualityGateServiceTest", "AssistantHub.spec.js")),
                 capability("security-red-team",
                         "Admin-gated governance endpoints and regression coverage for prompt injection, NL2SQL injection, and tool overreach",
-                        List.of("/api/rag-eval/**", "/api/nl2sql-eval/**", "/assistant/evals/**", "/ai/rag/**"),
+                        List.of("/assistant/admin/rag-eval/**", "/assistant/admin/nl2sql-eval/**", "/assistant/evals/**", "/assistant/admin/knowledge/**"),
                         List.of("AiAuthenticationInterceptorTest", "RedTeamRegressionTest")),
                 capability("aiops-rca",
-                        "Fault-injection scenarios and RCA evidence bundles correlate logs, metrics, traces, spanId, topology, changes, SLO, and suggested actions",
-                        List.of("POST /assistant/admin/aiops/rca-evidence", "POST /assistant/admin/aiops/fault-scenarios/{scenarioId}/inject"),
-                        List.of("OpsRcaEvidenceServiceTest", "AiOpsFaultInjectionServiceTest", "AssistantHub.spec.js")),
+                        "RCA evidence bundles are assembled from logs, metrics, traces, alerts, changes, topology, runbooks, and business events with explicit missing-provider handling",
+                        List.of("POST /assistant/admin/ops/rca-evidence", "GET /assistant/admin/ops/providers", "GET /assistant/admin/ops/runbooks"),
+                        List.of("OpsRcaEvidenceServiceTest", "AssistantHub.spec.js")),
                 capability("prompt-release-plan",
                         "Prompt/config releases generate a quality-gate evidence plan before publish and persist baseline, rollout, rollback, and gate evidence in release records",
-                        List.of("POST /api/prompt-versions/release-plan", "POST /api/prompt-versions/publish"),
+                        List.of("POST /assistant/admin/prompt-versions/release-plan", "POST /assistant/admin/prompt-versions/publish"),
                         List.of("PromptVersionServiceTest", "PromptGovernance.spec.js", "api.spec.js")));
     }
 
@@ -342,8 +345,8 @@ public class AiQualityGateService {
             sample.put("nextAction", "inspect unsafe rejection, schema-link recall, execution accuracy, and repair traces");
         } else if ("MCP_GOVERNANCE".equals(name)) {
             sample.put("nextAction", "keep MCP allowlist explicit, require admin, and keep high-risk tools confirmation-gated");
-        } else if ("AIOPS_LAB".equals(name)) {
-            sample.put("nextAction", "add missing fault scenarios so RCA evidence covers latency, errors, DB, downstream, and business consistency");
+        } else if ("AIOPS_EVIDENCE".equals(name)) {
+            sample.put("nextAction", "connect missing observability providers and verify business event ingestion before relying on RCA confidence");
         } else if ("CUSTOMER_SERVICE_EXPERIENCE".equals(name)) {
             sample.put("nextAction", "review hot-question coverage, unresolved cases, negative sentiment triggers, and CSAT before prompt/config release");
         } else {

@@ -30,7 +30,7 @@ class AiAuthenticationInterceptorTest {
     @Test
     void shouldRejectAnonymousRagEvalAccess() throws Exception {
         when(authenticationService.authenticate(null)).thenThrow(new AiAuthenticationException("登录态缺失"));
-        MockHttpServletRequest request = request("/api/rag-eval/start", null);
+        MockHttpServletRequest request = request("/assistant/admin/rag-eval/start", null);
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         assertFalse(interceptor.preHandle(request, response, new Object()));
@@ -44,7 +44,7 @@ class AiAuthenticationInterceptorTest {
         AiUserContext user = AiUserContext.builder().userId(2L).admin(false).build();
         when(authenticationService.authenticate("token-user")).thenReturn(user);
         when(permissionService.isAdmin(user)).thenReturn(false);
-        MockHttpServletRequest request = request("/ai/rag/reindex-jobs", "token-user");
+        MockHttpServletRequest request = request("/assistant/admin/knowledge/reindex-jobs", "token-user");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         assertFalse(interceptor.preHandle(request, response, new Object()));
@@ -72,7 +72,7 @@ class AiAuthenticationInterceptorTest {
         AiUserContext user = AiUserContext.builder().userId(2L).admin(false).build();
         when(authenticationService.authenticate("token-user")).thenReturn(user);
         when(permissionService.isAdmin(user)).thenReturn(false);
-        MockHttpServletRequest request = request("/api/feedback/knowledge-gaps", "token-user");
+        MockHttpServletRequest request = request("/assistant/admin/customer-service/feedback/knowledge-gaps", "token-user");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         assertFalse(interceptor.preHandle(request, response, new Object()));
@@ -82,10 +82,11 @@ class AiAuthenticationInterceptorTest {
     }
 
     @Test
-    void shouldRejectStructuredDemoWhenPlaygroundDisabled() throws Exception {
-        AiUserContext admin = AiUserContext.builder().userId(1L).admin(true).build();
-        when(authenticationService.authenticate("token-admin")).thenReturn(admin);
-        MockHttpServletRequest request = request("/ai/enhance/structured/intent", "token-admin");
+    void shouldRejectNonAdminForObservabilityEndpoints() throws Exception {
+        AiUserContext user = AiUserContext.builder().userId(2L).admin(false).build();
+        when(authenticationService.authenticate("token-user")).thenReturn(user);
+        when(permissionService.isAdmin(user)).thenReturn(false);
+        MockHttpServletRequest request = request("/assistant/admin/observability/today", "token-user");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         assertFalse(interceptor.preHandle(request, response, new Object()));
@@ -113,7 +114,7 @@ class AiAuthenticationInterceptorTest {
         AiUserContext admin = AiUserContext.builder().userId(1L).admin(true).build();
         when(authenticationService.authenticate("token-admin")).thenReturn(admin);
         when(permissionService.isAdmin(admin)).thenReturn(true);
-        MockHttpServletRequest request = request("/api/nl2sql-eval/start", "token-admin");
+        MockHttpServletRequest request = request("/assistant/admin/nl2sql-eval/start", "token-admin");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         assertTrue(interceptor.preHandle(request, response, new Object()));

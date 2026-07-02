@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/notifications")
+@RequestMapping("/assistant/notifications")
 @RequiredArgsConstructor
 public class NotificationController {
 

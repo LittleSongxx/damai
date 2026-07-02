@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/prompt-versions")
+@RequestMapping("/assistant/admin/prompt-versions")
 @RequiredArgsConstructor
 public class PromptVersionController {
 

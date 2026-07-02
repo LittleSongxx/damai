@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.javaup.ai.rag.channel.SearchContext;
 import org.javaup.ai.rag.engine.MultiChannelRetrievalEngine;
 import org.javaup.ai.service.AdvancedQueryService;
-import org.javaup.ai.service.HybridSearchService;
+import org.javaup.ai.service.RagSearchBackendService;
 import org.javaup.ai.vo.RagSearchResultVo;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
@@ -19,11 +19,11 @@ public class RagRetrievalFacade {
 
     private static final String BOUNDARY_NAME = "RagRetrievalFacade";
     private static final String ENGINE_NAME = "MultiChannelRetrievalEngine";
-    private static final String LEGACY_RESOLVER = "HybridSearchService.resolveDocuments";
+    private static final String DOCUMENT_RESOLVER = "RagSearchBackendService.resolveDocuments";
 
     private final MultiChannelRetrievalEngine retrievalEngine;
     private final AdvancedQueryService advancedQueryService;
-    private final HybridSearchService legacySearchService;
+    private final RagSearchBackendService searchBackendService;
 
     public RagSearchResultVo retrieveSimple(String query, int topK) {
         SearchContext context = SearchContext.builder()
@@ -55,7 +55,7 @@ public class RagRetrievalFacade {
     }
 
     public List<Document> resolveDocuments(RagSearchResultVo result) {
-        return result == null ? List.of() : legacySearchService.resolveDocuments(result.getSources());
+        return result == null ? List.of() : searchBackendService.resolveDocuments(result.getSources());
     }
 
     private RagSearchResultVo withResolvedDocuments(RagSearchResultVo result,
@@ -67,7 +67,7 @@ public class RagRetrievalFacade {
         List<Document> documents = result.getDocuments();
         boolean resolvedByFacade = false;
         if (documents == null || documents.isEmpty()) {
-            documents = legacySearchService.resolveDocuments(result.getSources());
+            documents = searchBackendService.resolveDocuments(result.getSources());
             resolvedByFacade = true;
         }
         return rebuild(result, documents, mode, enableRerank, resolvedByFacade);
@@ -85,7 +85,7 @@ public class RagRetrievalFacade {
         metadata.put("retrievalBoundary", BOUNDARY_NAME);
         metadata.put("retrievalMode", mode);
         metadata.put("retrievalEngine", ENGINE_NAME);
-        metadata.put("documentResolver", LEGACY_RESOLVER);
+        metadata.put("documentResolver", DOCUMENT_RESOLVER);
         metadata.put("documentResolvedByFacade", resolvedByFacade);
         metadata.put("enableRerank", enableRerank);
         metadata.put("denseHitCount", size(result.getDenseSources()));

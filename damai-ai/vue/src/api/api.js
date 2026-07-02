@@ -180,64 +180,6 @@ async function requestJson(path, options = {}) {
   return response.json()
 }
 
-export const chatAPI = {
-  async chatTypeHistoryList(type = 1) {
-    const url = buildUrl('/chat/type/history/list', { type })
-    const response = await fetchWithTimeout(url)
-    const chats = await response.json()
-    return chats.map(chat => ({
-      id: chat.chatId,
-      title: chat.title || '新的对话',
-      latestRunId: chat.latestRunId,
-      workflowStatus: chat.workflowStatus
-    }))
-  },
-
-  async chatHistoryMessageList(chatId, type = 1) {
-    const url = buildUrl('/chat/history/message/list', { chatId, type })
-    const response = await fetchWithTimeout(url)
-    const messages = await response.json()
-    return messages.map(msg => ({
-      ...msg,
-      timestamp: new Date()
-    }))
-  },
-
-  async deleteChat(chatId, type = 1) {
-    const url = buildUrl('/chat/delete', { chatId, type })
-    await fetchWithTimeout(url)
-    return true
-  },
-
-  async getWorkflow(runId) {
-    const url = buildUrl(`/ai/workflows/${runId}`)
-    const response = await fetchWithTimeout(url)
-    const result = await response.json()
-    return result.data
-  },
-
-  async approveWorkflow(runId) {
-    const url = buildUrl(`/ai/workflows/${runId}/approve`)
-    const response = await fetchWithTimeout(url, { method: 'POST' })
-    const result = await response.json()
-    return result.data
-  },
-
-  async rejectWorkflow(runId) {
-    const url = buildUrl(`/ai/workflows/${runId}/reject`)
-    const response = await fetchWithTimeout(url, { method: 'POST' })
-    const result = await response.json()
-    return result.data
-  },
-
-  async reindexFaq() {
-    const url = buildUrl('/ai/rag/reindex')
-    const response = await fetchWithTimeout(url, { method: 'POST' })
-    const result = await response.json()
-    return result.data
-  }
-}
-
 export const assistantAPI = {
   async getCapabilities() {
     const response = await fetchWithTimeout(buildUrl('/assistant/capabilities'))
@@ -311,6 +253,13 @@ export const assistantAPI = {
 
   async rejectAction(runId, actionId) {
     const response = await fetchWithTimeout(buildUrl(`/assistant/runs/${runId}/actions/${actionId}/reject`), {
+      method: 'POST'
+    })
+    return response.json()
+  },
+
+  async reindexKnowledge() {
+    const response = await fetchWithTimeout(buildUrl('/assistant/admin/knowledge/reindex'), {
       method: 'POST'
     })
     return response.json()
@@ -394,15 +343,15 @@ export const customerServiceAPI = {
     })
   },
 
-  async createEscalation(payload = {}) {
-    return requestJson('/assistant/customer-service/escalations', {
+  async createWorkItem(payload = {}) {
+    return requestJson('/assistant/customer-service/handoff', {
       method: 'POST',
       body: payload
     })
   },
 
-  async getEscalation(ticketId) {
-    const response = await fetchWithTimeout(buildUrl(`/assistant/customer-service/escalations/${ticketId}`))
+  async getWorkItem(workItemId) {
+    const response = await fetchWithTimeout(buildUrl(`/assistant/customer-service/work-items/${workItemId}`))
     return response.json()
   },
 
@@ -419,27 +368,32 @@ export const customerServiceAPI = {
   async getUnresolvedCases() {
     const response = await fetchWithTimeout(buildUrl('/assistant/admin/customer-service/unresolved-cases'))
     return response.json()
+  },
+
+  async getWorkItems(params = {}) {
+    const response = await fetchWithTimeout(buildUrl('/assistant/admin/customer-service/work-items', params))
+    return response.json()
   }
 }
 
 export const ragEvalAPI = {
   async getRunReport(evalRunId) {
-    const response = await fetchWithTimeout(buildUrl(`/api/rag-eval/runs/${evalRunId}/report`))
+    const response = await fetchWithTimeout(buildUrl(`/assistant/admin/rag-eval/runs/${evalRunId}/report`))
     return response.json()
   },
 
   async compareRun(evalRunId, baselineRunId) {
-    const response = await fetchWithTimeout(buildUrl(`/api/rag-eval/runs/${evalRunId}/compare`, { baselineRunId }))
+    const response = await fetchWithTimeout(buildUrl(`/assistant/admin/rag-eval/runs/${evalRunId}/compare`, { baselineRunId }))
     return response.json()
   },
 
   async listBadCases(reviewStatus = 'PENDING', failureType = '') {
-    const response = await fetchWithTimeout(buildUrl('/api/rag-eval/bad-cases', { reviewStatus, failureType }))
+    const response = await fetchWithTimeout(buildUrl('/assistant/admin/rag-eval/bad-cases', { reviewStatus, failureType }))
     return response.json()
   },
 
   async convertBadCase(badCaseId, payload = {}) {
-    const response = await fetchWithTimeout(buildUrl(`/api/rag-eval/bad-cases/${badCaseId}/convert`), {
+    const response = await fetchWithTimeout(buildUrl(`/assistant/admin/rag-eval/bad-cases/${badCaseId}/convert`), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -450,7 +404,7 @@ export const ragEvalAPI = {
   },
 
   async reviewBadCase(badCaseId, payload = {}) {
-    const response = await fetchWithTimeout(buildUrl(`/api/rag-eval/bad-cases/${badCaseId}/review`), {
+    const response = await fetchWithTimeout(buildUrl(`/assistant/admin/rag-eval/bad-cases/${badCaseId}/review`), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -461,37 +415,31 @@ export const ragEvalAPI = {
   },
 
   async createReindexJob(taskType = 'full') {
-    const response = await fetchWithTimeout(buildUrl('/ai/rag/reindex-jobs', { taskType }), {
+    const response = await fetchWithTimeout(buildUrl('/assistant/admin/knowledge/reindex-jobs', { taskType }), {
       method: 'POST'
     })
     return response.json()
   },
 
   async listIngestionTasks() {
-    const response = await fetchWithTimeout(buildUrl('/ai/rag/ingestion/tasks'))
+    const response = await fetchWithTimeout(buildUrl('/assistant/admin/knowledge/ingestion/tasks'))
     return response.json()
   }
 }
 
 export const aiOpsAdminAPI = {
-  async listFaultScenarios() {
-    const response = await fetchWithTimeout(buildUrl('/assistant/admin/aiops/fault-scenarios'))
+  async listProviders() {
+    const response = await fetchWithTimeout(buildUrl('/assistant/admin/ops/providers'))
     return response.json()
   },
 
-  async injectFaultScenario(scenarioId, payload = {}) {
-    const response = await fetchWithTimeout(buildUrl(`/assistant/admin/aiops/fault-scenarios/${scenarioId}/inject`), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    })
+  async listRunbooks() {
+    const response = await fetchWithTimeout(buildUrl('/assistant/admin/ops/runbooks'))
     return response.json()
   },
 
   async buildRcaEvidence(payload = {}) {
-    const response = await fetchWithTimeout(buildUrl('/assistant/admin/aiops/rca-evidence'), {
+    const response = await fetchWithTimeout(buildUrl('/assistant/admin/ops/rca-evidence'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -504,83 +452,78 @@ export const aiOpsAdminAPI = {
 
 export const promptVersionAPI = {
   async list(promptKey = '') {
-    const response = await fetchWithTimeout(buildUrl('/api/prompt-versions', { promptKey }))
+    const response = await fetchWithTimeout(buildUrl('/assistant/admin/prompt-versions', { promptKey }))
     return response.json()
   },
 
   async listReleaseRecords(promptKey = '') {
-    const response = await fetchWithTimeout(buildUrl('/api/prompt-versions/release-records', { promptKey }))
+    const response = await fetchWithTimeout(buildUrl('/assistant/admin/prompt-versions/release-records', { promptKey }))
     return response.json()
   },
 
   async createDraft(payload) {
-    return requestJson('/api/prompt-versions', {
+    return requestJson('/assistant/admin/prompt-versions', {
       method: 'POST',
       body: payload
     })
   },
 
   async buildReleasePlan(payload) {
-    return requestJson('/api/prompt-versions/release-plan', {
+    return requestJson('/assistant/admin/prompt-versions/release-plan', {
       method: 'POST',
       body: payload
     })
   },
 
   async publish(payload) {
-    return requestJson('/api/prompt-versions/publish', {
+    return requestJson('/assistant/admin/prompt-versions/publish', {
       method: 'POST',
       body: payload
     })
   },
 
   async promote(payload) {
-    return requestJson('/api/prompt-versions/promote', {
+    return requestJson('/assistant/admin/prompt-versions/promote', {
       method: 'POST',
       body: payload
     })
   },
 
   async rollback(payload) {
-    return requestJson('/api/prompt-versions/rollback', {
+    return requestJson('/assistant/admin/prompt-versions/rollback', {
       method: 'POST',
       body: payload
     })
   },
 
   async invalidateCache() {
-    return requestJson('/api/prompt-versions/invalidate-cache', {
+    return requestJson('/assistant/admin/prompt-versions/invalidate-cache', {
       method: 'POST'
     })
   }
 }
 
-export const observabilityAPI = {
-  async getTodayStats() {
-    const url = buildUrl('/ai/enhance/observability/today')
-    const response = await fetchWithTimeout(url)
-    const result = await response.json()
-    return result.data
+export const dataOpsAdminAPI = {
+  async reloadCatalog() {
+    const response = await fetchWithTimeout(buildUrl('/assistant/admin/dataops/catalog/reload'), {
+      method: 'POST'
+    })
+    return response.json()
   },
 
-  async getRecentTraces(limit = 50) {
-    const url = buildUrl('/ai/enhance/observability/traces', { limit })
-    const response = await fetchWithTimeout(url)
-    const result = await response.json()
-    return result.data
+  async getCatalog() {
+    const response = await fetchWithTimeout(buildUrl('/assistant/admin/dataops/catalog'))
+    return response.json()
   },
 
-  async getStatsByType() {
-    const url = buildUrl('/ai/enhance/observability/stats/type')
-    const response = await fetchWithTimeout(url)
-    const result = await response.json()
-    return result.data
-  },
-
-  async getConversationStats(conversationId) {
-    const url = buildUrl('/ai/enhance/observability/conversation', { conversationId })
-    const response = await fetchWithTimeout(url)
-    const result = await response.json()
-    return result.data
+  async rebuildMetrics(payload = {}) {
+    const response = await fetchWithTimeout(buildUrl('/assistant/admin/dataops/metrics/rebuild'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    })
+    return response.json()
   }
 }

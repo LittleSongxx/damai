@@ -60,7 +60,7 @@ graph TB
 | **数据一致性** | Redis + MySQL + RabbitMQ + Seata + 补偿任务 + 后台核对 |
 | **分库分表** | ShardingSphere · 基因法 · 虚拟分片 · 平滑扩容迁移 |
 | **服务治理** | Nacos · Gateway · OpenFeign · Sentinel · Spring Boot Admin |
-| **可观测性** | API 采集 · Elasticsearch · Prometheus · damai-ai 内置 MCP 诊断 |
+| **可观测性** | API 采集 · Elasticsearch · Prometheus · OpsEvent · damai-ai Ops Evidence / DataOps |
 
 ## 下单链路
 
@@ -206,11 +206,11 @@ cd vue3 && npm install && npm run dev -- --host 127.0.0.1 --port 15173 --strictP
 - **分库分表路由** — ShardingSphere + 基因法，按用户/订单维度定位分片
 - **虚拟分片扩容** — 物理分片与业务之间增加虚拟映射，降低迁移风险
 - **中间件故障兜底** — Redis/MQ/DB 不一致场景的恢复与核对机制
-- **链路可观测** — API 采集 + ES + Prometheus，为 `damai-ai` 提供诊断数据
+- **链路可观测** — API 采集 + ES + Prometheus + 业务事件，为 `damai-ai` 提供问数和诊断证据
 
 ## 与 damai-ai 联动
 
-`damai-ai` 通过网关接口调用节目检索、详情、票档、用户、观演人和下单能力。联调指南见 [`docs/damai-ai-integration.md`](docs/damai-ai-integration.md)。
+`damai-ai` 是 `damai-pro` 的外围 AI 能力：普通客户 AI 浮窗复用 `damai-pro/vue3` 登录态和页面上下文，购票只通过内部 reservation/confirm/release 接口完成真实锁座与下单；管理员问数和运维诊断只消费 `damai-pro` 产生的 OpsEvent、日志、指标、Trace、告警和变更证据。联调指南见 [`docs/damai-ai-integration.md`](docs/damai-ai-integration.md)。
 
 ## 常见问题
 

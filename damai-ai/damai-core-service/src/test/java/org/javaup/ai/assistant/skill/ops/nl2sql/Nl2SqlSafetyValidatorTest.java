@@ -1,6 +1,7 @@
 package org.javaup.ai.assistant.skill.ops.nl2sql;
 
 import org.javaup.ai.cache.CacheManager;
+import org.javaup.ai.service.Nl2SqlSemanticCatalogService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -8,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class Nl2SqlSafetyValidatorTest {
 
@@ -16,7 +18,10 @@ class Nl2SqlSafetyValidatorTest {
     @BeforeEach
     void setUp() {
         Nl2SqlProperties properties = new Nl2SqlProperties();
-        validator = new Nl2SqlSafetyValidator(properties, new Nl2SqlSchemaService(properties, mock(CacheManager.class)));
+        Nl2SqlSemanticCatalogService catalogService = mock(Nl2SqlSemanticCatalogService.class);
+        when(catalogService.activeSnapshot()).thenReturn(Nl2SqlTestCatalog.snapshot());
+        validator = new Nl2SqlSafetyValidator(properties,
+                new Nl2SqlSchemaService(properties, mock(CacheManager.class), catalogService));
     }
 
     @Test

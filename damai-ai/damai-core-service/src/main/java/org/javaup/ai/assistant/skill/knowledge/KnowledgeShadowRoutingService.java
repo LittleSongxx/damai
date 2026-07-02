@@ -64,7 +64,7 @@ public class KnowledgeShadowRoutingService {
         if (cached != null && !cached.isEmpty()) {
             return cached;
         }
-        List<Document> documents = markdownLoader.loadMarkdowns();
+        List<Document> documents = markdownLoader.loadMarkdownsFlat();
         documentCache.set(documents);
         return documents;
     }
