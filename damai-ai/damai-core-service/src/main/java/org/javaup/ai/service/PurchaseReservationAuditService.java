@@ -25,6 +25,7 @@ public class PurchaseReservationAuditService {
         row.setReservationId(reservation.reservationId());
         row.setRunId(runId);
         row.setActionId(actionId);
+        row.setUserId(snapshot.getUserId());
         row.setProgramId(snapshot.getProgramId());
         row.setTicketCategoryId(snapshot.getTicketCategoryId());
         row.setTicketCount(snapshot.getTicketCount());

@@ -23,6 +23,8 @@ public class AiPurchaseReservationAction extends BaseTableData {
 
     private String runId;
 
+    private Long userId;
+
     private Long programId;
 
     private Long ticketCategoryId;

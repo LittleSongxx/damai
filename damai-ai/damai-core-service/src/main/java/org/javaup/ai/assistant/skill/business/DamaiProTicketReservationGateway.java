@@ -27,8 +27,14 @@ public class DamaiProTicketReservationGateway implements TicketReservationGatewa
     @Value("${damai.pro.ai-reservation.ttl-seconds:900}")
     private Integer ttlSeconds;
 
+    @Value("${damai.pro.ai-reservation.connect-timeout-ms:3000}")
+    private Integer connectTimeoutMs;
+
+    @Value("${damai.pro.ai-reservation.read-timeout-ms:8000}")
+    private Integer readTimeoutMs;
+
     @Override
-    public TicketReservation reserve(PurchaseActionSnapshot snapshot, String idempotencyKey) {
+    public TicketReservation reserve(PurchaseActionSnapshot snapshot, String idempotencyKey, String runId, String actionId) {
         if (snapshot == null || snapshot.getProgramOrderCreateDto() == null || !StringUtils.hasText(idempotencyKey)) {
             throw new RuntimeException("库存预留参数缺失");
         }
@@ -36,8 +42,8 @@ public class DamaiProTicketReservationGateway implements TicketReservationGatewa
         request.setOrderCreate(snapshot.getProgramOrderCreateDto());
         request.setIdempotencyKey(idempotencyKey);
         request.setTtlSeconds(ttlSeconds);
-        request.setSourceRunId(null);
-        request.setSourceActionId(null);
+        request.setSourceRunId(runId);
+        request.setSourceActionId(actionId);
         ReservationResponse response = post(reservationBaseUrl, request, idempotencyKey, ReservationResponse.class);
         ReservationData data = response.getData();
         if (data == null || !StringUtils.hasText(data.getReservationId())) {
@@ -80,7 +86,11 @@ public class DamaiProTicketReservationGateway implements TicketReservationGatewa
             httpRequest.header("X-Idempotency-Key", idempotencyKey);
             httpRequest.header("X-AI-Request-Id", idempotencyKey);
         }
-        String result = httpRequest.body(JSON.toJSONString(body)).timeout(20000).execute().body();
+        String result = httpRequest.body(JSON.toJSONString(body))
+                .setConnectionTimeout(connectTimeoutMs == null ? 3000 : connectTimeoutMs)
+                .setReadTimeout(readTimeoutMs == null ? 8000 : readTimeoutMs)
+                .execute()
+                .body();
         T response = JSON.parseObject(result, type);
         if (response == null || !Objects.equals(response.getCode(), BaseCode.SUCCESS.getCode())) {
             String message = response == null || response.getMessage() == null ? "unknown error" : response.getMessage();

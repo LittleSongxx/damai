@@ -88,7 +88,7 @@ public class PurchaseActionService {
             riskPolicyService.validateBeforeApproval(snapshot, action);
             revalidateSnapshot(snapshot);
             String reservationIdempotencyKey = action.getIdempotencyKey() + ":reservation";
-            reservation = ticketReservationGateway.reserve(snapshot, reservationIdempotencyKey);
+            reservation = ticketReservationGateway.reserve(snapshot, reservationIdempotencyKey, runId, actionId);
             if (reservation == null || !reservation.locked() || reservation.reservationId() == null) {
                 throw new RuntimeException("库存预留失败，请稍后重试");
             }

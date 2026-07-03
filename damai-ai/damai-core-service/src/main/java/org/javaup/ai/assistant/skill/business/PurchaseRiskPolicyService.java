@@ -1,12 +1,19 @@
 package org.javaup.ai.assistant.skill.business;
 
 import cn.hutool.core.collection.CollectionUtil;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.javaup.ai.ai.function.dto.CreateOrderFunctionDto;
 import org.javaup.ai.context.AiRequestContextHolder;
 import org.javaup.ai.entity.AiAction;
+import org.javaup.ai.entity.AiPurchaseReservationAction;
+import org.javaup.ai.mapper.AiPurchaseReservationActionMapper;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
@@ -18,6 +25,16 @@ public class PurchaseRiskPolicyService {
 
     private static final Pattern CN_MOBILE = Pattern.compile("^1\\d{10}$");
     private static final int MAX_TICKET_COUNT = 6;
+    private static final Duration APPROVAL_WINDOW = Duration.ofMinutes(5);
+
+    private final AiPurchaseReservationActionMapper reservationActionMapper;
+    private final RedisTemplate<String, Object> redisTemplate;
+
+    public PurchaseRiskPolicyService(AiPurchaseReservationActionMapper reservationActionMapper,
+                                     @Qualifier("cacheRedisTemplate") RedisTemplate<String, Object> redisTemplate) {
+        this.reservationActionMapper = reservationActionMapper;
+        this.redisTemplate = redisTemplate;
+    }
 
     public void validatePreviewRequest(CreateOrderFunctionDto request) {
         if (request == null) {
@@ -58,6 +75,42 @@ public class PurchaseRiskPolicyService {
         validateTicketCount(snapshot.getTicketCount(), snapshot.getTicketUserIds());
         if (snapshot.getProgramId() == null || snapshot.getTicketCategoryId() == null || snapshot.getTicketCategoryPrice() == null) {
             throw new RuntimeException("购票快照中的节目或票档信息不完整，请重新生成购票预览");
+        }
+        validateApprovalFrequency(snapshot, action);
+    }
+
+    private void validateApprovalFrequency(PurchaseActionSnapshot snapshot, AiAction action) {
+        String currentUserId = String.valueOf(AiRequestContextHolder.getRequiredUser().getUserId());
+        if (!StringUtils.hasText(currentUserId)) {
+            throw new RuntimeException("无法识别当前登录用户，请重新登录后再审批");
+        }
+
+        String actionKey = "damai:ai:purchase:approve:action:" + action.getActionId();
+        Boolean firstActionApprove = redisTemplate.opsForValue()
+                .setIfAbsent(actionKey, "1", APPROVAL_WINDOW);
+        if (Boolean.FALSE.equals(firstActionApprove)) {
+            throw new RuntimeException("该购票审批已经提交过，请勿重复点击");
+        }
+
+        String userTicketKey = "damai:ai:purchase:approve:user-ticket:" + currentUserId + ":"
+                + snapshot.getProgramId() + ":" + snapshot.getTicketCategoryId();
+        Boolean firstTicketApprove = redisTemplate.opsForValue()
+                .setIfAbsent(userTicketKey, action.getActionId(), APPROVAL_WINDOW);
+        if (Boolean.FALSE.equals(firstTicketApprove)) {
+            throw new RuntimeException("同一用户同一节目同一票档正在处理其他AI购票请求，请稍后再试");
+        }
+
+        Date windowStart = Date.from(Instant.now().minus(APPROVAL_WINDOW));
+        Long activeSimilarReservations = reservationActionMapper.selectCount(Wrappers.lambdaQuery(AiPurchaseReservationAction.class)
+                .eq(AiPurchaseReservationAction::getUserId, snapshot.getUserId())
+                .eq(AiPurchaseReservationAction::getProgramId, snapshot.getProgramId())
+                .eq(AiPurchaseReservationAction::getTicketCategoryId, snapshot.getTicketCategoryId())
+                .ne(AiPurchaseReservationAction::getActionId, action.getActionId())
+                .in(AiPurchaseReservationAction::getReservationStatus, List.of("RESERVED", "CONFIRMED"))
+                .ge(AiPurchaseReservationAction::getCreateTime, windowStart)
+                .eq(AiPurchaseReservationAction::getStatus, 1));
+        if (activeSimilarReservations != null && activeSimilarReservations > 0) {
+            throw new RuntimeException("近期已有同节目同票档AI购票请求，请稍后再试或查看订单状态");
         }
     }
 
