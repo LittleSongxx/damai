@@ -1,4 +1,4 @@
-package org.javaup.ai.assistant.skill.knowledge;
+package org.javaup.ai.runtime.contract;
 
 public record SourceRef(
         String refId,

@@ -18,6 +18,8 @@ import org.javaup.ai.mapper.AiRagEvalResultMapper;
 import org.javaup.ai.mapper.AiRagEvalRunMapper;
 import org.javaup.ai.mapper.RagChunkMapper;
 import org.javaup.ai.rag.RagRetrievalFacade;
+import org.javaup.ai.rag.RetrievalStrategy;
+import org.javaup.ai.rag.channel.KnowledgeRetrievalFilter;
 import org.javaup.ai.vo.RagEvalRunRequest;
 import org.javaup.ai.vo.RagSearchResultVo;
 import org.javaup.ai.vo.RagSourceVo;
@@ -1294,7 +1296,9 @@ public class RagEvalService {
         }
 
         RagSearchResultVo searchResult = retrievalFacade.retrieve(
-                evalCase.getQuestion(), normalizedTopK, normalizedEnableRerank);
+                evalCase.getQuestion(),
+                RetrievalStrategy.standardHybrid(normalizedTopK, normalizedEnableRerank, false, "rag eval fallback"),
+                KnowledgeRetrievalFilter.empty());
         List<String> chunkIds = searchResult != null && searchResult.getSources() != null
                 ? searchResult.getSources().stream()
                 .map(RagSourceVo::getChunkId)

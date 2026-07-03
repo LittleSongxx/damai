@@ -6,6 +6,7 @@ import org.javaup.ai.rag.channel.SearchContext;
 import org.javaup.ai.rag.engine.MultiChannelRetrievalEngine;
 import org.javaup.ai.service.AdvancedQueryService;
 import org.javaup.ai.service.RagSearchBackendService;
+import org.javaup.ai.service.SentenceWindowService;
 import org.javaup.ai.vo.RagSearchResultVo;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
@@ -25,44 +26,54 @@ public class RagRetrievalFacade {
     private final MultiChannelRetrievalEngine retrievalEngine;
     private final AdvancedQueryService advancedQueryService;
     private final RagSearchBackendService searchBackendService;
+    private final SentenceWindowService sentenceWindowService;
 
-    public RagSearchResultVo retrieveSimple(String query, int topK) {
-        return retrieveSimple(query, topK, KnowledgeRetrievalFilter.empty());
-    }
-
-    public RagSearchResultVo retrieveSimple(String query, int topK, KnowledgeRetrievalFilter filter) {
+    public RagSearchResultVo retrieve(String query, RetrievalStrategy strategy, KnowledgeRetrievalFilter filter) {
+        RetrievalStrategy effectiveStrategy = strategy == null
+                ? RetrievalStrategy.standardHybrid(5, true, false, "default facade strategy")
+                : strategy;
+        if (effectiveStrategy.profile() == RetrievalStrategyProfile.HANDOFF_OR_CLARIFY) {
+            return RagSearchResultVo.builder()
+                    .originalQuery(query)
+                    .normalizedQuery(query)
+                    .rewrittenQuery(query)
+                    .documents(List.of())
+                    .sources(List.of())
+                    .metadata(Map.of("retrievalBoundary", BOUNDARY_NAME,
+                            "strategyProfile", effectiveStrategy.profile().name(),
+                            "strategyReason", effectiveStrategy.reason()))
+                    .build();
+        }
+        AdvancedQueryService.QueryRewriteResult rewrite = effectiveStrategy.enableQueryRewrite()
+                ? advancedQueryService.rewriteQuery(query)
+                : new AdvancedQueryService.QueryRewriteResult(query, List.of(query));
+        String primary = rewrite.primaryQuery();
+        List<String> variants = rewrite.allQueries();
+        if (effectiveStrategy.enableEntityExpansion()) {
+            String expanded = advancedQueryService.expandWithEntities(primary);
+            if (expanded != null && !expanded.equals(primary)) {
+                primary = expanded;
+                variants = appendVariant(variants, expanded);
+            }
+        }
         SearchContext context = SearchContext.builder()
                 .originalQuery(query)
-                .rewrittenQuery(query)
-                .queryVariants(List.of(query))
-                .queryType(AdvancedQueryService.QueryType.MIXED)
-                .topK(topK)
-                .enableRerank(false)
-                .now(System.currentTimeMillis())
-                .filter(filter == null ? KnowledgeRetrievalFilter.empty() : filter)
-                .metadata(Map.of("retrievalBoundary", BOUNDARY_NAME, "mode", "simple"))
-                .build();
-        return withResolvedDocuments(retrievalEngine.retrieveSimple(context), "simple", false);
-    }
-
-    public RagSearchResultVo retrieve(String query, int topK, boolean enableRerank) {
-        return retrieve(query, topK, enableRerank, KnowledgeRetrievalFilter.empty());
-    }
-
-    public RagSearchResultVo retrieve(String query, int topK, boolean enableRerank, KnowledgeRetrievalFilter filter) {
-        AdvancedQueryService.QueryRewriteResult rewrite = advancedQueryService.rewriteQuery(query);
-        SearchContext context = SearchContext.builder()
-                .originalQuery(query)
-                .rewrittenQuery(rewrite.primaryQuery())
-                .queryVariants(rewrite.allQueries())
+                .rewrittenQuery(primary)
+                .queryVariants(variants)
                 .queryType(rewrite.queryType())
-                .topK(topK)
-                .enableRerank(enableRerank)
+                .topK(effectiveStrategy.topK())
+                .enableRerank(effectiveStrategy.enableRerank())
+                .strategy(effectiveStrategy)
                 .now(System.currentTimeMillis())
                 .filter(filter == null ? KnowledgeRetrievalFilter.empty() : filter)
-                .metadata(Map.of("retrievalBoundary", BOUNDARY_NAME, "mode", "full"))
+                .metadata(Map.of("retrievalBoundary", BOUNDARY_NAME,
+                        "mode", effectiveStrategy.profile().name(),
+                        "strategyProfile", effectiveStrategy.profile().name(),
+                        "strategyReason", effectiveStrategy.reason(),
+                        "enabledChannels", effectiveStrategy.enabledChannels()))
                 .build();
-        return withResolvedDocuments(retrievalEngine.retrieve(context), "full", enableRerank);
+        return withResolvedDocuments(retrievalEngine.retrieve(context), effectiveStrategy.profile().name(),
+                effectiveStrategy.enableRerank(), effectiveStrategy);
     }
 
     public List<Document> resolveDocuments(RagSearchResultVo result) {
@@ -71,7 +82,8 @@ public class RagRetrievalFacade {
 
     private RagSearchResultVo withResolvedDocuments(RagSearchResultVo result,
                                                     String mode,
-                                                    boolean enableRerank) {
+                                                    boolean enableRerank,
+                                                    RetrievalStrategy strategy) {
         if (result == null) {
             return null;
         }
@@ -80,6 +92,9 @@ public class RagRetrievalFacade {
         if (documents == null || documents.isEmpty()) {
             documents = searchBackendService.resolveDocuments(result.getSources());
             resolvedByFacade = true;
+        }
+        if (strategy != null && strategy.enableSentenceWindow()) {
+            documents = sentenceWindowService.expand(documents);
         }
         return rebuild(result, documents, mode, enableRerank, resolvedByFacade);
     }
@@ -122,5 +137,17 @@ public class RagRetrievalFacade {
 
     private int size(List<?> values) {
         return values == null ? 0 : values.size();
+    }
+
+    private List<String> appendVariant(List<String> variants, String value) {
+        if (variants == null || variants.isEmpty()) {
+            return List.of(value);
+        }
+        if (variants.contains(value)) {
+            return variants;
+        }
+        java.util.ArrayList<String> merged = new java.util.ArrayList<>(variants);
+        merged.add(value);
+        return merged;
     }
 }

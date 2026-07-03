@@ -155,6 +155,8 @@ export function useAssistantRuntime() {
   const ragEvalReport = ref(null)
   const ragBaselineRunId = ref('')
   const ragEvalComparison = ref(null)
+  const ragBenchmarkResult = ref(null)
+  const ragBenchmarkRunning = ref(false)
   const ragBadCases = ref([])
   const ragIngestionTasks = ref([])
   const ragLastReindexJob = ref(null)
@@ -371,6 +373,8 @@ export function useAssistantRuntime() {
       evalSuiteRunning.value = ''
       ragEvalReport.value = null
       ragEvalComparison.value = null
+      ragBenchmarkResult.value = null
+      ragBenchmarkRunning.value = false
       ragBaselineRunId.value = ''
       ragBadCases.value = []
       ragIngestionTasks.value = []
@@ -498,6 +502,22 @@ export function useAssistantRuntime() {
     const result = await ragEvalAPI.compareRun(evalRunId, baselineRunId)
     ragEvalComparison.value = result?.data || null
     return result
+  }
+
+  const runRagBenchmark = async (payload = {}) => {
+    ragBenchmarkRunning.value = true
+    try {
+      const result = await ragEvalAPI.runBenchmark({
+        datasetId: payload.datasetId || 'default-golden',
+        datasetVersion: payload.datasetVersion || '',
+        limit: payload.limit || 20,
+        profiles: payload.profiles || ['STANDARD_HYBRID', 'ENHANCED_RECOVERY']
+      })
+      ragBenchmarkResult.value = result?.data || null
+      return result
+    } finally {
+      ragBenchmarkRunning.value = false
+    }
   }
 
   const createRagReindexJob = async (taskType = 'full') => {
@@ -1028,6 +1048,8 @@ export function useAssistantRuntime() {
     ragEvalReport,
     ragBaselineRunId,
     ragEvalComparison,
+    ragBenchmarkResult,
+    ragBenchmarkRunning,
     ragBadCases,
     ragIngestionTasks,
     ragLastReindexJob,
@@ -1051,6 +1073,7 @@ export function useAssistantRuntime() {
     resumeRun,
     replayRun,
     compareRagEvalWithBaseline,
+    runRagBenchmark,
     runEvalSuite,
     refreshEvalSuiteRun,
     convertBadCaseToEval,

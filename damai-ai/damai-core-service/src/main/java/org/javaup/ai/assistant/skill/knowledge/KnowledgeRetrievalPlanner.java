@@ -80,28 +80,6 @@ public class KnowledgeRetrievalPlanner {
         return KnowledgeRetrievalPlan.Complexity.SIMPLE;
     }
 
-    /**
-     * LLM-driven corrective query reformulation.
-     */
-    public String llmCorrectiveQuery(String rewrittenQuery, String normalizedQuery, String missingInfo) {
-        String missing = missingInfo != null && !missingInfo.isBlank() ? missingInfo : "关键细节";
-        try {
-            String prompt = String.format("""
-                    之前的检索关键词是 "%s"。检索时缺少以下信息：%s。
-                    请生成一个更精准的检索查询词，用于补充检索缺少的信息。
-                    只输出查询词本身，不要加任何前缀或解释，一行输出。
-                    """, rewrittenQuery, missing);
-
-            String result = advancedQueryService.generateHypotheticalDocument(prompt);
-            if (result != null && !result.isBlank()) {
-                return result.trim();
-            }
-        } catch (Exception e) {
-            log.warn("LLM corrective query failed, using fallback", e);
-        }
-        return rewrittenQuery;
-    }
-
     private boolean isComplex(String query) {
         if (query == null) return false;
         if (query.length() > 30) return true;

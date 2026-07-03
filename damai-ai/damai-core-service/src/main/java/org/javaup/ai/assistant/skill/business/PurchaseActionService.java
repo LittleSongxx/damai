@@ -17,7 +17,6 @@ import org.javaup.ai.vo.TicketCategoryVo;
 import org.javaup.ai.vo.TicketUserVo;
 import org.javaup.ai.service.PurchaseReservationAuditService;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.Date;
@@ -35,7 +34,6 @@ public class PurchaseActionService {
     private final PurchaseRiskPolicyService riskPolicyService;
     private final PurchaseReservationAuditService reservationAuditService;
 
-    @Transactional(rollbackFor = Exception.class)
     public AssistantActionResultVo approve(String runId, String actionId) {
         AiAction action = assistantRunService.getAction(runId, actionId);
         if (action == null) {
@@ -94,6 +92,7 @@ public class PurchaseActionService {
             }
             reservationAuditService.reserved(runId, actionId, snapshot, reservation, reservationIdempotencyKey);
             String orderIdempotencyKey = action.getIdempotencyKey() + ":reservation:" + reservation.reservationId();
+            reservationAuditService.confirmRequested(reservation.reservationId(), orderIdempotencyKey);
             String orderNumber = ticketReservationGateway.confirm(snapshot, reservation, orderIdempotencyKey);
             reservationAuditService.confirmed(reservation.reservationId(), orderNumber);
 
@@ -116,6 +115,37 @@ public class PurchaseActionService {
                     "status", AssistantActionStatus.COMPLETED.name()
             ));
             return resultVo;
+        } catch (ReservationGatewayException ex) {
+            if (ex.unknownResult()) {
+                AssistantActionResultVo unknown = handleUnknownResult(runId, action, reservation, ex);
+                assistantRunService.appendEvent(runId, AssistantEventTypes.TOOL_COMPLETED, Map.of(
+                        "runId", runId,
+                        "toolName", "createOrder",
+                        "toolType", "business",
+                        "status", "UNKNOWN",
+                        "reservationId", reservation == null ? "" : reservation.reservationId(),
+                        "failureCategory", ex.failureCategory().name(),
+                        "message", ex.getMessage()
+                ));
+                return unknown;
+            }
+            releaseReservation(reservation, "ORDER_CREATE_FAILED:" + ex.getMessage());
+            if (reservation != null) {
+                reservationAuditService.failed(reservation.reservationId(), ex.getMessage());
+            }
+            AssistantActionResultVo failed = result(action.getActionId(), AssistantActionStatus.FAILED.name(), ex.getMessage());
+            assistantRunService.markActionFailed(action, "ORDER_CREATE_FAILED", ex.getMessage(), failed);
+            failRun(runId, "ACTION_FAILED", ex.getMessage());
+            assistantRunService.appendEvent(runId, AssistantEventTypes.TOOL_COMPLETED, Map.of(
+                    "runId", runId,
+                    "toolName", "createOrder",
+                    "toolType", "business",
+                    "status", "FAILED",
+                    "reservationId", reservation == null ? "" : reservation.reservationId(),
+                    "failureCategory", ex.failureCategory().name(),
+                    "message", ex.getMessage()
+            ));
+            return failed;
         } catch (RuntimeException ex) {
             releaseReservation(reservation, "ORDER_CREATE_FAILED:" + ex.getMessage());
             if (reservation != null) {
@@ -136,7 +166,39 @@ public class PurchaseActionService {
         }
     }
 
-    @Transactional(rollbackFor = Exception.class)
+    private AssistantActionResultVo handleUnknownResult(String runId,
+                                                        AiAction action,
+                                                        TicketReservation reservation,
+                                                        ReservationGatewayException ex) {
+        if (reservation != null && reservation.reservationId() != null) {
+            try {
+                TicketReservation latest = ticketReservationGateway.status(reservation.reservationId());
+                if ("CONFIRMED".equals(latest.reservationStatus()) && latest.confirmedOrderNumber() != null) {
+                    AssistantActionResultVo completed = result(action.getActionId(), AssistantActionStatus.COMPLETED.name(), "订单已创建");
+                    completed.setOrderNumber(latest.confirmedOrderNumber());
+                    completed.setOrderListAddress(DaMaiConstant.ORDER_LIST_ADDRESS);
+                    reservationAuditService.confirmed(reservation.reservationId(), latest.confirmedOrderNumber());
+                    assistantRunService.markActionCompleted(action, completed, latest.confirmedOrderNumber());
+                    AiRun run = assistantRunService.getRunInternal(runId);
+                    assistantRunService.markCompleted(run, "ACTION_APPROVED", "订单已创建");
+                    return completed;
+                }
+                reservationAuditService.unknown(reservation.reservationId(), ex.failureCategory(), ex.getMessage());
+            } catch (RuntimeException statusEx) {
+                reservationAuditService.unknown(reservation.reservationId(), ex.failureCategory(),
+                        ex.getMessage() + "; status check failed: " + statusEx.getMessage());
+            }
+        }
+        AssistantActionResultVo unknown = result(action.getActionId(), AssistantActionStatus.ORDERING.name(),
+                "订单状态正在确认中，请稍后查看结果；我们不会重复下单。");
+        assistantRunService.markActionUnknown(action, "ORDER_RESULT_UNKNOWN", ex.getMessage(), unknown);
+        AiRun run = assistantRunService.getRunInternal(runId);
+        if (run != null) {
+            assistantRunService.markWaitingAction(run, "ORDER_RESULT_UNKNOWN", unknown.getMessage());
+        }
+        return unknown;
+    }
+
     public AssistantActionResultVo reject(String runId, String actionId) {
         AiAction action = assistantRunService.getAction(runId, actionId);
         if (action == null) {
@@ -215,15 +277,24 @@ public class PurchaseActionService {
         if (snapshot == null || snapshot.getReservationId() == null || snapshot.getReservationId().isBlank()) {
             return;
         }
-        ticketReservationGateway.release(snapshot.getReservationId(), reason);
+        try {
+            ticketReservationGateway.release(snapshot.getReservationId(), reason);
+            reservationAuditService.released(snapshot.getReservationId(), reason);
+        } catch (ReservationGatewayException ex) {
+            reservationAuditService.compensationPending(snapshot.getReservationId(), reason + ":" + ex.getMessage());
+        }
     }
 
     private void releaseReservation(TicketReservation reservation, String reason) {
         if (reservation == null || reservation.reservationId() == null || reservation.reservationId().isBlank()) {
             return;
         }
-        ticketReservationGateway.release(reservation.reservationId(), reason);
-        reservationAuditService.released(reservation.reservationId(), reason);
+        try {
+            ticketReservationGateway.release(reservation.reservationId(), reason);
+            reservationAuditService.released(reservation.reservationId(), reason);
+        } catch (ReservationGatewayException ex) {
+            reservationAuditService.compensationPending(reservation.reservationId(), reason + ":" + ex.getMessage());
+        }
     }
 
     private AssistantActionResultVo statusAwareResult(AiAction action) {

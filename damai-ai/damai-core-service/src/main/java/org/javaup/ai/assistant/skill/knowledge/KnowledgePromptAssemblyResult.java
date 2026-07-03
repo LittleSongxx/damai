@@ -1,5 +1,7 @@
 package org.javaup.ai.assistant.skill.knowledge;
 
+import org.javaup.ai.runtime.contract.SourceRef;
+
 import java.util.List;
 import java.util.Map;
 

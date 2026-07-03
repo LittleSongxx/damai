@@ -307,6 +307,16 @@ public class AssistantRunService {
     }
 
     @Transactional(rollbackFor = Exception.class)
+    public void markActionUnknown(AiAction action, String failureCode, String failureMessage, Object result) {
+        action.setActionStatus(AssistantActionStatus.ORDERING.name());
+        action.setFailureCode(failureCode);
+        action.setFailureMessage(failureMessage);
+        action.setResultJson(result == null ? null : JSON.toJSONString(result));
+        action.setVersion(action.getVersion() == null ? 1 : action.getVersion() + 1);
+        actionMapper.updateById(action);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
     public void markActionExpired(AiAction action, Object result) {
         action.setActionStatus(AssistantActionStatus.EXPIRED.name());
         action.setFailureCode("ACTION_EXPIRED");

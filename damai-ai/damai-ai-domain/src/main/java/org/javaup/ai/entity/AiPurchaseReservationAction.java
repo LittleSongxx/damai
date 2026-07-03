@@ -45,6 +45,20 @@ public class AiPurchaseReservationAction extends BaseTableData {
 
     private String failureMessage;
 
+    private String sagaStatus;
+
+    private String failureCategory;
+
+    private String compensationStatus;
+
+    private String confirmAttemptId;
+
+    private Date lastCheckedAt;
+
+    private Integer retryCount;
+
+    private String requestHash;
+
     private String operatorId;
 
     private String extJson;

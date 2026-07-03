@@ -24,7 +24,7 @@ import java.util.Objects;
 @Component
 public class ParentBlockElevationPostProcessor implements SearchResultPostProcessor {
 
-    @Value("${damai.ai.retrieval.parent-elevation-enabled:false}")
+    @Value("${damai.ai.retrieval.parent-elevation-enabled:true}")
     private boolean enabled;
 
     @Override

@@ -11,4 +11,8 @@ public interface TicketReservationGateway {
     String confirm(PurchaseActionSnapshot snapshot, TicketReservation reservation, String idempotencyKey);
 
     void release(String reservationId, String reason);
+
+    default TicketReservation status(String reservationId) {
+        throw new UnsupportedOperationException("reservation status query is not implemented");
+    }
 }

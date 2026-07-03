@@ -2,6 +2,7 @@ package org.javaup.ai.rag.channel;
 
 import lombok.Builder;
 import lombok.Data;
+import org.javaup.ai.rag.RetrievalStrategy;
 import org.javaup.ai.service.AdvancedQueryService;
 
 import java.util.List;
@@ -17,6 +18,7 @@ public class SearchContext {
     private int topK;
     private int candidateTopK;
     private boolean enableRerank;
+    private RetrievalStrategy strategy;
     private String runId;
     private Map<String, Object> metadata;
     private KnowledgeRetrievalFilter filter;
@@ -43,5 +45,32 @@ public class SearchContext {
                 .validAt(now)
                 .build();
         return explicit.merge(inline);
+    }
+
+    public boolean denseEnabled() {
+        return strategy == null || strategy.enableDense();
+    }
+
+    public boolean sparseEnabled() {
+        return strategy == null || strategy.enableSparse();
+    }
+
+    public boolean hydeEnabled() {
+        return strategy != null && strategy.enableHyde();
+    }
+
+    public boolean sentenceWindowEnabled() {
+        return strategy != null && strategy.enableSentenceWindow();
+    }
+
+    public boolean parentElevationEnabled() {
+        return strategy != null && strategy.enableParentElevation();
+    }
+
+    public long channelTimeoutMs(long defaultTimeoutMs) {
+        if (strategy == null || strategy.latencyBudgetMs() <= 0) {
+            return defaultTimeoutMs;
+        }
+        return Math.max(500L, strategy.latencyBudgetMs());
     }
 }

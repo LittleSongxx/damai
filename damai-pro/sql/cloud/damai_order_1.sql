@@ -740,3 +740,22 @@ FROM
          (SELECT 0 AS c UNION SELECT 1) t3
     ) numbers
 WHERE n >= 896 AND n <= 1023;
+
+CREATE TABLE IF NOT EXISTS `d_ops_event_outbox` (
+  `id` bigint NOT NULL,
+  `event_id` varchar(96) NOT NULL COMMENT '事件ID',
+  `routing_key` varchar(128) NOT NULL COMMENT 'RabbitMQ routing key',
+  `event_type` varchar(64) NOT NULL COMMENT '事件类型',
+  `event_json` json NOT NULL COMMENT '事件内容',
+  `publish_status` varchar(32) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/FAILED/PUBLISHED',
+  `retry_count` int NOT NULL DEFAULT 0 COMMENT '重试次数',
+  `next_retry_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '下次重试时间',
+  `published_at` datetime NULL COMMENT '发布时间',
+  `last_error` varchar(1024) NULL COMMENT '最近错误',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `edit_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `status` tinyint NOT NULL DEFAULT 1,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ops_event_outbox_event` (`event_id`),
+  KEY `idx_ops_event_outbox_status` (`publish_status`, `next_retry_at`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='OpsEvent outbox';

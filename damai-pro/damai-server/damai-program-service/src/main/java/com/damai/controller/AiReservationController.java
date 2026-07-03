@@ -5,6 +5,7 @@ import com.damai.dto.AiReservationConfirmDto;
 import com.damai.dto.AiReservationCreateDto;
 import com.damai.dto.AiReservationReleaseDto;
 import com.damai.service.AiReservationService;
+import com.damai.service.InternalAccessGuard;
 import com.damai.vo.AiReservationVo;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -22,10 +23,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class AiReservationController {
 
     private final AiReservationService aiReservationService;
+    private final InternalAccessGuard internalAccessGuard;
 
     @PostMapping
     public ApiResponse<AiReservationVo> reserve(@Valid @RequestBody AiReservationCreateDto request,
+                                                @RequestHeader(value = "X-Internal-Token", required = false) String internalToken,
                                                 @RequestHeader(value = "X-Idempotency-Key", required = false) String idempotencyKey) {
+        internalAccessGuard.require(internalToken);
         if (request.getIdempotencyKey() == null || request.getIdempotencyKey().isBlank()) {
             request.setIdempotencyKey(idempotencyKey);
         }
@@ -35,7 +39,9 @@ public class AiReservationController {
     @PostMapping("/{reservationId}/confirm")
     public ApiResponse<AiReservationVo> confirm(@PathVariable String reservationId,
                                                 @RequestBody(required = false) AiReservationConfirmDto request,
+                                                @RequestHeader(value = "X-Internal-Token", required = false) String internalToken,
                                                 @RequestHeader(value = "X-Idempotency-Key", required = false) String idempotencyKey) {
+        internalAccessGuard.require(internalToken);
         String key = request == null || request.getIdempotencyKey() == null || request.getIdempotencyKey().isBlank()
                 ? idempotencyKey
                 : request.getIdempotencyKey();
@@ -44,13 +50,17 @@ public class AiReservationController {
 
     @PostMapping("/{reservationId}/release")
     public ApiResponse<AiReservationVo> release(@PathVariable String reservationId,
+                                                @RequestHeader(value = "X-Internal-Token", required = false) String internalToken,
                                                 @RequestBody(required = false) AiReservationReleaseDto request) {
+        internalAccessGuard.require(internalToken);
         String reason = request == null ? null : request.getReason();
         return ApiResponse.ok(aiReservationService.release(reservationId, reason));
     }
 
     @GetMapping("/{reservationId}")
-    public ApiResponse<AiReservationVo> status(@PathVariable String reservationId) {
+    public ApiResponse<AiReservationVo> status(@PathVariable String reservationId,
+                                               @RequestHeader(value = "X-Internal-Token", required = false) String internalToken) {
+        internalAccessGuard.require(internalToken);
         return ApiResponse.ok(aiReservationService.status(reservationId));
     }
 }

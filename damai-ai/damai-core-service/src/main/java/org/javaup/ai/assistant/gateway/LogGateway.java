@@ -6,6 +6,7 @@ import com.alibaba.fastjson2.JSONObject;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.easyes.core.conditions.select.LambdaEsQueryWrapper;
+import org.javaup.ai.es.document.LogDocument;
 import org.javaup.ai.es.mapper.OpsLogMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;

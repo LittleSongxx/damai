@@ -13,18 +13,21 @@ import com.damai.enums.BaseCode;
 import com.damai.enums.ProgramOrderVersion;
 import com.damai.exception.DaMaiFrameException;
 import com.damai.mapper.AiReservationMapper;
-import com.damai.service.ops.OpsEventPublisher;
 import com.damai.service.domain.CreateOrderTemporaryData;
+import com.damai.service.ops.OpsEventPublisher;
 import com.damai.threadlocal.BaseParameterHolder;
 import com.damai.util.DateUtils;
 import com.damai.vo.AiReservationVo;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.DigestUtils;
 import org.springframework.util.StringUtils;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.List;
 import java.util.Objects;
@@ -37,10 +40,6 @@ import java.util.concurrent.TimeUnit;
 public class AiReservationService {
 
     private static final int DEFAULT_TTL_SECONDS = 15 * 60;
-    private static final String RESERVED = "RESERVED";
-    private static final String CONFIRMED = "CONFIRMED";
-    private static final String RELEASED = "RELEASED";
-    private static final String EXPIRED = "EXPIRED";
 
     private final AiReservationMapper aiReservationMapper;
     private final ProgramOrderService programOrderService;
@@ -55,8 +54,10 @@ public class AiReservationService {
             throw new DaMaiFrameException(BaseCode.PARAMETER_ERROR.getCode(), "AI reservation 参数缺失");
         }
         String idempotencyKey = normalizeIdempotencyKey(request.getIdempotencyKey());
+        String requestHash = requestHash(orderCreate);
         AiReservation existing = findByIdempotencyKey(idempotencyKey);
         if (existing != null) {
+            ensureSameRequest(existing, requestHash);
             return toVo(existing, "reservation 已存在");
         }
         AiReservation active = findActiveSameTicket(orderCreate);
@@ -65,39 +66,46 @@ public class AiReservationService {
                     "同一用户同一节目票档已有未完成 AI 预留，请先确认或释放");
         }
 
-        CreateOrderTemporaryData temporaryData = programOrderService.reserveForAi(orderCreate);
-        Date now = DateUtils.now();
-        Date expiresAt = new Date(now.getTime() + ttlSeconds(request) * 1000L);
-        AiReservation reservation = new AiReservation();
-        reservation.setId(uidGenerator.getUid());
-        reservation.setReservationId("air_" + uidGenerator.getUid());
-        reservation.setUserId(orderCreate.getUserId());
-        reservation.setProgramId(orderCreate.getProgramId());
-        reservation.setTicketCategoryId(resolveTicketCategoryId(orderCreate, temporaryData.getPurchaseSeatList()));
-        reservation.setTicketCount(resolveTicketCount(orderCreate, temporaryData.getPurchaseSeatList()));
-        reservation.setTicketUserIdsJson(JSON.toJSONString(orderCreate.getTicketUserIdList()));
-        reservation.setPurchaseSeatsJson(JSON.toJSONString(temporaryData.getPurchaseSeatList()));
-        reservation.setIdentifierId(temporaryData.getIdentifierId());
-        reservation.setReservationStatus(RESERVED);
-        reservation.setExpiresAt(expiresAt);
-        reservation.setIdempotencyKey(idempotencyKey);
-        reservation.setSourceRunId(request.getSourceRunId());
-        reservation.setSourceActionId(request.getSourceActionId());
-        reservation.setCreateTime(now);
-        reservation.setEditTime(now);
-        reservation.setStatus(1);
-        aiReservationMapper.insert(reservation);
-        publishReservationEvent("AI_RESERVATION_CREATED", "ops.reservation.created", reservation, null);
-        return toVo(reservation, "reservation 已创建，库存已锁定");
+        AiReservation reservation = createIntent(request, idempotencyKey, requestHash);
+        try {
+            aiReservationMapper.insert(reservation);
+        } catch (DuplicateKeyException duplicateKeyException) {
+            AiReservation duplicated = findByIdempotencyKey(idempotencyKey);
+            ensureSameRequest(duplicated, requestHash);
+            return toVo(duplicated, "reservation 已存在");
+        }
+
+        claimStatus(reservation.getReservationId(), AiReservationStatus.STARTED, AiReservationStatus.RESERVING, null, null);
+        reservation = getRequired(reservation.getReservationId());
+        try {
+            CreateOrderTemporaryData temporaryData = programOrderService.reserveForAi(orderCreate);
+            reservation.setTicketCategoryId(resolveTicketCategoryId(orderCreate, temporaryData.getPurchaseSeatList()));
+            reservation.setTicketCount(resolveTicketCount(orderCreate, temporaryData.getPurchaseSeatList()));
+            reservation.setPurchaseSeatsJson(JSON.toJSONString(temporaryData.getPurchaseSeatList()));
+            reservation.setIdentifierId(temporaryData.getIdentifierId());
+            reservation.setReservationStatus(AiReservationStatus.RESERVED);
+            reservation.setSagaStatus(AiReservationStatus.RESERVED);
+            reservation.setFailureCategory(null);
+            reservation.setLastError(null);
+            reservation.setEditTime(DateUtils.now());
+            aiReservationMapper.updateById(reservation);
+            publishReservationEvent("AI_RESERVATION_CREATED", "ops.reservation.created", reservation, null);
+            return toVo(reservation, "reservation 已创建，库存已锁定");
+        } catch (RuntimeException ex) {
+            markStatus(reservation, AiReservationStatus.FAILED, categorize(ex).name(), ex.getMessage());
+            publishReservationEvent("AI_RESERVATION_FAILED", "ops.reservation.failed", reservation, null);
+            throw ex;
+        }
     }
 
     @Transactional(rollbackFor = Exception.class)
     public AiReservationVo confirm(String reservationId, String idempotencyKey) {
         AiReservation reservation = getRequired(reservationId);
-        if (CONFIRMED.equals(reservation.getReservationStatus())) {
+        if (AiReservationStatus.CONFIRMED.equals(reservation.getReservationStatus())) {
             return toVo(reservation, "订单已创建");
         }
-        if (!RESERVED.equals(reservation.getReservationStatus())) {
+        if (!List.of(AiReservationStatus.RESERVED, AiReservationStatus.CONFIRMING, AiReservationStatus.UNKNOWN)
+                .contains(reservation.getReservationStatus())) {
             throw new DaMaiFrameException(BaseCode.OPERATE_ORDER_STATUS_NOT_PERMIT.getCode(),
                     "reservation 当前状态不可确认: " + reservation.getReservationStatus());
         }
@@ -106,35 +114,69 @@ public class AiReservationService {
             throw new DaMaiFrameException(BaseCode.OPERATION_IS_TOO_FREQUENT_PLEASE_TRY_AGAIN_LATER.getCode(),
                     "reservation 已过期，请重新发起购票预览");
         }
-        ProgramOrderCreateDto orderCreate = rebuildOrderCreate(reservation);
-        List<PurchaseSeat> purchaseSeats = parsePurchaseSeats(reservation);
-        String orderNumber = idempotencyService.execute(normalizeIdempotencyKey(idempotencyKey), orderCreate,
-                () -> programOrderService.createReservedOrder(orderCreate, purchaseSeats, ProgramOrderVersion.V4_VERSION.getValue()));
-        reservation.setReservationStatus(CONFIRMED);
-        reservation.setConfirmedOrderNumber(orderNumber);
-        reservation.setEditTime(DateUtils.now());
-        aiReservationMapper.updateById(reservation);
-        publishReservationEvent("AI_RESERVATION_CONFIRMED", "ops.reservation.confirmed", reservation, orderNumber);
-        return toVo(reservation, "订单已创建");
+        String normalizedIdempotencyKey = normalizeIdempotencyKey(idempotencyKey);
+        if (AiReservationStatus.RESERVED.equals(reservation.getReservationStatus())
+                && !claimStatus(reservationId, AiReservationStatus.RESERVED, AiReservationStatus.CONFIRMING, normalizedIdempotencyKey, null)) {
+            return toVo(getRequired(reservationId), "reservation 正在确认中");
+        }
+
+        reservation = getRequired(reservationId);
+        try {
+            ProgramOrderCreateDto orderCreate = rebuildOrderCreate(reservation);
+            List<PurchaseSeat> purchaseSeats = parsePurchaseSeats(reservation);
+            String orderNumber = idempotencyService.execute(normalizedIdempotencyKey, orderCreate,
+                    () -> programOrderService.createReservedOrder(orderCreate, purchaseSeats, ProgramOrderVersion.V4_VERSION.getValue()));
+            reservation.setReservationStatus(AiReservationStatus.CONFIRMED);
+            reservation.setSagaStatus(AiReservationStatus.CONFIRMED);
+            reservation.setConfirmedOrderNumber(orderNumber);
+            reservation.setFailureCategory(null);
+            reservation.setLastError(null);
+            reservation.setEditTime(DateUtils.now());
+            aiReservationMapper.updateById(reservation);
+            publishReservationEvent("AI_RESERVATION_CONFIRMED", "ops.reservation.confirmed", reservation, orderNumber);
+            return toVo(reservation, "订单已创建");
+        } catch (RuntimeException ex) {
+            AiReservationFailureCategory category = categorize(ex);
+            String nextStatus = category == AiReservationFailureCategory.DETERMINISTIC
+                    ? AiReservationStatus.FAILED
+                    : AiReservationStatus.UNKNOWN;
+            markStatus(reservation, nextStatus, category.name(), ex.getMessage());
+            publishReservationEvent("AI_RESERVATION_CONFIRM_UNKNOWN", "ops.reservation.confirm_unknown", reservation, null);
+            throw ex;
+        }
     }
 
     @Transactional(rollbackFor = Exception.class)
     public AiReservationVo release(String reservationId, String reason) {
         AiReservation reservation = getRequired(reservationId);
-        if (CONFIRMED.equals(reservation.getReservationStatus())) {
+        if (AiReservationStatus.CONFIRMED.equals(reservation.getReservationStatus())) {
             return toVo(reservation, "订单已确认，无需释放");
         }
-        if (RELEASED.equals(reservation.getReservationStatus()) || EXPIRED.equals(reservation.getReservationStatus())) {
+        if (AiReservationStatus.RELEASED.equals(reservation.getReservationStatus())
+                || AiReservationStatus.EXPIRED.equals(reservation.getReservationStatus())) {
             return toVo(reservation, "reservation 已释放");
         }
-        releaseLockedSeats(reservation);
-        reservation.setReservationStatus(RELEASED);
-        reservation.setReleasedAt(DateUtils.now());
-        reservation.setReleaseReason(StringUtils.hasText(reason) ? reason : "AI_RELEASE");
-        reservation.setEditTime(DateUtils.now());
-        aiReservationMapper.updateById(reservation);
-        publishReservationEvent("AI_RESERVATION_RELEASED", "ops.reservation.released", reservation, null);
-        return toVo(reservation, "reservation 已释放");
+        if (!claimStatus(reservationId, reservation.getReservationStatus(), AiReservationStatus.RELEASING, null, reason)) {
+            return toVo(getRequired(reservationId), "reservation 正在释放中");
+        }
+
+        reservation = getRequired(reservationId);
+        try {
+            releaseLockedSeats(reservation);
+            reservation.setReservationStatus(AiReservationStatus.RELEASED);
+            reservation.setSagaStatus(AiReservationStatus.RELEASED);
+            reservation.setReleasedAt(DateUtils.now());
+            reservation.setReleaseReason(StringUtils.hasText(reason) ? reason : "AI_RELEASE");
+            reservation.setFailureCategory(null);
+            reservation.setLastError(null);
+            reservation.setEditTime(DateUtils.now());
+            aiReservationMapper.updateById(reservation);
+            publishReservationEvent("AI_RESERVATION_RELEASED", "ops.reservation.released", reservation, null);
+            return toVo(reservation, "reservation 已释放");
+        } catch (RuntimeException ex) {
+            markStatus(reservation, AiReservationStatus.UNKNOWN, AiReservationFailureCategory.SIDE_EFFECT_UNKNOWN.name(), ex.getMessage());
+            throw ex;
+        }
     }
 
     public AiReservationVo status(String reservationId) {
@@ -145,7 +187,7 @@ public class AiReservationService {
     @Transactional(rollbackFor = Exception.class)
     public void expireDueReservations() {
         List<AiReservation> due = aiReservationMapper.selectList(Wrappers.lambdaQuery(AiReservation.class)
-                .eq(AiReservation::getReservationStatus, RESERVED)
+                .eq(AiReservation::getReservationStatus, AiReservationStatus.RESERVED)
                 .eq(AiReservation::getStatus, 1)
                 .lt(AiReservation::getExpiresAt, DateUtils.now())
                 .last("limit 100"));
@@ -160,29 +202,67 @@ public class AiReservationService {
     }
 
     private void expireOne(AiReservation reservation, String reason) {
-        releaseLockedSeats(reservation);
-        reservation.setReservationStatus(EXPIRED);
-        reservation.setReleasedAt(DateUtils.now());
-        reservation.setReleaseReason(reason);
-        reservation.setEditTime(DateUtils.now());
-        aiReservationMapper.updateById(reservation);
-        publishReservationEvent("AI_RESERVATION_EXPIRED", "ops.reservation.expired", reservation, null);
+        if (!claimStatus(reservation.getReservationId(), reservation.getReservationStatus(), AiReservationStatus.RELEASING, null, reason)) {
+            return;
+        }
+        reservation = getRequired(reservation.getReservationId());
+        try {
+            releaseLockedSeats(reservation);
+            reservation.setReservationStatus(AiReservationStatus.EXPIRED);
+            reservation.setSagaStatus(AiReservationStatus.EXPIRED);
+            reservation.setReleasedAt(DateUtils.now());
+            reservation.setReleaseReason(reason);
+            reservation.setEditTime(DateUtils.now());
+            aiReservationMapper.updateById(reservation);
+            publishReservationEvent("AI_RESERVATION_EXPIRED", "ops.reservation.expired", reservation, null);
+        } catch (RuntimeException ex) {
+            markStatus(reservation, AiReservationStatus.UNKNOWN, AiReservationFailureCategory.SIDE_EFFECT_UNKNOWN.name(), ex.getMessage());
+            throw ex;
+        }
     }
 
     private void releaseLockedSeats(AiReservation reservation) {
         programOrderService.releaseReservedSeats(reservation.getProgramId(), parsePurchaseSeats(reservation));
     }
 
+    private AiReservation createIntent(AiReservationCreateDto request, String idempotencyKey, String requestHash) {
+        ProgramOrderCreateDto orderCreate = request.getOrderCreate();
+        Date now = DateUtils.now();
+        Date expiresAt = new Date(now.getTime() + ttlSeconds(request) * 1000L);
+        AiReservation reservation = new AiReservation();
+        reservation.setId(uidGenerator.getUid());
+        reservation.setReservationId("air_" + uidGenerator.getUid());
+        reservation.setUserId(orderCreate.getUserId());
+        reservation.setProgramId(orderCreate.getProgramId());
+        reservation.setTicketCategoryId(orderCreate.getTicketCategoryId());
+        reservation.setTicketCount(orderCreate.getTicketCount());
+        reservation.setTicketUserIdsJson(JSON.toJSONString(orderCreate.getTicketUserIdList()));
+        reservation.setPurchaseSeatsJson("[]");
+        reservation.setIdentifierId(0L);
+        reservation.setReservationStatus(AiReservationStatus.STARTED);
+        reservation.setSagaStatus(AiReservationStatus.STARTED);
+        reservation.setExpiresAt(expiresAt);
+        reservation.setIdempotencyKey(idempotencyKey);
+        reservation.setRequestHash(requestHash);
+        reservation.setRetryCount(0);
+        reservation.setSourceRunId(request.getSourceRunId());
+        reservation.setSourceActionId(request.getSourceActionId());
+        reservation.setCreateTime(now);
+        reservation.setEditTime(now);
+        reservation.setStatus(1);
+        return reservation;
+    }
+
     private AiReservation findActiveSameTicket(ProgramOrderCreateDto orderCreate) {
-        AiReservation reservation = aiReservationMapper.selectOne(Wrappers.lambdaQuery(AiReservation.class)
+        return aiReservationMapper.selectOne(Wrappers.lambdaQuery(AiReservation.class)
                 .eq(AiReservation::getUserId, orderCreate.getUserId())
                 .eq(AiReservation::getProgramId, orderCreate.getProgramId())
                 .eq(AiReservation::getTicketCategoryId, orderCreate.getTicketCategoryId())
-                .eq(AiReservation::getReservationStatus, RESERVED)
+                .in(AiReservation::getReservationStatus, List.of(AiReservationStatus.STARTED, AiReservationStatus.RESERVING,
+                        AiReservationStatus.RESERVED, AiReservationStatus.CONFIRMING, AiReservationStatus.UNKNOWN))
                 .eq(AiReservation::getStatus, 1)
                 .gt(AiReservation::getExpiresAt, DateUtils.now())
                 .last("limit 1"));
-        return reservation;
     }
 
     private AiReservation findByIdempotencyKey(String idempotencyKey) {
@@ -252,6 +332,62 @@ public class AiReservationService {
                 : "ai-reservation-" + UUID.randomUUID().toString().replace("-", "");
     }
 
+    private String requestHash(ProgramOrderCreateDto orderCreate) {
+        return DigestUtils.md5DigestAsHex(JSON.toJSONString(orderCreate).getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void ensureSameRequest(AiReservation reservation, String requestHash) {
+        if (reservation != null && StringUtils.hasText(reservation.getRequestHash())
+                && !Objects.equals(reservation.getRequestHash(), requestHash)) {
+            throw new DaMaiFrameException(BaseCode.OPERATION_IS_TOO_FREQUENT_PLEASE_TRY_AGAIN_LATER.getCode(),
+                    "幂等键已被其他 reservation 请求占用");
+        }
+    }
+
+    private boolean claimStatus(String reservationId,
+                                String fromStatus,
+                                String toStatus,
+                                String confirmIdempotencyKey,
+                                String releaseReason) {
+        var update = Wrappers.lambdaUpdate(AiReservation.class)
+                .eq(AiReservation::getReservationId, reservationId)
+                .eq(AiReservation::getStatus, 1)
+                .eq(AiReservation::getReservationStatus, fromStatus)
+                .set(AiReservation::getReservationStatus, toStatus)
+                .set(AiReservation::getSagaStatus, toStatus)
+                .set(AiReservation::getEditTime, DateUtils.now())
+                .setSql("retry_count = ifnull(retry_count, 0) + 1");
+        if (StringUtils.hasText(confirmIdempotencyKey)) {
+            update.set(AiReservation::getConfirmIdempotencyKey, confirmIdempotencyKey);
+        }
+        if (StringUtils.hasText(releaseReason)) {
+            update.set(AiReservation::getReleaseReason, releaseReason);
+        }
+        return aiReservationMapper.update(null, update) > 0;
+    }
+
+    private void markStatus(AiReservation reservation, String status, String failureCategory, String lastError) {
+        reservation.setReservationStatus(status);
+        reservation.setSagaStatus(status);
+        reservation.setFailureCategory(failureCategory);
+        reservation.setLastError(lastError);
+        reservation.setRetryCount(reservation.getRetryCount() == null ? 1 : reservation.getRetryCount() + 1);
+        reservation.setEditTime(DateUtils.now());
+        aiReservationMapper.updateById(reservation);
+    }
+
+    private AiReservationFailureCategory categorize(RuntimeException ex) {
+        if (ex instanceof DaMaiFrameException) {
+            return AiReservationFailureCategory.DETERMINISTIC;
+        }
+        String message = ex.getMessage() == null ? "" : ex.getMessage().toLowerCase();
+        if (message.contains("timeout") || message.contains("timed out") || message.contains("connect")
+                || message.contains("read timed out")) {
+            return AiReservationFailureCategory.SIDE_EFFECT_UNKNOWN;
+        }
+        return AiReservationFailureCategory.TRANSIENT;
+    }
+
     private AiReservationVo toVo(AiReservation reservation, String message) {
         AiReservationVo vo = new AiReservationVo();
         vo.setReservationId(reservation.getReservationId());
@@ -259,6 +395,16 @@ public class AiReservationService {
         vo.setExpiresAt(reservation.getExpiresAt());
         vo.setConfirmedOrderNumber(reservation.getConfirmedOrderNumber());
         vo.setMessage(message);
+        vo.setFailureCategory(reservation.getFailureCategory());
+        vo.setSagaStatus(reservation.getSagaStatus());
+        vo.setLastError(reservation.getLastError());
+        boolean unknown = AiReservationStatus.UNKNOWN.equals(reservation.getReservationStatus())
+                || AiReservationStatus.CONFIRMING.equals(reservation.getReservationStatus())
+                || AiReservationStatus.RELEASING.equals(reservation.getReservationStatus());
+        vo.setUnknownResult(unknown);
+        vo.setRetriable(!AiReservationStatus.CONFIRMED.equals(reservation.getReservationStatus())
+                && !AiReservationStatus.FAILED.equals(reservation.getReservationStatus()));
+        vo.setNextCheckAfterMs(unknown ? 3000L : 0L);
         return vo;
     }
 
@@ -274,6 +420,9 @@ public class AiReservationService {
                 .putPayload("ticketCategoryId", reservation.getTicketCategoryId())
                 .putPayload("sourceRunId", reservation.getSourceRunId())
                 .putPayload("sourceActionId", reservation.getSourceActionId())
+                .putPayload("failureCategory", reservation.getFailureCategory())
+                .putPayload("sagaStatus", reservation.getSagaStatus())
+                .putPayload("lastError", reservation.getLastError())
                 .putPayload("expiresAt", reservation.getExpiresAt()));
     }
 }

@@ -1,4 +1,4 @@
-package org.javaup.ai.assistant.gateway;
+package org.javaup.ai.es.document;
 
 import lombok.Data;
 import org.dromara.easyes.annotation.IndexField;

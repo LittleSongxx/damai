@@ -31,6 +31,7 @@ const { aiOpsAdminAPIMock, assistantAPIMock, customerServiceAPIMock, dataOpsAdmi
   },
   ragEvalAPIMock: {
     getRunReport: vi.fn(),
+    runBenchmark: vi.fn(),
     compareRun: vi.fn(),
     listBadCases: vi.fn(),
     convertBadCase: vi.fn(),
@@ -239,6 +240,18 @@ describe('useAssistantRuntime', () => {
         }
       }
     })
+    ragEvalAPIMock.runBenchmark.mockResolvedValue({
+      data: {
+        benchmarkRunId: 'rag-bench-1',
+        caseCount: 10,
+        qualityGate: { status: 'PASS' },
+        profiles: [
+          { profile: 'STANDARD_HYBRID', p95LatencyMs: 420, avgHitRate: 0.8 },
+          { profile: 'ENHANCED_RECOVERY', p95LatencyMs: 820, avgHitRate: 0.9 }
+        ],
+        nextActions: ['Benchmark passed current gates; compare against previous baseline before release']
+      }
+    })
     ragEvalAPIMock.listBadCases.mockResolvedValue({
       data: [
         {
@@ -351,6 +364,15 @@ describe('useAssistantRuntime', () => {
     await runtime.compareRagEvalWithBaseline()
     expect(ragEvalAPIMock.compareRun).toHaveBeenCalledWith('rag-1', 'rag-0')
     expect(runtime.ragEvalComparison.value.caseDiffs.count).toBe(12)
+
+    await runtime.runRagBenchmark({ limit: 10 })
+    expect(ragEvalAPIMock.runBenchmark).toHaveBeenCalledWith(expect.objectContaining({
+      datasetId: 'default-golden',
+      limit: 10,
+      profiles: ['STANDARD_HYBRID', 'ENHANCED_RECOVERY']
+    }))
+    expect(runtime.ragBenchmarkResult.value.benchmarkRunId).toBe('rag-bench-1')
+    expect(runtime.ragBenchmarkRunning.value).toBe(false)
 
     await runtime.convertBadCaseToEval(runtime.ragBadCases.value[0])
     expect(ragEvalAPIMock.convertBadCase).toHaveBeenCalledWith('bad-1', expect.objectContaining({

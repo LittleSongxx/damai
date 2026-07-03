@@ -600,9 +600,11 @@ public class ProgramOrderService {
                 }
             }
             delSeatIdjsonObject.put("seatHashKeyDel",seatHashKeyDel);
+            delSeatIdjsonObject.put("ticketCategoryId",String.valueOf(k));
             delSeatIdjsonObject.put("seatIdList",v.stream().map(SeatVo::getId).map(String::valueOf).collect(Collectors.toList()));
             delSeatIdjsonArray.add(delSeatIdjsonObject);
             seatDatajsonObject.put("seatHashKeyAdd",seatHashKeyAdd);
+            seatDatajsonObject.put("ticketCategoryId",String.valueOf(k));
             List<String> seatDataList = new ArrayList<>();
             for (SeatVo seatVo : v) {
                 seatDataList.add(String.valueOf(seatVo.getId()));

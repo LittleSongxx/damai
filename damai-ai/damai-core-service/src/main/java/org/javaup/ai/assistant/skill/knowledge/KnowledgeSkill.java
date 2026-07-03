@@ -18,6 +18,7 @@ import org.javaup.ai.assistant.tool.AssistantToolInvoker;
 import org.javaup.ai.entity.AiRetrieval;
 import org.javaup.ai.entity.AiRun;
 import org.javaup.ai.mapper.AiRunMapper;
+import org.javaup.ai.runtime.contract.SourceRef;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.javaup.ai.rag.channel.KnowledgeRetrievalFilter;
 import org.javaup.ai.service.FaqMatchService;

@@ -106,6 +106,8 @@ rules:
             shardingColumn: program_id
             # 使用program_id分表算法
             shardingAlgorithmName: tableOrderProgramModModel
+      d_ops_event_outbox:
+        actualDataNodes: ds_0.d_ops_event_outbox
     # 具体的算法
     shardingAlgorithms:
       # d_order表分库算法

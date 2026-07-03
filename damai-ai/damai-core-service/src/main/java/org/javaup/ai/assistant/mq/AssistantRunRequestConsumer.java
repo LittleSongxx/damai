@@ -34,7 +34,7 @@ public class AssistantRunRequestConsumer {
             channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
         } catch (Exception e) {
             log.error("Failed to process overflow run: runId={}", request.getRunId(), e);
-            channel.basicNack(message.getMessageProperties().getDeliveryTag(), false, true);
+            channel.basicReject(message.getMessageProperties().getDeliveryTag(), false);
         }
     }
 }

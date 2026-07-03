@@ -12,4 +12,44 @@
     <artifactId>damai-ai-customer</artifactId>
     <name>damai-ai-customer</name>
     <description>Customer service work item, SLA and feedback loop services.</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.javaup</groupId>
+            <artifactId>damai-ai-domain</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.javaup</groupId>
+            <artifactId>damai-ai-infra</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.javaup</groupId>
+            <artifactId>damai-ai-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba.fastjson2</groupId>
+            <artifactId>fastjson2</artifactId>
+            <version>${fastjson2.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-client-chat</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-context</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-beans</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-tx</artifactId>
+        </dependency>
+    </dependencies>
 </project>

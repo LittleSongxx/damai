@@ -3,6 +3,8 @@ package org.javaup.ai.service;
 import org.javaup.ai.entity.RagChunk;
 import org.javaup.ai.mapper.RagChunkMapper;
 import org.javaup.ai.rag.RagRetrievalFacade;
+import org.javaup.ai.rag.RetrievalStrategy;
+import org.javaup.ai.rag.channel.KnowledgeRetrievalFilter;
 import org.javaup.ai.vo.RagSearchResultVo;
 import org.javaup.ai.vo.RagSourceVo;
 import org.junit.jupiter.api.Test;
@@ -12,9 +14,10 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -27,9 +30,10 @@ class IngestionQualityServiceTest {
         IngestionQualityService service = new IngestionQualityService(chunkMapper, retrievalFacade);
 
         when(chunkMapper.selectAllActiveChunks()).thenReturn(List.of(activeChunk("chunk-1")));
-        when(retrievalFacade.retrieveSimple(anyString(), anyInt())).thenReturn(RagSearchResultVo.builder()
+        when(retrievalFacade.retrieve(anyString(), any(RetrievalStrategy.class), any(KnowledgeRetrievalFilter.class)))
+                .thenReturn(RagSearchResultVo.builder()
                 .sources(List.of(RagSourceVo.builder().chunkId("chunk-1").score(0.91).build()))
-                .metadata(Map.of("retrievalBoundary", "RagRetrievalFacade", "retrievalMode", "simple"))
+                .metadata(Map.of("retrievalBoundary", "RagRetrievalFacade", "retrievalMode", "STANDARD_HYBRID"))
                 .build());
 
         Map<String, Object> report = service.runQualityReport();
@@ -39,7 +43,8 @@ class IngestionQualityServiceTest {
         assertEquals(20, coverage.get("covered"));
         assertEquals("100.0%", coverage.get("coverageRatio"));
         assertTrue(String.valueOf(coverage.get("details")).contains("RagRetrievalFacade"));
-        verify(retrievalFacade).retrieveSimple("如何退票", 5);
+        verify(retrievalFacade, times(20))
+                .retrieve(anyString(), any(RetrievalStrategy.class), any(KnowledgeRetrievalFilter.class));
     }
 
     private RagChunk activeChunk(String chunkUid) {

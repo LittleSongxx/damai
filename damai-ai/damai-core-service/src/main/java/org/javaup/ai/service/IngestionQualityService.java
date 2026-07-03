@@ -6,6 +6,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.entity.RagChunk;
 import org.javaup.ai.mapper.RagChunkMapper;
 import org.javaup.ai.rag.RagRetrievalFacade;
+import org.javaup.ai.rag.RetrievalStrategy;
+import org.javaup.ai.rag.channel.KnowledgeRetrievalFilter;
 import org.javaup.ai.vo.RagSearchResultVo;
 import org.javaup.ai.vo.RagSourceVo;
 import org.springframework.stereotype.Service;
@@ -160,7 +162,9 @@ public class IngestionQualityService {
 
         for (String query : testQueries) {
             try {
-                RagSearchResultVo searchResult = retrievalFacade.retrieveSimple(query, 5);
+                RagSearchResultVo searchResult = retrievalFacade.retrieve(query,
+                        RetrievalStrategy.standardHybrid(5, false, false, "ingestion coverage quality check"),
+                        KnowledgeRetrievalFilter.empty());
                 List<RagSourceVo> results = searchResult != null && searchResult.getSources() != null
                         ? searchResult.getSources()
                         : List.of();

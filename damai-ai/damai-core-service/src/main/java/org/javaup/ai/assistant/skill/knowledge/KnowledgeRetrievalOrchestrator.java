@@ -4,6 +4,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.assistant.runtime.AssistantStageTraceService;
 import org.javaup.ai.rag.RagRetrievalFacade;
+import org.javaup.ai.rag.RetrievalStrategy;
+import org.javaup.ai.rag.RetrievalStrategyPolicy;
+import org.javaup.ai.rag.RetrievalStrategyProfile;
 import org.javaup.ai.rag.channel.KnowledgeRetrievalFilter;
 import org.javaup.ai.service.AdvancedQueryService;
 import org.javaup.ai.vo.RagSearchResultVo;
@@ -19,12 +22,12 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 增强版 CRAG（Corrective RAG）编排器。
- *
- * 首轮检索：LLM Query Rewrite + Multi-query dense + HyDE dense + sparse + RRF + Rerank
- * 子问题拆解：复杂查询在首轮即拆解子问题并行检索
- * 多维度评估：LLM as Judge 做语义相关性 + 覆盖度 + 冲突检测，CRAG 三路分类
- * 纠正循环：CORRECT→知识精炼, AMBIGUOUS→扩展Top-k, INCORRECT→LLM查询改写
+ * Customer-service retrieval orchestrator.
+ * <p>
+ * First pass is strategy-driven instead of a hard-coded simple/full split.
+ * Corrective retrieval must change the retrieval method (missing-slot rewrite,
+ * step-back query, structured support, and optional HyDE) rather than repeating
+ * the same search with a larger topK.
  */
 @Slf4j
 @Service
@@ -38,6 +41,8 @@ public class KnowledgeRetrievalOrchestrator {
     private final RagRetrievalFacade retrievalFacade;
     private final KnowledgeRetrievalTraceService retrievalTraceService;
     private final AssistantStageTraceService stageTraceService;
+    private final RetrievalStrategyPolicy strategyPolicy;
+    private final CorrectiveQueryService correctiveQueryService;
 
     public KnowledgeRetrievalContext retrieve(String message) {
         KnowledgeRetrievalPlan plan = retrievalPlanner.plan(message);
@@ -49,14 +54,39 @@ public class KnowledgeRetrievalOrchestrator {
     }
 
     public KnowledgeRetrievalContext retrieve(KnowledgeRetrievalPlan plan, KnowledgeRetrievalFilter filter) {
-        if (plan.complexity() == KnowledgeRetrievalPlan.Complexity.SIMPLE) {
-            return retrieveSimple(plan, filter);
+        RetrievalStrategy strategy = strategyPolicy.firstPass(plan, filter);
+        if (strategy.profile() == RetrievalStrategyProfile.HANDOFF_OR_CLARIFY) {
+            return handoffContext(plan, strategy);
         }
-        return retrieveFull(plan, filter);
+        if (strategy.profile() == RetrievalStrategyProfile.FAST_EXACT) {
+            return retrieveFastExact(plan, filter, strategy);
+        }
+        return retrieveFull(plan, filter, strategy);
     }
 
-    private KnowledgeRetrievalContext retrieveSimple(KnowledgeRetrievalPlan plan, KnowledgeRetrievalFilter filter) {
-        RagSearchResultVo result = engineRetrieveSimple(plan.normalizedQuery(), plan.topK(), filter);
+    private KnowledgeRetrievalContext handoffContext(KnowledgeRetrievalPlan plan, RetrievalStrategy strategy) {
+        RagSearchResultVo empty = RagSearchResultVo.builder()
+                .originalQuery(plan.originalQuery())
+                .normalizedQuery(plan.normalizedQuery())
+                .rewrittenQuery(plan.normalizedQuery())
+                .sources(List.of())
+                .documents(List.of())
+                .metadata(Map.of(
+                        "strategyProfile", strategy.profile().name(),
+                        "strategyReason", strategy.reason()
+                ))
+                .build();
+        KnowledgeRetrievalAssessment assessment = new KnowledgeRetrievalAssessment(
+                0D, "INCORRECT", "handoff_or_clarify", List.of(),
+                "LOW", "LOW", false, "NOT_ANSWERABLE",
+                "问题缺少可安全检索的条件，建议澄清或转人工", List.of());
+        return new KnowledgeRetrievalContext(plan, empty,
+                new StructuredRuleSupportService.SupportBundle(List.of(), List.of()), assessment, List.of());
+    }
+
+    private KnowledgeRetrievalContext retrieveFastExact(KnowledgeRetrievalPlan plan, KnowledgeRetrievalFilter filter,
+                                                     RetrievalStrategy strategy) {
+        RagSearchResultVo result = engineRetrieve(plan.normalizedQuery(), strategy, filter);
         var supportBundle = structuredRuleSupportService.lookup(plan.normalizedQuery());
         List<RagSourceVo> merged = new ArrayList<>();
         if (result.getSources() != null) merged.addAll(result.getSources());
@@ -74,57 +104,55 @@ public class KnowledgeRetrievalOrchestrator {
                 .fusedSources(result.getFusedSources())
                 .sources(deduped)
                 .documents(answerDocs)
+                .metadata(result.getMetadata())
                 .build();
-        KnowledgeRetrievalAssessment assessment = simpleAssessment(assessedResult, supportBundle, plan);
-        return new KnowledgeRetrievalContext(plan, result, supportBundle, assessment, answerDocs);
+        KnowledgeRetrievalAssessment assessment = fastExactAssessment(assessedResult, supportBundle, plan);
+        return new KnowledgeRetrievalContext(plan, assessedResult, supportBundle, assessment, answerDocs);
     }
 
-    private KnowledgeRetrievalAssessment simpleAssessment(RagSearchResultVo result,
+    private KnowledgeRetrievalAssessment fastExactAssessment(RagSearchResultVo result,
                                                           StructuredRuleSupportService.SupportBundle supportBundle,
                                                           KnowledgeRetrievalPlan plan) {
         if (result.getSources() == null || result.getSources().isEmpty()) {
             return new KnowledgeRetrievalAssessment(
-                    0D, "INCORRECT", "simple_no_evidence", List.of(),
+                    0D, "INCORRECT", "fast_exact_no_evidence", List.of(),
                     "LOW", "LOW", false, "NOT_ANSWERABLE",
                     "没有命中可用于回答的证据", List.of());
         }
         try {
-            return retrievalEvaluator.assess(result, supportBundle.sources(), "simple", plan);
+            return retrievalEvaluator.assess(result, supportBundle.sources(), "fast_exact", plan);
         } catch (RuntimeException ex) {
-            log.warn("simple retrieval assessment failed, using conservative fallback", ex);
+            log.warn("fast exact retrieval assessment failed, using conservative fallback", ex);
             double score = Math.min(0.55D, 0.25D + result.getSources().size() * 0.08D);
             String level = result.getSources().size() >= Math.min(3, plan.topK()) ? "AMBIGUOUS" : "INCORRECT";
             String coverage = result.getSources().size() >= Math.min(3, plan.topK()) ? "MEDIUM" : "LOW";
             String answerability = "AMBIGUOUS".equals(level) ? "PARTIALLY_ANSWERABLE" : "NOT_ANSWERABLE";
             return new KnowledgeRetrievalAssessment(
-                    score, level, "simple_fallback", result.getSources(),
+                    score, level, "fast_exact_fallback", result.getSources(),
                     "MEDIUM", coverage, false, answerability, "检索评估失败，已降级为保守判断", List.of());
         }
     }
 
-    private RagSearchResultVo engineRetrieveSimple(String query, int topK, KnowledgeRetrievalFilter filter) {
-        if (filter == null || !filter.hasAnyConstraint()) {
-            return retrievalFacade.retrieveSimple(query, topK);
-        }
-        return retrievalFacade.retrieveSimple(query, topK, filter);
-    }
-
-    private KnowledgeRetrievalContext retrieveFull(KnowledgeRetrievalPlan plan, KnowledgeRetrievalFilter filter) {
+    private KnowledgeRetrievalContext retrieveFull(KnowledgeRetrievalPlan plan, KnowledgeRetrievalFilter filter,
+                                                   RetrievalStrategy strategy) {
         var firstPassSpan = stageTraceService.startStage(
                 "KNOWLEDGE_RETRIEVAL_FIRST_PASS",
                 "KnowledgeRetrieval",
                 plan.normalizedQuery(),
                 null,
-                Map.of("topK", plan.topK(), "enableRerank", plan.enableRerank(),
-                        "subQuestions", plan.subQuestions()));
+                Map.of("topK", strategy.topK(), "enableRerank", strategy.enableRerank(),
+                        "subQuestions", plan.subQuestions(),
+                        "strategyProfile", strategy.profile().name(),
+                        "enabledChannels", strategy.enabledChannels()));
         RagSearchResultVo firstPass;
         try {
-            firstPass = engineRetrieve(plan.normalizedQuery(), plan.topK(), plan.enableRerank(), filter);
+            firstPass = engineRetrieve(plan.normalizedQuery(), strategy, filter);
             stageTraceService.complete(firstPassSpan, firstPass.getRewrittenQuery(), null, null, null, null, Map.of(
                     "denseHitCount", size(firstPass.getDenseSources()),
                     "sparseHitCount", size(firstPass.getSparseSources()),
                     "fusedHitCount", size(firstPass.getFusedSources()),
-                    "finalHitCount", size(firstPass.getSources())
+                    "finalHitCount", size(firstPass.getSources()),
+                    "strategyProfile", strategy.profile().name()
             ));
         } catch (Exception ex) {
             stageTraceService.fail(firstPassSpan, ex, Map.of());
@@ -134,7 +162,10 @@ public class KnowledgeRetrievalOrchestrator {
                 firstPass.getRetrievalTraceId(), plan.normalizedQuery(), firstPass.getRewrittenQuery(),
                 firstPass.getDenseSources(), firstPass.getSparseSources(),
                 firstPass.getFusedSources(), firstPass.getSources(),
-                retrievalMetadata(firstPass, "topK", plan.topK(), "enableRerank", plan.enableRerank()));
+                retrievalMetadata(firstPass, "topK", strategy.topK(),
+                        "enableRerank", strategy.enableRerank(),
+                        "strategyProfile", strategy.profile().name(),
+                        "enabledChannels", strategy.enabledChannels()));
 
         // Sub-question decomposition: search per sub-question in first pass for complex queries
         if (plan.subQuestions().size() > 1) {
@@ -143,12 +174,16 @@ public class KnowledgeRetrievalOrchestrator {
             List<Document> allSubDocuments = new ArrayList<>(firstPass.getDocuments());
             for (String subQ : plan.subQuestions()) {
                 if (subQ.equals(plan.normalizedQuery())) continue;
-                var subResult = engineRetrieve(subQ, Math.max(4, plan.topK() / 2), plan.enableRerank(), filter);
+                RetrievalStrategy subStrategy = RetrievalStrategy.standardHybrid(
+                        Math.max(4, strategy.topK() / 2), strategy.enableRerank(), strategy.highRisk(),
+                        "first-pass sub-question retrieval");
+                var subResult = engineRetrieve(subQ, subStrategy, filter);
                 retrievalTraceService.saveStageTrace("stage", "knowledge.retrieval.sub_question_first_pass",
                         firstPass.getRetrievalTraceId(), subQ, subResult.getRewrittenQuery(),
                         subResult.getDenseSources(), subResult.getSparseSources(),
                         subResult.getFusedSources(), subResult.getSources(),
-                        retrievalMetadata(subResult, "topK", Math.max(4, plan.topK() / 2)));
+                        retrievalMetadata(subResult, "topK", subStrategy.topK(),
+                                "strategyProfile", subStrategy.profile().name()));
                 mergeSources(allSubSources, subResult.getSources());
                 mergeDocuments(allSubDocuments, subResult.getDocuments());
             }
@@ -180,7 +215,7 @@ public class KnowledgeRetrievalOrchestrator {
                 break;
             case "AMBIGUOUS": {
                 log.info("CRAG: AMBIGUOUS confidence, expanding retrieval");
-                var correction = runAmbiguousRetrieval(firstPass, plan, filter);
+                var correction = runAmbiguousRetrieval(firstPass, plan, assessment.missingInfo(), filter);
                 KnowledgeRetrievalAssessment corrected = retrievalEvaluator.assess(
                         correction.result(), supportBundle.sources(), correction.action(), plan);
                 CorrectionDecision decision = chooseCorrection(firstPass, assessment, correction.result(), corrected, correction.action());
@@ -189,7 +224,7 @@ public class KnowledgeRetrievalOrchestrator {
                 break;
             }
             case "INCORRECT": {
-                log.info("CRAG: INCORRECT confidence, full query reformulation");
+                log.info("CRAG: INCORRECT confidence, running step-back and reformulated retrieval");
                 var correction = runIncorrectRetrieval(firstPass, plan, assessment.missingInfo(), filter);
                 KnowledgeRetrievalAssessment corrected = retrievalEvaluator.assess(
                         correction.result(), supportBundle.sources(), correction.action(), plan);
@@ -201,7 +236,7 @@ public class KnowledgeRetrievalOrchestrator {
             default:
                 // Treat LOW/other as corrective trigger.
                 if ("LOW".equals(assessment.confidenceLevel()) && assessment.sources().size() < 4) {
-                    var correction = runAmbiguousRetrieval(firstPass, plan, filter);
+                    var correction = runAmbiguousRetrieval(firstPass, plan, assessment.missingInfo(), filter);
                     KnowledgeRetrievalAssessment corrected = retrievalEvaluator.assess(
                             correction.result(), supportBundle.sources(), correction.action(), plan);
                     CorrectionDecision decision = chooseCorrection(firstPass, assessment, correction.result(), corrected, correction.action());
@@ -216,31 +251,40 @@ public class KnowledgeRetrievalOrchestrator {
     }
 
     /**
-     * AMBIGUOUS: Expand retrieval with 3x Top-k + sub-question decomposition.
+     * AMBIGUOUS: Use missing-slot rewrite and topic-constrained retrieval.
      */
     private CragCorrectionResult runAmbiguousRetrieval(RagSearchResultVo firstPass, KnowledgeRetrievalPlan plan,
+                                                       String missingInfo,
                                                        KnowledgeRetrievalFilter filter) {
-        int expandedTopK = plan.topK() * 3;
-        log.info("CRAG AMBIGUOUS: expanding topK from {} to {}", plan.topK(), expandedTopK);
+        RetrievalStrategy strategy = strategyPolicy.corrective(plan, "AMBIGUOUS", missingInfo, filter);
+        if (strategy.profile() == RetrievalStrategyProfile.HANDOFF_OR_CLARIFY) {
+            return new CragCorrectionResult(firstPass, "crag_ambiguous_handoff");
+        }
+        CorrectiveQueryService.CorrectiveQueryPlan correctivePlan =
+                correctiveQueryService.planAmbiguous(plan.normalizedQuery(), missingInfo);
+        log.info("CRAG AMBIGUOUS: missing-slot query='{}'", correctivePlan.query());
 
         var correctionSpan = stageTraceService.startStage("KNOWLEDGE_RETRIEVAL_AMBIGUOUS",
                 "KnowledgeRetrieval", plan.normalizedQuery(), null,
-                metadata("parentTraceId", firstPass.getRetrievalTraceId()));
+                metadata("parentTraceId", firstPass.getRetrievalTraceId(),
+                        "strategyProfile", strategy.profile().name(),
+                        "correctiveQuery", correctivePlan.query()));
         List<RagSourceVo> allSources = new ArrayList<>(safeSources(firstPass));
         List<Document> allDocuments = new ArrayList<>(safeDocuments(firstPass));
 
         try {
-            RagSearchResultVo expanded = engineRetrieve(
-                    plan.normalizedQuery(), expandedTopK, plan.enableRerank(), filter);
-            mergeSources(allSources, expanded.getSources());
-            mergeDocuments(allDocuments, expanded.getDocuments());
+            RagSearchResultVo rewritten = engineRetrieve(correctivePlan.query(), strategy, filter);
+            mergeSources(allSources, rewritten.getSources());
+            mergeDocuments(allDocuments, rewritten.getDocuments());
 
             try {
-                List<String> subQuestions = advancedQueryService.decomposeSubQuestions(plan.normalizedQuery());
+                List<String> subQuestions = advancedQueryService.decomposeSubQuestions(correctivePlan.query());
                 if (subQuestions.size() > 1) {
                     for (String subQ : subQuestions) {
-                        RagSearchResultVo subResult = engineRetrieve(
-                                subQ, Math.max(4, expandedTopK / 2), plan.enableRerank(), filter);
+                        RetrievalStrategy subStrategy = RetrievalStrategy.standardHybrid(
+                                Math.max(4, plan.topK()), true, strategy.highRisk(),
+                                "ambiguous corrective sub-question");
+                        RagSearchResultVo subResult = engineRetrieve(subQ, subStrategy, filter);
                         mergeSources(allSources, subResult.getSources());
                         mergeDocuments(allDocuments, subResult.getDocuments());
                     }
@@ -250,7 +294,9 @@ public class KnowledgeRetrievalOrchestrator {
             }
 
             stageTraceService.complete(correctionSpan, "crag_ambiguous", null, null, null, null,
-                    Map.of("mergedSourceCount", allSources.size()));
+                    Map.of("mergedSourceCount", allSources.size(),
+                            "correctiveQuery", correctivePlan.query(),
+                            "strategyProfile", strategy.profile().name()));
         } catch (Exception ex) {
             stageTraceService.fail(correctionSpan, ex, Map.of());
             throw ex;
@@ -263,39 +309,59 @@ public class KnowledgeRetrievalOrchestrator {
                 .retrievalTraceId(firstPass.getRetrievalTraceId())
                 .sources(dedup(allSources))
                 .documents(dedupDocuments(allDocuments))
-                .build(), "crag_ambiguous");
+                .metadata(Map.of("correctionDecision", correctivePlan.reason(),
+                        "strategyProfile", strategy.profile().name()))
+                .build(), "crag_ambiguous_missing_slot");
     }
 
     /**
-     * INCORRECT: LLM-driven query reformulation + 2x Top-k + sub-question decomposition.
+     * INCORRECT: step-back + reformulated query + optional HyDE recovery.
      */
     private CragCorrectionResult runIncorrectRetrieval(RagSearchResultVo firstPass,
                                                         KnowledgeRetrievalPlan plan,
                                                         String missingInfo,
                                                         KnowledgeRetrievalFilter filter) {
-        String reformulatedQuery = retrievalPlanner.llmCorrectiveQuery(
-                firstPass.getRewrittenQuery(), plan.normalizedQuery(), missingInfo);
+        RetrievalStrategy strategy = strategyPolicy.corrective(plan, "INCORRECT", missingInfo, filter);
+        if (strategy.profile() == RetrievalStrategyProfile.HANDOFF_OR_CLARIFY) {
+            return new CragCorrectionResult(firstPass, "crag_incorrect_handoff");
+        }
+        CorrectiveQueryService.CorrectiveQueryPlan correctivePlan =
+                correctiveQueryService.planIncorrect(plan.normalizedQuery(), missingInfo);
+        String reformulatedQuery = correctivePlan.query();
         log.info("CRAG INCORRECT: reformulated query '{}' -> '{}'",
                 plan.normalizedQuery(), reformulatedQuery);
 
         var correctionSpan = stageTraceService.startStage("KNOWLEDGE_RETRIEVAL_INCORRECT",
                 "KnowledgeRetrieval", plan.normalizedQuery(), null,
-                metadata("parentTraceId", firstPass.getRetrievalTraceId()));
+                metadata("parentTraceId", firstPass.getRetrievalTraceId(),
+                        "strategyProfile", strategy.profile().name(),
+                        "stepBackQuery", correctivePlan.stepBackQuery(),
+                        "reformulatedQuery", reformulatedQuery));
         List<RagSourceVo> allSources = new ArrayList<>(safeSources(firstPass));
         List<Document> allDocuments = new ArrayList<>(safeDocuments(firstPass));
 
         try {
-            RagSearchResultVo corrected = engineRetrieve(
-                    reformulatedQuery, plan.topK() * 2, plan.enableRerank(), filter);
+            RagSearchResultVo corrected = engineRetrieve(reformulatedQuery, strategy, filter);
             mergeSources(allSources, corrected.getSources());
             mergeDocuments(allDocuments, corrected.getDocuments());
+
+            if (correctivePlan.stepBackQuery() != null && !correctivePlan.stepBackQuery().isBlank()) {
+                RetrievalStrategy stepBackStrategy = RetrievalStrategy.standardHybrid(
+                        Math.max(4, plan.topK()), true, strategy.highRisk(),
+                        "incorrect corrective step-back retrieval");
+                RagSearchResultVo stepBack = engineRetrieve(correctivePlan.stepBackQuery(), stepBackStrategy, filter);
+                mergeSources(allSources, stepBack.getSources());
+                mergeDocuments(allDocuments, stepBack.getDocuments());
+            }
 
             try {
                 List<String> subQuestions = advancedQueryService.decomposeSubQuestions(reformulatedQuery);
                 for (String subQ : subQuestions) {
                     if (subQ.equals(reformulatedQuery)) continue;
-                    RagSearchResultVo subResult = engineRetrieve(
-                            subQ, Math.max(4, plan.topK()), plan.enableRerank(), filter);
+                    RetrievalStrategy subStrategy = RetrievalStrategy.standardHybrid(
+                            Math.max(4, plan.topK()), true, strategy.highRisk(),
+                            "incorrect corrective sub-question");
+                    RagSearchResultVo subResult = engineRetrieve(subQ, subStrategy, filter);
                     mergeSources(allSources, subResult.getSources());
                     mergeDocuments(allDocuments, subResult.getDocuments());
                 }
@@ -305,6 +371,8 @@ public class KnowledgeRetrievalOrchestrator {
 
             stageTraceService.complete(correctionSpan, "crag_incorrect", null, null, null, null,
                     Map.of("reformulatedQuery", reformulatedQuery,
+                            "stepBackQuery", correctivePlan.stepBackQuery(),
+                            "strategyProfile", strategy.profile().name(),
                             "missingInfo", missingInfo != null ? missingInfo : "",
                             "mergedSourceCount", allSources.size()));
         } catch (Exception ex) {
@@ -319,7 +387,10 @@ public class KnowledgeRetrievalOrchestrator {
                 .retrievalTraceId(firstPass.getRetrievalTraceId())
                 .sources(dedup(allSources))
                 .documents(dedupDocuments(allDocuments))
-                .build(), "crag_incorrect");
+                .metadata(Map.of("correctionDecision", correctivePlan.reason(),
+                        "strategyProfile", strategy.profile().name(),
+                        "stepBackQuery", correctivePlan.stepBackQuery()))
+                .build(), "crag_incorrect_step_back");
     }
 
     /**
@@ -474,11 +545,8 @@ public class KnowledgeRetrievalOrchestrator {
         return value == null ? null : String.valueOf(value);
     }
 
-    private RagSearchResultVo engineRetrieve(String query, int topK, boolean enableRerank, KnowledgeRetrievalFilter filter) {
-        if (filter == null || !filter.hasAnyConstraint()) {
-            return retrievalFacade.retrieve(query, topK, enableRerank);
-        }
-        return retrievalFacade.retrieve(query, topK, enableRerank, filter);
+    private RagSearchResultVo engineRetrieve(String query, RetrievalStrategy strategy, KnowledgeRetrievalFilter filter) {
+        return retrievalFacade.retrieve(query, strategy, filter == null ? KnowledgeRetrievalFilter.empty() : filter);
     }
 
     private CorrectionDecision chooseCorrection(RagSearchResultVo originalResult,
@@ -535,10 +603,13 @@ public class KnowledgeRetrievalOrchestrator {
         return values == null ? 0 : values.size();
     }
 
-    private Map<String, Object> metadata(String key, Object value) {
+    private Map<String, Object> metadata(Object... pairs) {
         Map<String, Object> metadata = new LinkedHashMap<>();
-        if (value != null) {
-            metadata.put(key, value);
+        for (int index = 0; index + 1 < pairs.length; index += 2) {
+            Object value = pairs[index + 1];
+            if (value != null) {
+                metadata.put(String.valueOf(pairs[index]), value);
+            }
         }
         return metadata;
     }

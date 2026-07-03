@@ -12,4 +12,40 @@
     <artifactId>damai-ai-ops</artifactId>
     <name>damai-ai-ops</name>
     <description>Observability, AIOps RCA and NL2SQL services.</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.javaup</groupId>
+            <artifactId>damai-ai-domain</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.javaup</groupId>
+            <artifactId>damai-ai-infra</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.javaup</groupId>
+            <artifactId>damai-ai-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba.fastjson2</groupId>
+            <artifactId>fastjson2</artifactId>
+            <version>${fastjson2.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-context</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-core</artifactId>
+        </dependency>
+    </dependencies>
 </project>

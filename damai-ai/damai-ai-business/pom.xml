@@ -12,4 +12,27 @@
     <artifactId>damai-ai-business</artifactId>
     <name>damai-ai-business</name>
     <description>Ticket search, purchase preview, reservation, approval and risk policy domain services.</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.javaup</groupId>
+            <artifactId>damai-ai-domain</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.javaup</groupId>
+            <artifactId>damai-ai-infra</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.javaup</groupId>
+            <artifactId>damai-ai-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-context</artifactId>
+        </dependency>
+    </dependencies>
 </project>

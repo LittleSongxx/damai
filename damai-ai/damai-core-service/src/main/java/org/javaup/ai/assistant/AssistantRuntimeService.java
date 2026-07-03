@@ -384,6 +384,7 @@ public class AssistantRuntimeService {
                     .runId(runId)
                     .conversationId(run != null ? run.getConversationId() : null)
                     .userId(run != null ? run.getUserId() : null)
+                    .user(context != null ? context.getUser() : null)
                     .userMessage(run != null ? run.getUserMessage() : null)
                     .clientContextJson(run != null ? run.getClientContextJson() : null)
                     .build();
@@ -422,6 +423,9 @@ public class AssistantRuntimeService {
                 return;
             }
             AiRequestContext ctx = AiRequestContext.builder()
+                    .user(message.getUser() != null
+                            ? message.getUser()
+                            : AiUserContext.builder().userId(message.getUserId()).build())
                     .conversationId(message.getConversationId())
                     .runId(message.getRunId())
                     .build();

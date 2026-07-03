@@ -62,6 +62,8 @@ rules:
           standard:
             shardingColumn: program_id
             shardingAlgorithmName: tableOrderProgramModModel
+      d_ops_event_outbox:
+        actualDataNodes: ds_0.d_ops_event_outbox
     shardingAlgorithms:
       databaseOrderComplexGeneArithmetic:
         type: CLASS_BASED

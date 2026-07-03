@@ -41,6 +41,18 @@ public class AiReservation extends BaseTableData implements Serializable {
 
     private String idempotencyKey;
 
+    private String requestHash;
+
+    private String confirmIdempotencyKey;
+
+    private String failureCategory;
+
+    private String sagaStatus;
+
+    private String lastError;
+
+    private Integer retryCount;
+
     private String sourceRunId;
 
     private String sourceActionId;

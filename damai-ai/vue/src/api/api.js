@@ -382,6 +382,17 @@ export const ragEvalAPI = {
     return response.json()
   },
 
+  async runBenchmark(payload = {}) {
+    const response = await fetchWithTimeout(buildUrl('/assistant/admin/rag-eval/benchmark'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    })
+    return response.json()
+  },
+
   async compareRun(evalRunId, baselineRunId) {
     const response = await fetchWithTimeout(buildUrl(`/assistant/admin/rag-eval/runs/${evalRunId}/compare`, { baselineRunId }))
     return response.json()

@@ -342,6 +342,27 @@
             </div>
             <div class="detail-section">
               <div class="card-title-row">
+                <span class="memory-label">RAG Performance</span>
+                <button class="ghost-button ghost-button--tiny" :disabled="ragBenchmarkRunning" @click="runRagBenchmark()">
+                  {{ ragBenchmarkRunning ? 'Running' : 'Benchmark' }}
+                </button>
+              </div>
+              <p v-if="!ragBenchmarkResult" class="empty-text">运行后展示策略延迟、命中率、证据覆盖和转人工建议。</p>
+              <div v-else class="comparison-summary">
+                <strong>{{ ragBenchmarkResult.benchmarkRunId }}</strong>
+                <p>{{ ragBenchmarkSummaryText }}</p>
+                <div v-if="ragBenchmarkProfileItems.length" class="pill-list">
+                  <span v-for="profile in ragBenchmarkProfileItems" :key="profile.profile" class="detail-pill">
+                    {{ profile.profile }} · P95 {{ profile.p95LatencyMs || 0 }}ms · hit {{ formatRatio(profile.avgHitRate) }}
+                  </span>
+                </div>
+                <ul v-if="ragBenchmarkActions.length" class="detail-list">
+                  <li v-for="action in ragBenchmarkActions" :key="action">{{ action }}</li>
+                </ul>
+              </div>
+            </div>
+            <div class="detail-section">
+              <div class="card-title-row">
                 <span class="memory-label">Reindex Jobs</span>
                 <div class="rag-job-actions">
                   <button class="ghost-button ghost-button--tiny" @click="createRagReindexJob('full')">Full</button>
@@ -829,6 +850,8 @@ const {
   ragEvalReport,
   ragBaselineRunId,
   ragEvalComparison,
+  ragBenchmarkResult,
+  ragBenchmarkRunning,
   ragBadCases,
   ragIngestionTasks,
   ragLastReindexJob,
@@ -851,6 +874,7 @@ const {
   resumeRun,
   replayRun,
   compareRagEvalWithBaseline,
+  runRagBenchmark,
   runEvalSuite,
   refreshEvalSuiteRun,
   convertBadCaseToEval,
@@ -1135,6 +1159,31 @@ const comparisonSummaryText = computed(() => {
     ragEvalComparison.value?.caseDiffs?.count != null ? `cases ${ragEvalComparison.value.caseDiffs.count}` : ''
   ].filter(Boolean).join(' · ') || 'baseline comparison ready'
 })
+
+const ragBenchmarkProfileItems = computed(() => Array.isArray(ragBenchmarkResult.value?.profiles)
+  ? ragBenchmarkResult.value.profiles.slice(0, 4)
+  : [])
+
+const ragBenchmarkActions = computed(() => Array.isArray(ragBenchmarkResult.value?.nextActions)
+  ? ragBenchmarkResult.value.nextActions.slice(0, 4)
+  : [])
+
+const ragBenchmarkSummaryText = computed(() => {
+  if (!ragBenchmarkResult.value) {
+    return ''
+  }
+  const gate = ragBenchmarkResult.value.qualityGate?.status || 'UNKNOWN'
+  const count = ragBenchmarkResult.value.caseCount ?? 0
+  const profiles = ragBenchmarkProfileItems.value.map(item => item.profile).join(' / ')
+  return `${gate} · ${count} cases · ${profiles || 'no profiles'}`
+})
+
+const formatRatio = (value) => {
+  if (value == null || Number.isNaN(Number(value))) {
+    return 'n/a'
+  }
+  return `${Math.round(Number(value) * 100)}%`
+}
 
 const stageTraceItems = computed(() => [...stageTraces.value]
   .slice()

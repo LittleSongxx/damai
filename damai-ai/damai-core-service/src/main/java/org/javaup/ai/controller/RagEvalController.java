@@ -15,7 +15,10 @@ import org.javaup.ai.mapper.AiRagEvalDatasetMapper;
 import org.javaup.ai.mapper.AiRagEvalJudgeConfigMapper;
 import org.javaup.ai.mapper.AiRagEvalRetrievalConfigMapper;
 import org.javaup.ai.rag.RagRetrievalFacade;
+import org.javaup.ai.rag.RetrievalStrategy;
+import org.javaup.ai.rag.channel.KnowledgeRetrievalFilter;
 import org.javaup.ai.service.RagBadCaseService;
+import org.javaup.ai.service.RagBenchmarkService;
 import org.javaup.ai.service.RagEvalBaselineService;
 import org.javaup.ai.service.RagEvalReportService;
 import org.javaup.ai.service.RagEvalService;
@@ -51,6 +54,7 @@ public class RagEvalController {
     private final RagEvalBaselineService ragEvalBaselineService;
     private final RagOnlineTraceService ragOnlineTraceService;
     private final RagBadCaseService ragBadCaseService;
+    private final RagBenchmarkService ragBenchmarkService;
 
     @PostMapping("/preview")
     public ResponseEntity<Map<String, Object>> previewEval(@RequestBody(required = false) RagEvalRunRequest request) {
@@ -98,6 +102,11 @@ public class RagEvalController {
             return ResponseEntity.ok(Map.of("code", 1, "message", "not found"));
         }
         return ResponseEntity.ok(Map.of("code", 0, "data", comparison));
+    }
+
+    @PostMapping("/benchmark")
+    public ResponseEntity<Map<String, Object>> runBenchmark(@RequestBody(required = false) Map<String, Object> request) {
+        return ResponseEntity.ok(Map.of("code", 0, "data", ragBenchmarkService.runBenchmark(request)));
     }
 
     @PostMapping("/cases/{caseId}/diagnose")
@@ -222,7 +231,9 @@ public class RagEvalController {
         List<String> errors = new ArrayList<>();
         for (AiRagEvalCase evalCase : cases) {
             try {
-                var searchResult = ragRetrievalFacade.retrieve(evalCase.getQuestion(), 5, true);
+                var searchResult = ragRetrievalFacade.retrieve(evalCase.getQuestion(),
+                        RetrievalStrategy.standardHybrid(5, true, false, "rag eval expected chunk refresh"),
+                        KnowledgeRetrievalFilter.empty());
                 List<String> chunkIds = searchResult.getSources() != null
                         ? searchResult.getSources().stream()
                                 .map(org.javaup.ai.vo.RagSourceVo::getChunkId)

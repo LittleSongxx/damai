@@ -16,4 +16,16 @@ public class AiReservationVo {
     private String confirmedOrderNumber;
 
     private String message;
+
+    private String failureCategory;
+
+    private String sagaStatus;
+
+    private Boolean retriable;
+
+    private Boolean unknownResult;
+
+    private Long nextCheckAfterMs;
+
+    private String lastError;
 }

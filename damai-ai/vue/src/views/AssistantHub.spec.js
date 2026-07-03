@@ -17,6 +17,7 @@ const runtimeState = vi.hoisted(() => ({
   refreshEvalSuiteRun: vi.fn(),
   convertBadCaseToEval: vi.fn(),
   reviewBadCase: vi.fn(),
+  runRagBenchmark: vi.fn(),
   createRagReindexJob: vi.fn(),
   readMcpResource: vi.fn(),
   renderMcpPrompt: vi.fn(),
@@ -378,6 +379,31 @@ vi.mock('../composables/useAssistantRuntime', () => ({
         count: 12
       }
     }),
+    ragBenchmarkResult: ref({
+      benchmarkRunId: 'rag-bench-1',
+      caseCount: 10,
+      qualityGate: {
+        status: 'PASS'
+      },
+      profiles: [
+        {
+          profile: 'STANDARD_HYBRID',
+          p95LatencyMs: 420,
+          avgHitRate: 0.8,
+          citationCoverage: 0.9
+        },
+        {
+          profile: 'ENHANCED_RECOVERY',
+          p95LatencyMs: 820,
+          avgHitRate: 0.9,
+          citationCoverage: 0.95
+        }
+      ],
+      nextActions: [
+        'Benchmark passed current gates; compare against previous baseline before release'
+      ]
+    }),
+    ragBenchmarkRunning: ref(false),
     ragBadCases: ref([
       {
         badCaseId: 'bad-1',
@@ -575,6 +601,13 @@ describe('AssistantHub', () => {
     expect(wrapper.text()).toContain('评测闭环')
     expect(wrapper.text()).toContain('rag-0')
     expect(wrapper.text()).toContain('recall 0.040')
+    expect(wrapper.text()).toContain('RAG Performance')
+    expect(wrapper.text()).toContain('rag-bench-1')
+    expect(wrapper.text()).toContain('PASS · 10 cases')
+    expect(wrapper.text()).toContain('STANDARD_HYBRID')
+    expect(wrapper.text()).toContain('P95 420ms')
+    expect(wrapper.text()).toContain('hit 80%')
+    expect(wrapper.text()).toContain('Benchmark passed current gates')
     expect(wrapper.text()).toContain('Reindex Jobs')
     expect(wrapper.text()).toContain('submitted incremental · reindex-2')
     expect(wrapper.text()).toContain('reindex-1')
@@ -616,6 +649,8 @@ describe('AssistantHub', () => {
     expect(runtimeState.sendMessage).toHaveBeenCalledWith('查询或购买演出票')
     await wrapper.findAll('button').find(item => item.text() === 'Compare').trigger('click')
     expect(runtimeState.compareRagEvalWithBaseline).toHaveBeenCalled()
+    await wrapper.findAll('button').find(item => item.text() === 'Benchmark').trigger('click')
+    expect(runtimeState.runRagBenchmark).toHaveBeenCalled()
     await wrapper.findAll('button').find(item => item.text() === 'Run RAG').trigger('click')
     expect(runtimeState.runEvalSuite).toHaveBeenCalledWith('rag')
     await wrapper.findAll('button').find(item => item.text() === 'Run NL2SQL').trigger('click')

@@ -4,9 +4,8 @@ import lombok.Builder;
 import lombok.Data;
 import org.javaup.ai.entity.AiAction;
 import org.javaup.ai.entity.AiRetrieval;
+import org.javaup.ai.runtime.contract.SourceRef;
 import reactor.core.publisher.Flux;
-
-import org.javaup.ai.assistant.skill.knowledge.SourceRef;
 
 import java.util.List;
 

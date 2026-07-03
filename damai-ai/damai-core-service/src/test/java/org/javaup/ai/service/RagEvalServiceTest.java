@@ -16,6 +16,8 @@ import org.javaup.ai.mapper.AiRagEvalResultMapper;
 import org.javaup.ai.mapper.AiRagEvalRunMapper;
 import org.javaup.ai.mapper.RagChunkMapper;
 import org.javaup.ai.rag.RagRetrievalFacade;
+import org.javaup.ai.rag.RetrievalStrategy;
+import org.javaup.ai.rag.channel.KnowledgeRetrievalFilter;
 import org.javaup.ai.vo.RagEvalRunRequest;
 import org.javaup.ai.vo.RagSearchResultVo;
 import org.javaup.ai.vo.RagSourceVo;
@@ -34,8 +36,6 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
@@ -242,7 +242,8 @@ class RagEvalServiceTest {
     void shouldDiagnoseZeroOverlapAndMissingExpectedChunks() {
         AiRagEvalCase evalCase = evalCase("case-diagnose", "如何申请退票？", "refund", "easy", "[\"chunk-1\",\"chunk-2\"]", "支持退票");
         when(caseMapper.selectOne(any())).thenReturn(evalCase);
-        when(retrievalFacade.retrieve(anyString(), anyInt(), anyBoolean())).thenReturn(RagSearchResultVo.builder()
+        when(retrievalFacade.retrieve(anyString(), any(RetrievalStrategy.class), any(KnowledgeRetrievalFilter.class)))
+                .thenReturn(RagSearchResultVo.builder()
                 .sources(List.of(
                         RagSourceVo.builder().chunkId("chunk-3").score(0.9).build(),
                         RagSourceVo.builder().chunkId("chunk-4").score(0.8).build()))
@@ -286,7 +287,8 @@ class RagEvalServiceTest {
         run.setCompletedCases(0);
 
         AiRagEvalCase evalCase = evalCase("case-failed", "如何申请退票？", "refund", "easy", "[\"chunk-1\"]", "支持退票");
-        when(retrievalFacade.retrieve(anyString(), anyInt(), anyBoolean())).thenReturn(searchResult());
+        when(retrievalFacade.retrieve(anyString(), any(RetrievalStrategy.class), any(KnowledgeRetrievalFilter.class)))
+                .thenReturn(searchResult());
         when(ragEvalScorer.generateAnswer(anyString(), anyList())).thenReturn("支持退票");
         when(ragEvalScorer.evaluateContext(anyString(), anyString(), anyList()))
                 .thenReturn(new RagEvalScorer.ContextEvalResult(0.8, 0.7, 0.6,
@@ -323,7 +325,8 @@ class RagEvalServiceTest {
         run.setCompletedCases(0);
 
         AiRagEvalCase evalCase = evalCase("case-success", "如何申请退票？", "refund", "easy", "[\"chunk-1\"]", "支持退票");
-        when(retrievalFacade.retrieve(anyString(), anyInt(), anyBoolean())).thenReturn(searchResult());
+        when(retrievalFacade.retrieve(anyString(), any(RetrievalStrategy.class), any(KnowledgeRetrievalFilter.class)))
+                .thenReturn(searchResult());
         when(ragEvalScorer.generateAnswer(anyString(), anyList())).thenReturn("支持退票");
         when(ragEvalScorer.evaluateContext(anyString(), anyString(), anyList()))
                 .thenReturn(new RagEvalScorer.ContextEvalResult(0.8, 0.7, 0.6,
@@ -412,7 +415,7 @@ class RagEvalServiceTest {
         service.executeEvalAsync(run, List.of(evalCase), request);
 
         verify(orchestrator).retrieve(any(KnowledgeRetrievalPlan.class));
-        verify(retrievalFacade, never()).retrieve(anyString(), anyInt(), anyBoolean());
+        verify(retrievalFacade, never()).retrieve(anyString(), any(RetrievalStrategy.class), any(KnowledgeRetrievalFilter.class));
         assertEquals(1, run.getCompletedCases());
         assertEquals("COMPLETED", run.getRunStatus());
         assertEquals(1.0, run.getAvgRecall());

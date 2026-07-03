@@ -2,6 +2,7 @@ package org.javaup.ai.assistant.skill.knowledge;
 
 import org.javaup.ai.assistant.budget.TokenBudget;
 import org.javaup.ai.assistant.budget.TokenBudgetManager;
+import org.javaup.ai.runtime.contract.SourceRef;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
 
