@@ -20,6 +20,8 @@ public class OpsRcaEvidenceService {
     private static final Pattern SERVICE_PATTERN = Pattern.compile("([a-z][a-z0-9-]+-service)");
     private static final Pattern TRACE_PATTERN = Pattern.compile("trace(?:id)?[=: ]+([A-Za-z0-9\\-_]+)", Pattern.CASE_INSENSITIVE);
     private static final Pattern SPAN_PATTERN = Pattern.compile("span(?:id)?[=: ]+([A-Za-z0-9\\-_]+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern ORDER_PATTERN = Pattern.compile("order(?:number|No)?[=: ]+([A-Za-z0-9\\-_]+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern RESERVATION_PATTERN = Pattern.compile("reservation(?:id)?[=: ]+([A-Za-z0-9\\-_]+)", Pattern.CASE_INSENSITIVE);
 
     private final OpsProviderRegistry providerRegistry;
 
@@ -37,6 +39,9 @@ public class OpsRcaEvidenceService {
         bundle.put("serviceName", normalized.getServiceName());
         bundle.put("traceId", value(normalized.getTraceId()));
         bundle.put("spanId", value(normalized.getSpanId()));
+        bundle.put("orderNumber", value(normalized.getOrderNumber()));
+        bundle.put("reservationId", value(normalized.getReservationId()));
+        bundle.put("programId", normalized.getProgramId());
         bundle.put("timeWindow", Map.of(
                 "start", start.toString(),
                 "end", end.toString(),
@@ -72,6 +77,13 @@ public class OpsRcaEvidenceService {
         normalized.setSpanId(StringUtils.hasText(request != null ? request.getSpanId() : null)
                 ? request.getSpanId()
                 : firstMatch(query, SPAN_PATTERN, ""));
+        normalized.setOrderNumber(StringUtils.hasText(request != null ? request.getOrderNumber() : null)
+                ? request.getOrderNumber()
+                : firstMatch(query, ORDER_PATTERN, ""));
+        normalized.setReservationId(StringUtils.hasText(request != null ? request.getReservationId() : null)
+                ? request.getReservationId()
+                : firstMatch(query, RESERVATION_PATTERN, ""));
+        normalized.setProgramId(request == null ? null : request.getProgramId());
         int minutes = request != null && request.getWindowMinutes() != null && request.getWindowMinutes() > 0
                 ? request.getWindowMinutes()
                 : 30;
@@ -163,7 +175,7 @@ public class OpsRcaEvidenceService {
     private String confidence(Map<String, Object> coverage,
                               List<String> linkedSignals,
                               Map<String, Object> providerEvidence) {
-        double ratio = number(coverage.get("coverageRatio"));
+        double ratio = number(coverage.get("relevanceRatio"));
         boolean hasAlerts = providerEvidence.containsKey("alerts") && linkedSignals.contains("alerts");
         boolean hasBusiness = providerEvidence.containsKey("businessEvents") && linkedSignals.contains("businessEvents");
         if (ratio >= 0.75D && linkedSignals.size() >= 4 && (hasAlerts || hasBusiness)) {

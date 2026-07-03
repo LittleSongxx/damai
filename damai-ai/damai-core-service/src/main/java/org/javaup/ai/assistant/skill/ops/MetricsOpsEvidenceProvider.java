@@ -25,6 +25,6 @@ public class MetricsOpsEvidenceProvider implements OpsEvidenceProvider {
 
     @Override
     public Map<String, Object> collect(OpsRcaRequest request, Instant start, Instant end) {
-        return metricsGateway.getServiceHealthOverview(request.getServiceName());
+        return metricsGateway.getGoldenSignals(request.getServiceName(), start, end);
     }
 }

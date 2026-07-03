@@ -72,6 +72,45 @@ public class MetricsGateway {
         return result;
     }
 
+    public Map<String, Object> getGoldenSignals(String serviceName, Instant start, Instant end) {
+        Duration step = Duration.ofSeconds(Math.max(30, Duration.between(start, end).toSeconds() / 60));
+        List<Map<String, Object>> items = new ArrayList<>();
+        items.add(signal("requestRate",
+                String.format("sum(rate(http_server_requests_seconds_count{application=\"%s\"}[5m]))", serviceName),
+                start, end, step));
+        items.add(signal("errorRate",
+                String.format("sum(rate(http_server_requests_seconds_count{application=\"%s\",status=~\"5..\"}[5m])) / clamp_min(sum(rate(http_server_requests_seconds_count{application=\"%s\"}[5m])), 1)", serviceName, serviceName),
+                start, end, step));
+        items.add(signal("p95Latency",
+                String.format("histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{application=\"%s\"}[5m])) by (le))", serviceName),
+                start, end, step));
+        items.add(signal("jvmHeapUsage",
+                String.format("sum(jvm_memory_used_bytes{application=\"%s\",area=\"heap\"}) / clamp_min(sum(jvm_memory_max_bytes{application=\"%s\",area=\"heap\"}), 1)", serviceName, serviceName),
+                start, end, step));
+        items.add(signal("orderCreateFailure",
+                "sum(rate(damai_order_create_fail_total[5m]))",
+                start, end, step));
+
+        boolean relevant = items.stream()
+                .map(item -> item.get("series"))
+                .filter(List.class::isInstance)
+                .map(List.class::cast)
+                .anyMatch(list -> !list.isEmpty());
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("serviceName", serviceName);
+        result.put("start", start == null ? "" : start.toString());
+        result.put("end", end == null ? "" : end.toString());
+        result.put("items", items);
+        result.put("relevant", relevant);
+        return result;
+    }
+
+    private Map<String, Object> signal(String name, String promql, Instant start, Instant end, Duration step) {
+        Map<String, Object> result = new LinkedHashMap<>(queryRange(promql, start, end, step));
+        result.put("name", name);
+        return result;
+    }
+
     public Map<String, Object> getJvmMemory(String serviceName) {
         Map<String, Double> used = queryMetricByLabel(String.format("jvm_memory_used_bytes{application=\"%s\",area=\"heap\"}", serviceName), "id");
         Map<String, Double> max = queryMetricByLabel(String.format("jvm_memory_max_bytes{application=\"%s\",area=\"heap\"}", serviceName), "id");

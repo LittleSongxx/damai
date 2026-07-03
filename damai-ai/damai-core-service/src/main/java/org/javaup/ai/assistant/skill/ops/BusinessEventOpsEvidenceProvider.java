@@ -38,6 +38,23 @@ public class BusinessEventOpsEvidenceProvider implements OpsEvidenceProvider {
         if (StringUtils.hasText(request.getServiceName())) {
             query.eq(AiOpsEventRaw::getSourceService, request.getServiceName());
         }
-        return Map.of("items", eventRawMapper.selectList(query));
+        if (StringUtils.hasText(request.getTraceId())) {
+            query.eq(AiOpsEventRaw::getTraceId, request.getTraceId());
+        }
+        if (StringUtils.hasText(request.getOrderNumber())) {
+            query.eq(AiOpsEventRaw::getOrderNumber, request.getOrderNumber());
+        }
+        if (StringUtils.hasText(request.getReservationId())) {
+            query.eq(AiOpsEventRaw::getReservationId, request.getReservationId());
+        }
+        if (request.getProgramId() != null) {
+            query.eq(AiOpsEventRaw::getProgramId, request.getProgramId());
+        }
+        var items = eventRawMapper.selectList(query);
+        return Map.of(
+                "items", items,
+                "relevant", !items.isEmpty(),
+                "linkedSignals", items.stream().map(AiOpsEventRaw::getEventType).distinct().toList()
+        );
     }
 }

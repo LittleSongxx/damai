@@ -13,6 +13,12 @@ public class OpsRcaRequest {
 
     private String spanId;
 
+    private String orderNumber;
+
+    private String reservationId;
+
+    private Long programId;
+
     private Integer windowMinutes;
 
     private String releaseVersion;
