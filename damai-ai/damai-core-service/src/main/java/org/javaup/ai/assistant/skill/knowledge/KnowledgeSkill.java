@@ -19,6 +19,7 @@ import org.javaup.ai.entity.AiRetrieval;
 import org.javaup.ai.entity.AiRun;
 import org.javaup.ai.mapper.AiRunMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import org.javaup.ai.rag.channel.KnowledgeRetrievalFilter;
 import org.javaup.ai.service.FaqMatchService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -131,24 +132,35 @@ public class KnowledgeSkill implements AssistantSkill {
                     "matchScore", faqMatch.matchScore()
             ));
             String answer = faqMatch.answer();
-            assistantRunService.appendEvent(context.getRun().getRunId(), AssistantEventTypes.RETRIEVAL_COMPLETED, Map.of(
-                    "runId", context.getRun().getRunId(),
-                    "faqMatched", true,
-                    "faqId", faqMatch.faqId(),
-                    "matchMethod", faqMatch.matchMethod(),
-                    "matchScore", faqMatch.matchScore(),
-                    "confidenceLevel", "HIGH",
-                    "sources", List.of()
+            Map<String, Object> faqCompletedPayload = new LinkedHashMap<>();
+            faqCompletedPayload.put("runId", context.getRun().getRunId());
+            faqCompletedPayload.put("faqMatched", true);
+            faqCompletedPayload.put("faqId", faqMatch.faqId());
+            faqCompletedPayload.put("version", faqMatch.version());
+            faqCompletedPayload.put("updatedAt", faqMatch.updatedAt());
+            faqCompletedPayload.put("applicableScope", faqMatch.applicableScope());
+            faqCompletedPayload.put("matchMethod", faqMatch.matchMethod());
+            faqCompletedPayload.put("matchScore", faqMatch.matchScore());
+            faqCompletedPayload.put("confidenceLevel", "HIGH");
+            faqCompletedPayload.put("sources", faqMatch.sourceRefs());
+            assistantRunService.appendEvent(context.getRun().getRunId(), AssistantEventTypes.RETRIEVAL_COMPLETED, faqCompletedPayload);
+            List<SourceRef> faqSourceRefs = List.of(new SourceRef(
+                    "faq:" + faqMatch.faqId(),
+                    faqMatch.question(),
+                    faqMatch.category(),
+                    faqMatch.faqId(),
+                    "FAQ"
             ));
             return AssistantSkillResult.builder()
                     .message(answer)
                     .responseSummary(answer)
-                    .sourceRefs(List.of())
+                    .sourceRefs(faqSourceRefs)
                     .build();
         }
 
         KnowledgeRetrievalPlan plan = retrievalPlanner.plan(context.getMessage());
         KnowledgeShadowRouteResult shadowRoute = shadowRoutingService.shadowRoute(plan.normalizedQuery());
+        KnowledgeRetrievalFilter retrievalFilter = filterFromShadowRoute(shadowRoute, context);
         retrievalTraceService.saveStageTrace(
                 "route",
                 "knowledge.shadow_route",
@@ -167,7 +179,8 @@ public class KnowledgeSkill implements AssistantSkill {
                 "mode", shadowRoute.mode(),
                 "scopeCandidates", shadowRoute.scopeCandidates(),
                 "topicCandidates", shadowRoute.topicCandidates(),
-                "documentCandidates", shadowRoute.documentCandidates()
+                "documentCandidates", shadowRoute.documentCandidates(),
+                "retrievalFilter", retrievalFilter
         ));
         assistantRunService.appendEvent(context.getRun().getRunId(), AssistantEventTypes.RETRIEVAL_STARTED, Map.of(
                 "runId", context.getRun().getRunId(),
@@ -176,11 +189,13 @@ public class KnowledgeSkill implements AssistantSkill {
                 "topK", plan.topK(),
                 "enableRerank", plan.enableRerank(),
                 "subQuestions", plan.subQuestions(),
-                "shadowRoute", shadowRoute
+                "shadowRoute", shadowRoute,
+                "retrievalFilter", retrievalFilter
         ));
 
-        KnowledgeRetrievalContext retrievalContext = toolInvoker.invoke(context.getRun().getRunId(), "knowledge.retrieve", "rag", plan, () ->
-                retrievalOrchestrator.retrieve(plan));
+        KnowledgeRetrievalContext retrievalContext = toolInvoker.invoke(context.getRun().getRunId(), "knowledge.retrieve", "rag",
+                Map.of("plan", plan, "retrievalFilter", retrievalFilter), () ->
+                        retrievalOrchestrator.retrieve(plan, retrievalFilter));
         KnowledgeRetrievalAssessment assessment = retrievalContext.assessment();
 
         AiRetrieval retrieval = new AiRetrieval();
@@ -197,7 +212,7 @@ public class KnowledgeSkill implements AssistantSkill {
         retrieval.setConfidenceScore(assessment.confidenceScore());
         retrieval.setConfidenceLevel(assessment.confidenceLevel());
         retrieval.setCorrectiveAction(assessment.correctiveAction());
-        retrieval.setRetrievalPlanJson(JSON.toJSONString(buildRetrievalPlanPayload(retrievalContext, shadowRoute)));
+        retrieval.setRetrievalPlanJson(JSON.toJSONString(buildRetrievalPlanPayload(retrievalContext, shadowRoute, retrievalFilter)));
         assistantRunService.saveRetrieval(retrieval);
 
         Map<String, Object> retrievalCompletedPayload = new LinkedHashMap<>();
@@ -222,6 +237,7 @@ public class KnowledgeSkill implements AssistantSkill {
         retrievalCompletedPayload.put("sparseHitCount", retrievalContext.searchResult().getSparseSources() == null ? 0 : retrievalContext.searchResult().getSparseSources().size());
         retrievalCompletedPayload.put("sources", assessment.sources());
         retrievalCompletedPayload.put("shadowRoute", shadowRoute);
+        retrievalCompletedPayload.put("retrievalFilter", retrievalFilter);
         assistantRunService.appendEvent(context.getRun().getRunId(), AssistantEventTypes.RETRIEVAL_COMPLETED, retrievalCompletedPayload);
 
         // CRAG three-way + Self-RAG: refuse to answer if not answerable
@@ -274,7 +290,8 @@ public class KnowledgeSkill implements AssistantSkill {
     }
 
     private Map<String, Object> buildRetrievalPlanPayload(KnowledgeRetrievalContext retrievalContext,
-                                                          KnowledgeShadowRouteResult shadowRoute) {
+                                                          KnowledgeShadowRouteResult shadowRoute,
+                                                          KnowledgeRetrievalFilter retrievalFilter) {
         KnowledgeRetrievalPlan plan = retrievalContext.plan();
         return Map.of(
                 "topK", plan.topK(),
@@ -284,8 +301,49 @@ public class KnowledgeSkill implements AssistantSkill {
                 "evidenceContextCharBudget", plan.evidenceContextCharBudget(),
                 "subQuestions", plan.subQuestions(),
                 "usedStructuredSupport", !retrievalContext.supportBundle().sources().isEmpty(),
-                "shadowRoute", shadowRoute
+                "shadowRoute", shadowRoute,
+                "retrievalFilter", retrievalFilter
         );
+    }
+
+    private KnowledgeRetrievalFilter filterFromShadowRoute(KnowledgeShadowRouteResult shadowRoute,
+                                                           AssistantSkillContext context) {
+        if (shadowRoute == null) {
+            return KnowledgeRetrievalFilter.empty();
+        }
+        return KnowledgeRetrievalFilter.builder()
+                .scope(topCandidateName(shadowRoute.scopeCandidates(), 0.45D))
+                .topic(topCandidateName(shadowRoute.topicCandidates(), 0.45D))
+                .documentIds(candidateNames(shadowRoute.documentCandidates(), 0.50D, 3))
+                .audience("customer")
+                .channel("assistant")
+                .validAt(System.currentTimeMillis())
+                .userScope(context.getRun() == null ? null : String.valueOf(context.getRun().getUserId()))
+                .build();
+    }
+
+    private String topCandidateName(List<KnowledgeRouteCandidate> candidates, double minScore) {
+        if (candidates == null || candidates.isEmpty()) {
+            return null;
+        }
+        KnowledgeRouteCandidate candidate = candidates.get(0);
+        if (candidate == null || candidate.score() == null || candidate.score() < minScore) {
+            return null;
+        }
+        return candidate.name();
+    }
+
+    private List<String> candidateNames(List<KnowledgeRouteCandidate> candidates, double minScore, int limit) {
+        if (candidates == null || candidates.isEmpty()) {
+            return List.of();
+        }
+        return candidates.stream()
+                .filter(candidate -> candidate != null && candidate.name() != null && !candidate.name().isBlank())
+                .filter(candidate -> candidate.score() == null || candidate.score() >= minScore)
+                .map(KnowledgeRouteCandidate::name)
+                .distinct()
+                .limit(limit)
+                .toList();
     }
 
     private List<String> usedChannels(KnowledgeRetrievalContext retrievalContext) {

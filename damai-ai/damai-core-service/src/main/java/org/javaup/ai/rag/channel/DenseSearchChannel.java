@@ -23,7 +23,7 @@ public class DenseSearchChannel {
                     ? context.getQueryVariants() : List.of(context.getRewrittenQuery());
             int limit = context.getCandidateTopK() > 0 ? context.getCandidateTopK() : context.getTopK();
             List<RagSourceVo> sources = circuitBreakerService.executeQdrant(
-                    () -> searchBackendService.multiQueryDenseSearch(queries, limit),
+                    () -> searchBackendService.multiQueryDenseSearch(queries, limit, context.effectiveFilter()),
                     List.of());
             long latency = System.currentTimeMillis() - start;
             return new SearchChannel.SearchChannelResult("dense", sources, latency);

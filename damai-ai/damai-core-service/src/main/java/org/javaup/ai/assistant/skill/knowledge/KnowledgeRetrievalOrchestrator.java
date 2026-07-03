@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.assistant.runtime.AssistantStageTraceService;
 import org.javaup.ai.rag.RagRetrievalFacade;
+import org.javaup.ai.rag.channel.KnowledgeRetrievalFilter;
 import org.javaup.ai.service.AdvancedQueryService;
 import org.javaup.ai.vo.RagSearchResultVo;
 import org.javaup.ai.vo.RagSourceVo;
@@ -44,14 +45,18 @@ public class KnowledgeRetrievalOrchestrator {
     }
 
     public KnowledgeRetrievalContext retrieve(KnowledgeRetrievalPlan plan) {
-        if (plan.complexity() == KnowledgeRetrievalPlan.Complexity.SIMPLE) {
-            return retrieveSimple(plan);
-        }
-        return retrieveFull(plan);
+        return retrieve(plan, KnowledgeRetrievalFilter.empty());
     }
 
-    private KnowledgeRetrievalContext retrieveSimple(KnowledgeRetrievalPlan plan) {
-        RagSearchResultVo result = engineRetrieveSimple(plan.normalizedQuery(), plan.topK());
+    public KnowledgeRetrievalContext retrieve(KnowledgeRetrievalPlan plan, KnowledgeRetrievalFilter filter) {
+        if (plan.complexity() == KnowledgeRetrievalPlan.Complexity.SIMPLE) {
+            return retrieveSimple(plan, filter);
+        }
+        return retrieveFull(plan, filter);
+    }
+
+    private KnowledgeRetrievalContext retrieveSimple(KnowledgeRetrievalPlan plan, KnowledgeRetrievalFilter filter) {
+        RagSearchResultVo result = engineRetrieveSimple(plan.normalizedQuery(), plan.topK(), filter);
         var supportBundle = structuredRuleSupportService.lookup(plan.normalizedQuery());
         List<RagSourceVo> merged = new ArrayList<>();
         if (result.getSources() != null) merged.addAll(result.getSources());
@@ -86,22 +91,25 @@ public class KnowledgeRetrievalOrchestrator {
         try {
             return retrievalEvaluator.assess(result, supportBundle.sources(), "simple", plan);
         } catch (RuntimeException ex) {
-            log.warn("simple retrieval assessment failed, using evidence-count fallback", ex);
-            double score = Math.min(0.85D, 0.35D + result.getSources().size() * 0.1D);
-            String level = result.getSources().size() >= Math.min(3, plan.topK()) ? "CORRECT" : "AMBIGUOUS";
+            log.warn("simple retrieval assessment failed, using conservative fallback", ex);
+            double score = Math.min(0.55D, 0.25D + result.getSources().size() * 0.08D);
+            String level = result.getSources().size() >= Math.min(3, plan.topK()) ? "AMBIGUOUS" : "INCORRECT";
             String coverage = result.getSources().size() >= Math.min(3, plan.topK()) ? "MEDIUM" : "LOW";
-            String answerability = "CORRECT".equals(level) ? "ANSWERABLE" : "PARTIAL";
+            String answerability = "AMBIGUOUS".equals(level) ? "PARTIALLY_ANSWERABLE" : "NOT_ANSWERABLE";
             return new KnowledgeRetrievalAssessment(
                     score, level, "simple_fallback", result.getSources(),
-                    "MEDIUM", coverage, false, answerability, "", List.of());
+                    "MEDIUM", coverage, false, answerability, "检索评估失败，已降级为保守判断", List.of());
         }
     }
 
-    private RagSearchResultVo engineRetrieveSimple(String query, int topK) {
-        return retrievalFacade.retrieveSimple(query, topK);
+    private RagSearchResultVo engineRetrieveSimple(String query, int topK, KnowledgeRetrievalFilter filter) {
+        if (filter == null || !filter.hasAnyConstraint()) {
+            return retrievalFacade.retrieveSimple(query, topK);
+        }
+        return retrievalFacade.retrieveSimple(query, topK, filter);
     }
 
-    private KnowledgeRetrievalContext retrieveFull(KnowledgeRetrievalPlan plan) {
+    private KnowledgeRetrievalContext retrieveFull(KnowledgeRetrievalPlan plan, KnowledgeRetrievalFilter filter) {
         var firstPassSpan = stageTraceService.startStage(
                 "KNOWLEDGE_RETRIEVAL_FIRST_PASS",
                 "KnowledgeRetrieval",
@@ -111,7 +119,7 @@ public class KnowledgeRetrievalOrchestrator {
                         "subQuestions", plan.subQuestions()));
         RagSearchResultVo firstPass;
         try {
-            firstPass = engineRetrieve(plan.normalizedQuery(), plan.topK(), plan.enableRerank());
+            firstPass = engineRetrieve(plan.normalizedQuery(), plan.topK(), plan.enableRerank(), filter);
             stageTraceService.complete(firstPassSpan, firstPass.getRewrittenQuery(), null, null, null, null, Map.of(
                     "denseHitCount", size(firstPass.getDenseSources()),
                     "sparseHitCount", size(firstPass.getSparseSources()),
@@ -135,7 +143,7 @@ public class KnowledgeRetrievalOrchestrator {
             List<Document> allSubDocuments = new ArrayList<>(firstPass.getDocuments());
             for (String subQ : plan.subQuestions()) {
                 if (subQ.equals(plan.normalizedQuery())) continue;
-                var subResult = engineRetrieve(subQ, Math.max(4, plan.topK() / 2), plan.enableRerank());
+                var subResult = engineRetrieve(subQ, Math.max(4, plan.topK() / 2), plan.enableRerank(), filter);
                 retrievalTraceService.saveStageTrace("stage", "knowledge.retrieval.sub_question_first_pass",
                         firstPass.getRetrievalTraceId(), subQ, subResult.getRewrittenQuery(),
                         subResult.getDenseSources(), subResult.getSparseSources(),
@@ -172,27 +180,33 @@ public class KnowledgeRetrievalOrchestrator {
                 break;
             case "AMBIGUOUS": {
                 log.info("CRAG: AMBIGUOUS confidence, expanding retrieval");
-                var correction = runAmbiguousRetrieval(firstPass, plan);
-                assessment = retrievalEvaluator.assess(
+                var correction = runAmbiguousRetrieval(firstPass, plan, filter);
+                KnowledgeRetrievalAssessment corrected = retrievalEvaluator.assess(
                         correction.result(), supportBundle.sources(), correction.action(), plan);
-                firstPass = correction.result();
+                CorrectionDecision decision = chooseCorrection(firstPass, assessment, correction.result(), corrected, correction.action());
+                firstPass = decision.result();
+                assessment = decision.assessment();
                 break;
             }
             case "INCORRECT": {
                 log.info("CRAG: INCORRECT confidence, full query reformulation");
-                var correction = runIncorrectRetrieval(firstPass, plan, assessment.missingInfo());
-                assessment = retrievalEvaluator.assess(
+                var correction = runIncorrectRetrieval(firstPass, plan, assessment.missingInfo(), filter);
+                KnowledgeRetrievalAssessment corrected = retrievalEvaluator.assess(
                         correction.result(), supportBundle.sources(), correction.action(), plan);
-                firstPass = correction.result();
+                CorrectionDecision decision = chooseCorrection(firstPass, assessment, correction.result(), corrected, correction.action());
+                firstPass = decision.result();
+                assessment = decision.assessment();
                 break;
             }
             default:
                 // Treat LOW/other as corrective trigger.
                 if ("LOW".equals(assessment.confidenceLevel()) && assessment.sources().size() < 4) {
-                    var correction = runAmbiguousRetrieval(firstPass, plan);
-                    assessment = retrievalEvaluator.assess(
+                    var correction = runAmbiguousRetrieval(firstPass, plan, filter);
+                    KnowledgeRetrievalAssessment corrected = retrievalEvaluator.assess(
                             correction.result(), supportBundle.sources(), correction.action(), plan);
-                    firstPass = correction.result();
+                    CorrectionDecision decision = chooseCorrection(firstPass, assessment, correction.result(), corrected, correction.action());
+                    firstPass = decision.result();
+                    assessment = decision.assessment();
                 }
         }
 
@@ -204,19 +218,20 @@ public class KnowledgeRetrievalOrchestrator {
     /**
      * AMBIGUOUS: Expand retrieval with 3x Top-k + sub-question decomposition.
      */
-    private CragCorrectionResult runAmbiguousRetrieval(RagSearchResultVo firstPass, KnowledgeRetrievalPlan plan) {
+    private CragCorrectionResult runAmbiguousRetrieval(RagSearchResultVo firstPass, KnowledgeRetrievalPlan plan,
+                                                       KnowledgeRetrievalFilter filter) {
         int expandedTopK = plan.topK() * 3;
         log.info("CRAG AMBIGUOUS: expanding topK from {} to {}", plan.topK(), expandedTopK);
 
         var correctionSpan = stageTraceService.startStage("KNOWLEDGE_RETRIEVAL_AMBIGUOUS",
                 "KnowledgeRetrieval", plan.normalizedQuery(), null,
                 metadata("parentTraceId", firstPass.getRetrievalTraceId()));
-        List<RagSourceVo> allSources = new ArrayList<>();
-        List<Document> allDocuments = new ArrayList<>();
+        List<RagSourceVo> allSources = new ArrayList<>(safeSources(firstPass));
+        List<Document> allDocuments = new ArrayList<>(safeDocuments(firstPass));
 
         try {
             RagSearchResultVo expanded = engineRetrieve(
-                    plan.normalizedQuery(), expandedTopK, plan.enableRerank());
+                    plan.normalizedQuery(), expandedTopK, plan.enableRerank(), filter);
             mergeSources(allSources, expanded.getSources());
             mergeDocuments(allDocuments, expanded.getDocuments());
 
@@ -225,7 +240,7 @@ public class KnowledgeRetrievalOrchestrator {
                 if (subQuestions.size() > 1) {
                     for (String subQ : subQuestions) {
                         RagSearchResultVo subResult = engineRetrieve(
-                                subQ, Math.max(4, expandedTopK / 2), plan.enableRerank());
+                                subQ, Math.max(4, expandedTopK / 2), plan.enableRerank(), filter);
                         mergeSources(allSources, subResult.getSources());
                         mergeDocuments(allDocuments, subResult.getDocuments());
                     }
@@ -256,7 +271,8 @@ public class KnowledgeRetrievalOrchestrator {
      */
     private CragCorrectionResult runIncorrectRetrieval(RagSearchResultVo firstPass,
                                                         KnowledgeRetrievalPlan plan,
-                                                        String missingInfo) {
+                                                        String missingInfo,
+                                                        KnowledgeRetrievalFilter filter) {
         String reformulatedQuery = retrievalPlanner.llmCorrectiveQuery(
                 firstPass.getRewrittenQuery(), plan.normalizedQuery(), missingInfo);
         log.info("CRAG INCORRECT: reformulated query '{}' -> '{}'",
@@ -265,12 +281,12 @@ public class KnowledgeRetrievalOrchestrator {
         var correctionSpan = stageTraceService.startStage("KNOWLEDGE_RETRIEVAL_INCORRECT",
                 "KnowledgeRetrieval", plan.normalizedQuery(), null,
                 metadata("parentTraceId", firstPass.getRetrievalTraceId()));
-        List<RagSourceVo> allSources = new ArrayList<>();
-        List<Document> allDocuments = new ArrayList<>();
+        List<RagSourceVo> allSources = new ArrayList<>(safeSources(firstPass));
+        List<Document> allDocuments = new ArrayList<>(safeDocuments(firstPass));
 
         try {
             RagSearchResultVo corrected = engineRetrieve(
-                    reformulatedQuery, plan.topK() * 2, plan.enableRerank());
+                    reformulatedQuery, plan.topK() * 2, plan.enableRerank(), filter);
             mergeSources(allSources, corrected.getSources());
             mergeDocuments(allDocuments, corrected.getDocuments());
 
@@ -279,7 +295,7 @@ public class KnowledgeRetrievalOrchestrator {
                 for (String subQ : subQuestions) {
                     if (subQ.equals(reformulatedQuery)) continue;
                     RagSearchResultVo subResult = engineRetrieve(
-                            subQ, Math.max(4, plan.topK()), plan.enableRerank());
+                            subQ, Math.max(4, plan.topK()), plan.enableRerank(), filter);
                     mergeSources(allSources, subResult.getSources());
                     mergeDocuments(allDocuments, subResult.getDocuments());
                 }
@@ -354,6 +370,15 @@ public class KnowledgeRetrievalOrchestrator {
                         .snippet(snippet.substring(0, budgetLeft))
                         .score(source.getScore())
                         .parentBlockId(source.getParentBlockId())
+                        .channelName(source.getChannelName())
+                        .validUntil(source.getValidUntil())
+                        .version(source.getVersion())
+                        .scope(source.getScope())
+                        .topic(source.getTopic())
+                        .documentId(source.getDocumentId())
+                        .audience(source.getAudience())
+                        .region(source.getRegion())
+                        .docStatus(source.getDocStatus())
                         .build();
                 budgetLeft = 0;
             } else {
@@ -449,15 +474,62 @@ public class KnowledgeRetrievalOrchestrator {
         return value == null ? null : String.valueOf(value);
     }
 
-    private RagSearchResultVo engineRetrieve(String query, int topK, boolean enableRerank) {
-        return retrievalFacade.retrieve(query, topK, enableRerank);
+    private RagSearchResultVo engineRetrieve(String query, int topK, boolean enableRerank, KnowledgeRetrievalFilter filter) {
+        if (filter == null || !filter.hasAnyConstraint()) {
+            return retrievalFacade.retrieve(query, topK, enableRerank);
+        }
+        return retrievalFacade.retrieve(query, topK, enableRerank, filter);
     }
 
-    private RagSearchResultVo withResolvedDocuments(RagSearchResultVo result) {
-        return result;
+    private CorrectionDecision chooseCorrection(RagSearchResultVo originalResult,
+                                                KnowledgeRetrievalAssessment originalAssessment,
+                                                RagSearchResultVo correctedResult,
+                                                KnowledgeRetrievalAssessment correctedAssessment,
+                                                String correctiveAction) {
+        double originalScore = assessmentScore(originalAssessment);
+        double correctedScore = assessmentScore(correctedAssessment);
+        boolean better = correctedScore > originalScore + 0.05D
+                || ("NOT_ANSWERABLE".equals(originalAssessment.answerabilityLevel())
+                && !"NOT_ANSWERABLE".equals(correctedAssessment.answerabilityLevel()));
+        if (better) {
+            return new CorrectionDecision(correctedResult, correctedAssessment, correctiveAction, correctedScore - originalScore);
+        }
+        KnowledgeRetrievalAssessment kept = new KnowledgeRetrievalAssessment(
+                originalAssessment.confidenceScore(),
+                originalAssessment.confidenceLevel(),
+                correctiveAction + "_kept_first_pass",
+                originalAssessment.sources(),
+                originalAssessment.relevanceLevel(),
+                originalAssessment.coverageLevel(),
+                originalAssessment.hasContradictions(),
+                originalAssessment.answerabilityLevel(),
+                originalAssessment.missingInfo(),
+                originalAssessment.verifiedClaims());
+        return new CorrectionDecision(originalResult, kept, correctiveAction + "_kept_first_pass", correctedScore - originalScore);
+    }
+
+    private double assessmentScore(KnowledgeRetrievalAssessment assessment) {
+        if (assessment == null) return 0D;
+        double score = assessment.confidenceScore() == null ? 0D : assessment.confidenceScore();
+        score += "ANSWERABLE".equals(assessment.answerabilityLevel()) ? 0.35D : 0D;
+        score += "PARTIALLY_ANSWERABLE".equals(assessment.answerabilityLevel()) ? 0.15D : 0D;
+        score += "HIGH".equals(assessment.coverageLevel()) ? 0.20D : ("MEDIUM".equals(assessment.coverageLevel()) ? 0.08D : 0D);
+        score += "HIGH".equals(assessment.relevanceLevel()) ? 0.20D : ("MEDIUM".equals(assessment.relevanceLevel()) ? 0.08D : 0D);
+        if (assessment.hasContradictions()) score -= 0.4D;
+        return score;
+    }
+
+    private List<RagSourceVo> safeSources(RagSearchResultVo result) {
+        return result == null || result.getSources() == null ? List.of() : result.getSources();
+    }
+
+    private List<Document> safeDocuments(RagSearchResultVo result) {
+        return result == null || result.getDocuments() == null ? List.of() : result.getDocuments();
     }
 
     private record CragCorrectionResult(RagSearchResultVo result, String action) {}
+    private record CorrectionDecision(RagSearchResultVo result, KnowledgeRetrievalAssessment assessment,
+                                      String action, double delta) {}
 
     private int size(List<?> values) {
         return values == null ? 0 : values.size();

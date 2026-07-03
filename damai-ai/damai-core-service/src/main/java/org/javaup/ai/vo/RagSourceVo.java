@@ -40,4 +40,16 @@ public class RagSourceVo {
      * Document version number. Higher values indicate newer revisions.
      */
     private Integer version;
+
+    private String scope;
+
+    private String topic;
+
+    private String documentId;
+
+    private String audience;
+
+    private String region;
+
+    private String docStatus;
 }

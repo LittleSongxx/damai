@@ -1,6 +1,7 @@
 package org.javaup.ai.rag;
 
 import lombok.RequiredArgsConstructor;
+import org.javaup.ai.rag.channel.KnowledgeRetrievalFilter;
 import org.javaup.ai.rag.channel.SearchContext;
 import org.javaup.ai.rag.engine.MultiChannelRetrievalEngine;
 import org.javaup.ai.service.AdvancedQueryService;
@@ -26,6 +27,10 @@ public class RagRetrievalFacade {
     private final RagSearchBackendService searchBackendService;
 
     public RagSearchResultVo retrieveSimple(String query, int topK) {
+        return retrieveSimple(query, topK, KnowledgeRetrievalFilter.empty());
+    }
+
+    public RagSearchResultVo retrieveSimple(String query, int topK, KnowledgeRetrievalFilter filter) {
         SearchContext context = SearchContext.builder()
                 .originalQuery(query)
                 .rewrittenQuery(query)
@@ -34,12 +39,17 @@ public class RagRetrievalFacade {
                 .topK(topK)
                 .enableRerank(false)
                 .now(System.currentTimeMillis())
+                .filter(filter == null ? KnowledgeRetrievalFilter.empty() : filter)
                 .metadata(Map.of("retrievalBoundary", BOUNDARY_NAME, "mode", "simple"))
                 .build();
         return withResolvedDocuments(retrievalEngine.retrieveSimple(context), "simple", false);
     }
 
     public RagSearchResultVo retrieve(String query, int topK, boolean enableRerank) {
+        return retrieve(query, topK, enableRerank, KnowledgeRetrievalFilter.empty());
+    }
+
+    public RagSearchResultVo retrieve(String query, int topK, boolean enableRerank, KnowledgeRetrievalFilter filter) {
         AdvancedQueryService.QueryRewriteResult rewrite = advancedQueryService.rewriteQuery(query);
         SearchContext context = SearchContext.builder()
                 .originalQuery(query)
@@ -49,6 +59,7 @@ public class RagRetrievalFacade {
                 .topK(topK)
                 .enableRerank(enableRerank)
                 .now(System.currentTimeMillis())
+                .filter(filter == null ? KnowledgeRetrievalFilter.empty() : filter)
                 .metadata(Map.of("retrievalBoundary", BOUNDARY_NAME, "mode", "full"))
                 .build();
         return withResolvedDocuments(retrievalEngine.retrieve(context), "full", enableRerank);

@@ -60,7 +60,7 @@ public class KnowledgeRetrievalEvaluator {
         String missingInfo;
         List<String> verifiedClaims = List.of();
 
-        if (heuristicScore >= 0.62 && deduped.size() >= 3) {
+        if (heuristicScore >= 0.78 && deduped.size() >= 3 && (overlap >= 0.34D || (supportSources != null && !supportSources.isEmpty()))) {
             // Fast path: strong heuristic = skip expensive LLM assessment
             // Lower threshold justified by better normalization and overlap weighting
             relevanceLevel = "HIGH";
@@ -315,8 +315,8 @@ public class KnowledgeRetrievalEvaluator {
         if (sources == null || sources.isEmpty() || sources.get(0).getScore() == null) return 0D;
         double top = sources.get(0).getScore();
         if (top <= 0) return 0D;
-        double divisor = Math.min(top, 20D);
-        return Math.min(1D, top / divisor);
+        double saturation = 20D;
+        return Math.min(1D, top / saturation);
     }
 
     /**

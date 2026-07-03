@@ -301,15 +301,31 @@ public class FaqMatchService {
      * FAQ匹配结果
      */
     public record FaqMatchResult(String faqId, String question, String answer, String category,
-                                 String matchMethod, Double matchScore) {
+                                 String matchMethod, Double matchScore, List<String> sourceRefs,
+                                 String version, String updatedAt, Map<String, Object> applicableScope) {
         public static FaqMatchResult from(FaqEntry entry, String matchMethod, Double matchScore) {
+            Map<String, Object> scope = new HashMap<>();
+            if (StringUtils.hasText(entry.getCategory())) {
+                scope.put("category", entry.getCategory());
+            }
+            if (StringUtils.hasText(entry.getRegion())) {
+                scope.put("region", entry.getRegion());
+            }
+            if (StringUtils.hasText(entry.getAudience())) {
+                scope.put("audience", entry.getAudience());
+            }
+            String updatedAt = entry.getEditTime() == null ? null : entry.getEditTime().toInstant().toString();
             return new FaqMatchResult(
                     entry.getFaqId(),
                     entry.getQuestion(),
                     entry.getAnswer(),
                     entry.getCategory(),
                     matchMethod,
-                    matchScore
+                    matchScore,
+                    List.of("faq:" + entry.getFaqId()),
+                    String.valueOf(entry.getId()),
+                    updatedAt,
+                    scope
             );
         }
     }

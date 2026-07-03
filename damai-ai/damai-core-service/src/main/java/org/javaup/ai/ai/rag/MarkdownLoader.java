@@ -137,6 +137,9 @@ public class MarkdownLoader {
                 .sorted()
                 .reduce("", (a, b) -> a + b);
         currentIndexVersion = "v" + DigestUtil.md5Hex(allHashes);
+        for (Document document : flatDocuments) {
+            document.getMetadata().put("indexVersion", currentIndexVersion);
+        }
         lastLoadStats = new LoadStats(resources.length, faqCount, flatDocuments.size(), skippedCount,
                 documentMetadatas.size());
         log.info("Loaded {} FAQ entries, generated {} chunks ({} documents, indexVersion={}), skipped {} files",
@@ -404,6 +407,14 @@ public class MarkdownLoader {
         metadata.put("name", fileName);
         metadata.put("title", section.question());
         metadata.put("label", label);
+        metadata.put("scope", defaultText(firstFrontMatter(docMeta.frontMatter(), "scope", "category", "source"), label));
+        metadata.put("topic", defaultText(firstFrontMatter(docMeta.frontMatter(), "topic", "category"), label));
+        metadata.put("documentId", defaultText(firstFrontMatter(docMeta.frontMatter(), "documentId", "document_id", "document", "sourceFile"), fileName));
+        metadata.put("audience", defaultText(firstFrontMatter(docMeta.frontMatter(), "audience"), "all"));
+        metadata.put("region", defaultText(firstFrontMatter(docMeta.frontMatter(), "region"), "global"));
+        metadata.put("channel", defaultText(firstFrontMatter(docMeta.frontMatter(), "channel"), "all"));
+        metadata.put("userScope", defaultText(firstFrontMatter(docMeta.frontMatter(), "user_scope", "userScope"), "public"));
+        metadata.put("docStatus", firstFrontMatter(docMeta.frontMatter(), "doc_status", "docStatus", "status", "published"));
         metadata.put("keywords", keywords);
         metadata.put("source", docMeta.frontMatter().getOrDefault("source", "official_faq"));
         metadata.put("sourceFile", fileName);
@@ -424,9 +435,21 @@ public class MarkdownLoader {
                 metadata.put("validUntil", java.sql.Timestamp.valueOf(s + " 23:59:59").getTime());
             } catch (Exception ignored) {}
         }
+        Object validFrom = docMeta.frontMatter().get("valid_from");
+        if (validFrom instanceof String s && !s.isEmpty()) {
+            try {
+                metadata.put("validFrom", java.sql.Timestamp.valueOf(s + " 00:00:00").getTime());
+            } catch (Exception ignored) {}
+        }
         Object docVersion = docMeta.frontMatter().get("version");
         if (docVersion instanceof Number n) {
             metadata.put("version", n.intValue());
+        } else if (docVersion instanceof String s && !s.isBlank()) {
+            try {
+                metadata.put("version", Integer.parseInt(s.trim()));
+            } catch (NumberFormatException ignored) {
+                metadata.put("version", s.trim());
+            }
         }
 
         // Carry forward front matter into chunk metadata
@@ -436,6 +459,29 @@ public class MarkdownLoader {
             }
         });
         return metadata;
+    }
+
+    private String defaultText(String value, String fallback) {
+        return StringUtil.isNotEmpty(value) ? value : fallback;
+    }
+
+    private String firstFrontMatter(Map<String, Object> frontMatter, String... keys) {
+        if (frontMatter == null || keys == null) {
+            return null;
+        }
+        for (String key : keys) {
+            if ("published".equals(key)) {
+                return "published";
+            }
+            Object value = frontMatter.get(key);
+            if (value instanceof List<?> list && !list.isEmpty()) {
+                return list.stream().map(String::valueOf).filter(StringUtil::isNotEmpty).findFirst().orElse(null);
+            }
+            if (value != null && StringUtil.isNotEmpty(String.valueOf(value))) {
+                return String.valueOf(value);
+            }
+        }
+        return null;
     }
 
     private static Map<String, String> defaultKeywordMap() {

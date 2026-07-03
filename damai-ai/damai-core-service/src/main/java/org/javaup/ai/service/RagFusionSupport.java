@@ -113,6 +113,14 @@ public final class RagFusionSupport {
                 .score(score)
                 .parentBlockId(source.getParentBlockId())
                 .channelName(source.getChannelName())
+                .validUntil(source.getValidUntil())
+                .version(source.getVersion())
+                .scope(source.getScope())
+                .topic(source.getTopic())
+                .documentId(source.getDocumentId())
+                .audience(source.getAudience())
+                .region(source.getRegion())
+                .docStatus(source.getDocStatus())
                 .build();
     }
 
@@ -130,6 +138,14 @@ public final class RagFusionSupport {
                 .score(source.getScore())
                 .parentBlockId(source.getParentBlockId())
                 .channelName(source.getChannelName())
+                .validUntil(source.getValidUntil())
+                .version(source.getVersion())
+                .scope(source.getScope())
+                .topic(source.getTopic())
+                .documentId(source.getDocumentId())
+                .audience(source.getAudience())
+                .region(source.getRegion())
+                .docStatus(source.getDocStatus())
                 .build();
     }
 }

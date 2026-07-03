@@ -24,7 +24,7 @@ public class SparseSearchChannel {
             long start = System.currentTimeMillis();
             int limit = context.getCandidateTopK() > 0 ? context.getCandidateTopK() : context.getTopK();
             List<RagSourceVo> sources = circuitBreakerService.executeEs(
-                    () -> searchBackendService.sparseSearch(context.getRewrittenQuery(), limit),
+                    () -> searchBackendService.sparseSearch(context.getRewrittenQuery(), limit, context.effectiveFilter()),
                     List.of());
             long latency = System.currentTimeMillis() - start;
             return new SearchChannel.SearchChannelResult("sparse", sources, latency);

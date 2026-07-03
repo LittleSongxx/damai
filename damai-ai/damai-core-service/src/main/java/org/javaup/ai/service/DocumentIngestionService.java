@@ -533,21 +533,25 @@ public class DocumentIngestionService {
             Map<String, io.qdrant.client.grpc.JsonWithInt.Value> payloadMap = new HashMap<>();
             for (Map.Entry<String, Object> entry : doc.getMetadata().entrySet()) {
                 if (entry.getValue() != null) {
-                    payloadMap.put(entry.getKey(),
-                            io.qdrant.client.ValueFactory.value(String.valueOf(entry.getValue())));
+                    putPayloadValue(payloadMap, entry.getKey(), entry.getValue());
                 }
             }
             payloadMap.put("text", io.qdrant.client.ValueFactory.value(doc.getText()));
             String title = doc.getMetadata().getOrDefault("title",
                     doc.getMetadata().getOrDefault("name", "FAQ")).toString();
             payloadMap.put("title", io.qdrant.client.ValueFactory.value(title));
-            // Propagate temporal validity for retrieval-time filtering
-            Object validFrom = doc.getMetadata().get("fm_valid_from");
-            Object validUntil = doc.getMetadata().get("fm_valid_until");
-            if (validFrom != null) payloadMap.put("validFrom",
-                    io.qdrant.client.ValueFactory.value(String.valueOf(validFrom)));
-            if (validUntil != null) payloadMap.put("validUntil",
-                    io.qdrant.client.ValueFactory.value(String.valueOf(validUntil)));
+            putTemporalPayload(payloadMap, "validFrom", doc.getMetadata().get("validFrom"),
+                    doc.getMetadata().get("fm_valid_from"));
+            putTemporalPayload(payloadMap, "validUntil", doc.getMetadata().get("validUntil"),
+                    doc.getMetadata().get("fm_valid_until"));
+            putPayloadValue(payloadMap, "scope", doc.getMetadata().get("scope"));
+            putPayloadValue(payloadMap, "topic", doc.getMetadata().get("topic"));
+            putPayloadValue(payloadMap, "documentId", doc.getMetadata().get("documentId"));
+            putPayloadValue(payloadMap, "audience", doc.getMetadata().get("audience"));
+            putPayloadValue(payloadMap, "region", doc.getMetadata().get("region"));
+            putPayloadValue(payloadMap, "channel", doc.getMetadata().get("channel"));
+            putPayloadValue(payloadMap, "userScope", doc.getMetadata().get("userScope"));
+            putPayloadValue(payloadMap, "docStatus", doc.getMetadata().get("docStatus"));
 
             long pointId = cid.hashCode() & 0xFFFFFFFFL;
             points.add(PointStruct.newBuilder()
@@ -577,6 +581,62 @@ public class DocumentIngestionService {
         return points.size();
     }
 
+    private void putPayloadValue(Map<String, io.qdrant.client.grpc.JsonWithInt.Value> payloadMap,
+                                 String key,
+                                 Object rawValue) {
+        if (!StringUtils.hasText(key) || rawValue == null) {
+            return;
+        }
+        if (rawValue instanceof Number number) {
+            payloadMap.put(key, io.qdrant.client.ValueFactory.value(number.longValue()));
+            return;
+        }
+        if (rawValue instanceof Boolean bool) {
+            payloadMap.put(key, io.qdrant.client.ValueFactory.value(bool));
+            return;
+        }
+        payloadMap.put(key, io.qdrant.client.ValueFactory.value(String.valueOf(rawValue)));
+    }
+
+    private void putTemporalPayload(Map<String, io.qdrant.client.grpc.JsonWithInt.Value> payloadMap,
+                                    String key,
+                                    Object normalized,
+                                    Object frontMatterValue) {
+        if (!StringUtils.hasText(key)) {
+            return;
+        }
+        if (normalized instanceof Number number) {
+            payloadMap.put(key, io.qdrant.client.ValueFactory.value(number.longValue()));
+            return;
+        }
+        Long parsed = parseTemporalMillis(frontMatterValue);
+        if (parsed != null) {
+            payloadMap.put(key, io.qdrant.client.ValueFactory.value(parsed));
+        }
+    }
+
+    private Long parseTemporalMillis(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        String text = String.valueOf(value);
+        if (!StringUtils.hasText(text)) {
+            return null;
+        }
+        try {
+            return java.time.Instant.parse(text).toEpochMilli();
+        } catch (Exception ignored) {
+        }
+        try {
+            return java.time.LocalDate.parse(text).atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
     // ======================== ES Operations ========================
 
     private EsReindexResult recreateEsIndex(List<Document> documents) {
@@ -588,6 +648,14 @@ public class DocumentIngestionService {
         properties.put("sourceFile", esClient.fieldMapping("keyword"));
         properties.put("chunkType", esClient.fieldMapping("keyword"));
         properties.put("label", esClient.fieldMapping("keyword"));
+        properties.put("scope", esClient.fieldMapping("keyword"));
+        properties.put("topic", esClient.fieldMapping("keyword"));
+        properties.put("documentId", esClient.fieldMapping("keyword"));
+        properties.put("audience", esClient.fieldMapping("keyword"));
+        properties.put("region", esClient.fieldMapping("keyword"));
+        properties.put("channel", esClient.fieldMapping("keyword"));
+        properties.put("userScope", esClient.fieldMapping("keyword"));
+        properties.put("docStatus", esClient.fieldMapping("keyword"));
         properties.put("indexVersion", esClient.fieldMapping("keyword"));
         properties.put("docVersion", esClient.fieldMapping("keyword"));
         properties.put("contentHash", esClient.fieldMapping("keyword"));
@@ -613,11 +681,7 @@ public class DocumentIngestionService {
             source.put("title", source.getOrDefault("title", source.getOrDefault("name", "FAQ")));
             source.put("text", doc.getText());
             source.putIfAbsent("searchText", doc.getText());
-            // Propagate temporal validity fields for retrieval-time filtering
-            Object validFrom = doc.getMetadata().get("fm_valid_from");
-            Object validUntil = doc.getMetadata().get("fm_valid_until");
-            if (validFrom != null) source.put("validFrom", validFrom);
-            if (validUntil != null) source.put("validUntil", validUntil);
+            normalizeTemporalSource(source, doc.getMetadata());
             bulk.append(JSON.toJSONString(source)).append('\n');
             docCount++;
 
@@ -656,10 +720,7 @@ public class DocumentIngestionService {
             source.put("title", source.getOrDefault("title", source.getOrDefault("name", "FAQ")));
             source.put("text", doc.getText());
             source.putIfAbsent("searchText", doc.getText());
-            Object validFrom = doc.getMetadata().get("fm_valid_from");
-            Object validUntil = doc.getMetadata().get("fm_valid_until");
-            if (validFrom != null) source.put("validFrom", validFrom);
-            if (validUntil != null) source.put("validUntil", validUntil);
+            normalizeTemporalSource(source, doc.getMetadata());
             bulk.append(JSON.toJSONString(source)).append('\n');
             count++;
         }
@@ -667,6 +728,17 @@ public class DocumentIngestionService {
             esClient.bulkPost(bulk.toString());
         }
         return count;
+    }
+
+    private void normalizeTemporalSource(Map<String, Object> source, Map<String, Object> metadata) {
+        Long validFrom = parseTemporalMillis(metadata.getOrDefault("validFrom", metadata.get("fm_valid_from")));
+        Long validUntil = parseTemporalMillis(metadata.getOrDefault("validUntil", metadata.get("fm_valid_until")));
+        if (validFrom != null) {
+            source.put("validFrom", validFrom);
+        }
+        if (validUntil != null) {
+            source.put("validUntil", validUntil);
+        }
     }
 
     // ======================== Task Management ========================

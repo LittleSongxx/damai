@@ -22,7 +22,7 @@ public class HydeSearchChannel {
             List<RagSourceVo> sources;
             try {
                 int limit = context.getCandidateTopK() > 0 ? context.getCandidateTopK() : context.getTopK();
-                sources = searchBackendService.hydeSearch(context.getOriginalQuery(), limit);
+                sources = searchBackendService.hydeSearch(context.getOriginalQuery(), limit, context.effectiveFilter());
                 for (RagSourceVo source : sources) {
                     source.setChannelName("hyde");
                 }
