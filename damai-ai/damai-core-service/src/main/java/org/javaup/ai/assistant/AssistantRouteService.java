@@ -1,10 +1,11 @@
 package org.javaup.ai.assistant;
 
+import org.javaup.ai.config.AssistantRoutingProperties;
 import org.javaup.ai.rag.intent.IntentGuidanceService;
 import org.javaup.ai.structured.IntentRecognition;
 import org.javaup.ai.structured.StructuredOutputService;
-import org.javaup.ai.utils.CommonUtils;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -16,40 +17,26 @@ import java.util.Map;
 @Service
 public class AssistantRouteService {
 
-    private static final Map<String, Double> BUSINESS_KEYWORDS = Map.ofEntries(
-            Map.entry("购票", 2.5), Map.entry("买票", 2.5), Map.entry("门票", 1.5), Map.entry("票档", 2.0),
-            Map.entry("演唱会", 1.0), Map.entry("节目", 0.5), Map.entry("推荐", 0.8), Map.entry("下单", 2.5)
-    );
-
-    private static final Map<String, Double> KNOWLEDGE_KEYWORDS = Map.ofEntries(
-            Map.entry("规则", 2.0), Map.entry("退票", 2.0), Map.entry("退款", 2.0),
-            Map.entry("实名", 1.5), Map.entry("转赠", 1.5), Map.entry("儿童票", 1.5), Map.entry("入场", 1.0),
-            Map.entry("配送", 1.0), Map.entry("电子票", 1.0), Map.entry("安检", 1.0)
-    );
-
-    private static final Map<String, Double> OPS_KEYWORDS = Map.ofEntries(
-            Map.entry("trace", 2.0), Map.entry("日志", 2.0), Map.entry("jvm", 2.0), Map.entry("cpu", 2.0),
-            Map.entry("线程", 1.5), Map.entry("gc", 1.5), Map.entry("监控", 1.5),
-            Map.entry("服务健康", 2.0), Map.entry("消息异常", 1.5), Map.entry("接口调用量", 2.0), Map.entry("接口错误", 2.0)
-    );
-
-    private static final Map<String, Double> GENERAL_KEYWORDS = Map.ofEntries(
-            Map.entry("谁是", 1.5), Map.entry("是谁", 1.5), Map.entry("介绍", 1.0), Map.entry("代表作", 1.5),
-            Map.entry("百科", 1.5), Map.entry("新闻", 1.5), Map.entry("资料", 1.0), Map.entry("最近", 0.5),
-            Map.entry("歌手", 1.0), Map.entry("艺人", 1.0), Map.entry("专辑", 1.0), Map.entry("巡演", 1.0),
-            Map.entry("新歌", 1.0), Map.entry("乐队", 1.0)
-    );
-
     private final StructuredOutputService structuredOutputService;
     private final ChatClient chatClient;
     private final IntentGuidanceService intentGuidanceService;
+    private final AssistantRoutingProperties routingProperties;
 
+    @Autowired
     public AssistantRouteService(StructuredOutputService structuredOutputService,
                                  @Qualifier("unifiedGeneralChatClient") ChatClient chatClient,
-                                 IntentGuidanceService intentGuidanceService) {
+                                 IntentGuidanceService intentGuidanceService,
+                                 AssistantRoutingProperties routingProperties) {
         this.structuredOutputService = structuredOutputService;
         this.chatClient = chatClient;
         this.intentGuidanceService = intentGuidanceService;
+        this.routingProperties = routingProperties == null ? new AssistantRoutingProperties() : routingProperties;
+    }
+
+    public AssistantRouteService(StructuredOutputService structuredOutputService,
+                                 ChatClient chatClient,
+                                 IntentGuidanceService intentGuidanceService) {
+        this(structuredOutputService, chatClient, intentGuidanceService, new AssistantRoutingProperties());
     }
 
     public AssistantRouteDecision route(String message) {
@@ -63,13 +50,13 @@ public class AssistantRouteService {
                     .build();
         }
         Map.Entry<AssistantRouteType, Double> best = Map.ofEntries(
-                Map.entry(AssistantRouteType.BUSINESS, scoreKeywords(normalized, BUSINESS_KEYWORDS)),
-                Map.entry(AssistantRouteType.KNOWLEDGE, scoreKeywords(normalized, KNOWLEDGE_KEYWORDS)),
-                Map.entry(AssistantRouteType.OPS, scoreKeywords(normalized, OPS_KEYWORDS)),
-                Map.entry(AssistantRouteType.GENERAL, scoreKeywords(normalized, GENERAL_KEYWORDS))
+                Map.entry(AssistantRouteType.BUSINESS, scoreKeywords(normalized, routingProperties.getBusinessKeywords())),
+                Map.entry(AssistantRouteType.KNOWLEDGE, scoreKeywords(normalized, routingProperties.getKnowledgeKeywords())),
+                Map.entry(AssistantRouteType.OPS, scoreKeywords(normalized, routingProperties.getOpsKeywords())),
+                Map.entry(AssistantRouteType.GENERAL, scoreKeywords(normalized, routingProperties.getGeneralKeywords()))
         ).entrySet().stream().max(Comparator.comparingDouble(Map.Entry::getValue)).orElse(null);
 
-        if (best != null && best.getValue() > 0) {
+        if (best != null && best.getValue() >= routingProperties.getKeywordMinScore()) {
             // Intent tree gray-zone check for keyword-matched routes
             try {
                 var guidanceResult = intentGuidanceService.classify(message);
@@ -80,7 +67,7 @@ public class AssistantRouteService {
                             .fromFallback(false)
                             .clarificationRequired(true)
                             .clarificationPrompt(guidanceResult.clarificationPrompt())
-                            .clarificationOptions(List.of("查询或购买演出票", "咨询购票/退票/入场规则", "联网搜索歌手、演出和娱乐资讯", "排查日志、Trace 或服务指标"))
+                            .clarificationOptions(clarificationOptions())
                             .build();
                 }
             } catch (Exception ignored) {
@@ -111,7 +98,7 @@ public class AssistantRouteService {
                         .fromFallback(true)
                         .clarificationRequired(true)
                         .clarificationPrompt(guidanceResult.clarificationPrompt())
-                        .clarificationOptions(List.of("查询或购买演出票", "咨询购票/退票/入场规则", "联网搜索歌手、演出和娱乐资讯", "排查日志、Trace 或服务指标"))
+                        .clarificationOptions(clarificationOptions())
                         .build();
             }
         } catch (Exception ignored) {
@@ -168,7 +155,8 @@ public class AssistantRouteService {
         if (Boolean.TRUE.equals(recognition.getNeedsClarification())) {
             return true;
         }
-        return recognition.getConfidence() != null && recognition.getConfidence() < 0.45D;
+        return recognition.getConfidence() != null
+                && recognition.getConfidence() < routingProperties.getStructuredClarificationConfidence();
     }
 
     private AssistantRouteDecision clarification(IntentRecognition recognition, String primaryIntent) {
@@ -181,7 +169,7 @@ public class AssistantRouteService {
                 .fromFallback(false)
                 .clarificationRequired(true)
                 .clarificationPrompt(prompt)
-                .clarificationOptions(List.of("查询或购买演出票", "咨询购票/退票/入场规则", "联网搜索歌手、演出和娱乐资讯", "排查日志、Trace 或服务指标"))
+                .clarificationOptions(clarificationOptions())
                 .build();
     }
 
@@ -196,15 +184,22 @@ public class AssistantRouteService {
     }
 
     private boolean looksLikeOpsDataQuestion(String normalized) {
-        if (!CommonUtils.containsAny(normalized,
-                "nl2sql", "text2sql", "sql", "查库", "数据库", "问数", "取数", "报表",
-                "统计", "趋势", "同比", "环比", "排名", "top",
-                "订单量", "支付成功率", "退款率", "退款金额", "gmv", "成交额",
-                "失败订单", "失败原因", "票档库存", "库存告急", "余票",
-                "接口调用量", "接口错误", "错误率", "p95", "消息异常", "消费失败",
-                "token", "成本")) {
+        if (!containsAny(normalized, routingProperties.getOpsDataKeywords())) {
             return false;
         }
-        return !CommonUtils.containsAny(normalized, "购票", "买票", "下单", "推荐");
+        return !containsAny(normalized, routingProperties.getPurchaseOverrideKeywords());
+    }
+
+    private List<String> clarificationOptions() {
+        return routingProperties.getClarificationOptions() == null || routingProperties.getClarificationOptions().isEmpty()
+                ? new AssistantRoutingProperties().getClarificationOptions()
+                : routingProperties.getClarificationOptions();
+    }
+
+    private boolean containsAny(String text, List<String> terms) {
+        if (!StringUtils.hasText(text) || terms == null || terms.isEmpty()) {
+            return false;
+        }
+        return terms.stream().filter(StringUtils::hasText).anyMatch(text::contains);
     }
 }

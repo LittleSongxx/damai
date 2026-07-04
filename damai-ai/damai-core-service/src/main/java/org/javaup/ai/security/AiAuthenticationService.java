@@ -1,7 +1,7 @@
 package org.javaup.ai.security;
 
 import lombok.extern.slf4j.Slf4j;
-import org.javaup.ai.cache.CacheManager;
+import org.javaup.ai.cache.UserContextCacheService;
 import org.javaup.ai.context.AiUserContext;
 import org.javaup.ai.resilience.CircuitBreakerService;
 import org.javaup.ai.vo.UserDetailVo;
@@ -25,7 +25,7 @@ public class AiAuthenticationService {
     private AiPermissionService aiPermissionService;
 
     @Resource
-    private CacheManager cacheManager;
+    private UserContextCacheService userContextCacheService;
 
     @Resource
     private CircuitBreakerService circuitBreakerService;
@@ -34,7 +34,7 @@ public class AiAuthenticationService {
         if (!StringUtils.hasText(token)) {
             throw new AiAuthenticationException("登录态缺失");
         }
-        AiUserContext cached = cacheManager.getUserContext(token);
+        AiUserContext cached = userContextCacheService.get(token);
         if (cached != null) {
             return cached;
         }
@@ -52,7 +52,7 @@ public class AiAuthenticationService {
                 .email(user.getEmail())
                 .admin(aiPermissionService.isAdmin(user.getId()))
                 .build();
-        cacheManager.putUserContext(token, context);
+        userContextCacheService.put(token, context);
         return context;
     }
 }

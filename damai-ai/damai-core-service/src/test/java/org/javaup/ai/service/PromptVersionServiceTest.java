@@ -6,6 +6,7 @@ import org.javaup.ai.assistant.mcp.McpGovernanceProperties;
 import org.javaup.ai.assistant.skill.ops.OpsEvidenceProvider;
 import org.javaup.ai.assistant.skill.ops.OpsProviderRegistry;
 import org.javaup.ai.assistant.skill.ops.OpsRcaRequest;
+import org.javaup.ai.config.AiQualityGateProperties;
 import org.javaup.ai.entity.AiNl2SqlEvalRun;
 import org.javaup.ai.entity.AiRagEvalRun;
 import org.javaup.ai.mapper.AiNl2SqlEvalRunMapper;
@@ -124,7 +125,7 @@ class PromptVersionServiceTest {
         CustomerServiceMetricsService metricsService = mock(CustomerServiceMetricsService.class);
         when(metricsService.qualitySnapshot()).thenReturn(passingCustomerServiceSnapshot());
         AiQualityGateService qualityGateService = new AiQualityGateService(
-                ragMapper, sqlMapper, new McpGovernanceProperties(), opsRegistry(), metricsService);
+                ragMapper, sqlMapper, new McpGovernanceProperties(), opsRegistry(), metricsService, new AiQualityGateProperties());
         PromptReleasePlanService releasePlanService = new PromptReleasePlanService(service, qualityGateService);
 
         List<AiPromptVersion> versions = new ArrayList<>();
@@ -152,7 +153,7 @@ class PromptVersionServiceTest {
         CustomerServiceMetricsService metricsService = mock(CustomerServiceMetricsService.class);
         when(metricsService.qualitySnapshot()).thenReturn(passingCustomerServiceSnapshot());
         AiQualityGateService qualityGateService = new AiQualityGateService(
-                ragMapper, sqlMapper, new McpGovernanceProperties(), opsRegistry(), metricsService);
+                ragMapper, sqlMapper, new McpGovernanceProperties(), opsRegistry(), metricsService, new AiQualityGateProperties());
         PromptReleasePlanService releasePlanService = new PromptReleasePlanService(service, qualityGateService);
 
         List<AiPromptVersion> versions = new ArrayList<>();
@@ -181,7 +182,7 @@ class PromptVersionServiceTest {
         CustomerServiceMetricsService metricsService = mock(CustomerServiceMetricsService.class);
         when(metricsService.qualitySnapshot()).thenReturn(Map.of("totalEvents", 0));
         AiQualityGateService qualityGateService = new AiQualityGateService(
-                ragMapper, sqlMapper, mcp, opsRegistry(), metricsService);
+                ragMapper, sqlMapper, mcp, opsRegistry(), metricsService, new AiQualityGateProperties());
         PromptReleasePlanService releasePlanService = new PromptReleasePlanService(service, qualityGateService);
 
         when(versionMapper.selectList(any())).thenReturn(List.of(version(2, "candidate", false, "DRAFT", 0)));

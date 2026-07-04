@@ -1,8 +1,10 @@
 package org.javaup.ai.config;
 
+import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
+@Data
 @Configuration
 @ConfigurationProperties(prefix = "damai.ai.eval")
 public class EvalConfig {
@@ -17,84 +19,9 @@ public class EvalConfig {
     private double faithfulnessThreshold = 0.90;
     private double answerRelevancyThreshold = 0.80;
     private double answerCorrectnessThreshold = 0.75;
-
-    public boolean isDegradedMode() {
-        return degradedMode;
-    }
-
-    public void setDegradedMode(boolean degradedMode) {
-        this.degradedMode = degradedMode;
-    }
-
-    public double getRecallAtKThreshold() {
-        return recallAtKThreshold;
-    }
-
-    public void setRecallAtKThreshold(double recallAtKThreshold) {
-        this.recallAtKThreshold = recallAtKThreshold;
-    }
-
-    public double getMrrThreshold() {
-        return mrrThreshold;
-    }
-
-    public void setMrrThreshold(double mrrThreshold) {
-        this.mrrThreshold = mrrThreshold;
-    }
-
-    public double getNdcgAtKThreshold() {
-        return ndcgAtKThreshold;
-    }
-
-    public void setNdcgAtKThreshold(double ndcgAtKThreshold) {
-        this.ndcgAtKThreshold = ndcgAtKThreshold;
-    }
-
-    public double getContextPrecisionThreshold() {
-        return contextPrecisionThreshold;
-    }
-
-    public void setContextPrecisionThreshold(double contextPrecisionThreshold) {
-        this.contextPrecisionThreshold = contextPrecisionThreshold;
-    }
-
-    public double getContextRecallThreshold() {
-        return contextRecallThreshold;
-    }
-
-    public void setContextRecallThreshold(double contextRecallThreshold) {
-        this.contextRecallThreshold = contextRecallThreshold;
-    }
-
-    public double getContextRelevanceThreshold() {
-        return contextRelevanceThreshold;
-    }
-
-    public void setContextRelevanceThreshold(double contextRelevanceThreshold) {
-        this.contextRelevanceThreshold = contextRelevanceThreshold;
-    }
-
-    public double getFaithfulnessThreshold() {
-        return faithfulnessThreshold;
-    }
-
-    public void setFaithfulnessThreshold(double faithfulnessThreshold) {
-        this.faithfulnessThreshold = faithfulnessThreshold;
-    }
-
-    public double getAnswerRelevancyThreshold() {
-        return answerRelevancyThreshold;
-    }
-
-    public void setAnswerRelevancyThreshold(double answerRelevancyThreshold) {
-        this.answerRelevancyThreshold = answerRelevancyThreshold;
-    }
-
-    public double getAnswerCorrectnessThreshold() {
-        return answerCorrectnessThreshold;
-    }
-
-    public void setAnswerCorrectnessThreshold(double answerCorrectnessThreshold) {
-        this.answerCorrectnessThreshold = answerCorrectnessThreshold;
-    }
+    private int maxConcurrency = 3;
+    private int workerPoolSize = 3;
+    private int innerPoolSize = 4;
+    private int runTimeoutMinutes = 30;
+    private int stageTimeoutMinutes = 10;
 }

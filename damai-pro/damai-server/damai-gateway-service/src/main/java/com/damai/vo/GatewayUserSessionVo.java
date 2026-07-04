@@ -10,7 +10,7 @@ import java.util.Date;
  * @author: 阿星不是程序员
  **/
 @Data
-public class UserVo {
+public class GatewayUserSessionVo {
     
     private String id;
     

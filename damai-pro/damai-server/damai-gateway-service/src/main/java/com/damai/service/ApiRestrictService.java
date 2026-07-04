@@ -7,7 +7,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.baidu.fsg.uid.UidGenerator;
 import com.damai.core.RedisKeyManage;
 import com.damai.util.StringUtil;
-import com.damai.dto.ApiDataDto;
+import com.damai.dto.GatewayApiCallRecordMessage;
 import com.damai.enums.ApiRuleType;
 import com.damai.enums.BaseCode;
 import com.damai.enums.RuleTimeUnit;
@@ -18,8 +18,8 @@ import com.damai.redis.RedisCache;
 import com.damai.redis.RedisKeyBuild;
 import com.damai.service.lua.ApiRestrictCacheOperate;
 import com.damai.util.DateUtils;
-import com.damai.vo.DepthRuleVo;
-import com.damai.vo.RuleVo;
+import com.damai.vo.GatewayDepthRuleConfigVo;
+import com.damai.vo.GatewayRuleConfigVo;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
@@ -89,13 +89,13 @@ public class ApiRestrictService {
             }
             String commonKey = stringBuilder.append("_").append(url).toString();
             try {
-                List<DepthRuleVo> depthRuleVoList = new ArrayList<>();
+                List<GatewayDepthRuleConfigVo> depthRuleVoList = new ArrayList<>();
           
-                RuleVo ruleVo = redisCache.getForHash(RedisKeyBuild.createRedisKey(RedisKeyManage.ALL_RULE_HASH), RedisKeyBuild.createRedisKey(RedisKeyManage.RULE).getRelKey(),RuleVo.class);
+                GatewayRuleConfigVo ruleVo = redisCache.getForHash(RedisKeyBuild.createRedisKey(RedisKeyManage.ALL_RULE_HASH), RedisKeyBuild.createRedisKey(RedisKeyManage.RULE).getRelKey(),GatewayRuleConfigVo.class);
   
                 String depthRuleStr = redisCache.getForHash(RedisKeyBuild.createRedisKey(RedisKeyManage.ALL_RULE_HASH), RedisKeyBuild.createRedisKey(RedisKeyManage.DEPTH_RULE).getRelKey(),String.class);
                 if (StringUtil.isNotEmpty(depthRuleStr)) {
-                    depthRuleVoList = JSON.parseArray(depthRuleStr,DepthRuleVo.class);
+                    depthRuleVoList = JSON.parseArray(depthRuleStr,GatewayDepthRuleConfigVo.class);
                 }
              
                 int apiRuleType = ApiRuleType.NO_RULE.getCode();
@@ -129,7 +129,7 @@ public class ApiRestrictService {
                     messageIndex = apiRestrictData.getMessageIndex();
                     if (messageIndex != -1) {
                         message = Optional.ofNullable(depthRuleVoList.get((int)messageIndex))
-                                .map(DepthRuleVo::getMessage)
+                                .map(GatewayDepthRuleConfigVo::getMessage)
                                 .filter(StringUtil::isNotEmpty)
                                 .orElse(message);
                     }
@@ -151,7 +151,7 @@ public class ApiRestrictService {
         }
     }
     
-    public JSONObject getRuleParameter(int apiRuleType, String commonKey, RuleVo ruleVo){
+    public JSONObject getRuleParameter(int apiRuleType, String commonKey, GatewayRuleConfigVo ruleVo){
         JSONObject parameter = new JSONObject();
         
         parameter.put("apiRuleType",apiRuleType);
@@ -172,7 +172,7 @@ public class ApiRestrictService {
         return parameter;
     }
     
-    public JSONObject getDepthRuleParameter(JSONObject parameter,String commonKey,List<DepthRuleVo> depthRuleVoList){
+    public JSONObject getDepthRuleParameter(JSONObject parameter,String commonKey,List<GatewayDepthRuleConfigVo> depthRuleVoList){
         depthRuleVoList = sortStartTimeWindow(depthRuleVoList);
         
         parameter.put("depthRuleSize",String.valueOf(depthRuleVoList.size()));
@@ -182,7 +182,7 @@ public class ApiRestrictService {
         List<JSONObject> depthRules = new ArrayList<>();
         for (int i = 0; i < depthRuleVoList.size(); i++) {
             JSONObject depthRule = new JSONObject();
-            DepthRuleVo depthRuleVo = depthRuleVoList.get(i);
+            GatewayDepthRuleConfigVo depthRuleVo = depthRuleVoList.get(i);
             
             depthRule.put("statTime",Objects.equals(depthRuleVo.getStatTimeType(), RuleTimeUnit.SECOND.getCode()) ? depthRuleVo.getStatTime() : depthRuleVo.getStatTime() * 60);
             
@@ -203,11 +203,11 @@ public class ApiRestrictService {
         return parameter;
     }
     
-    public List<DepthRuleVo> sortStartTimeWindow(List<DepthRuleVo> depthRuleVoList){
+    public List<GatewayDepthRuleConfigVo> sortStartTimeWindow(List<GatewayDepthRuleConfigVo> depthRuleVoList){
         return depthRuleVoList.stream().peek(depthRuleVo -> {
             depthRuleVo.setStartTimeWindowTimestamp(getTimeWindowTimestamp(depthRuleVo.getStartTimeWindow()));
             depthRuleVo.setEndTimeWindowTimestamp((getTimeWindowTimestamp(depthRuleVo.getEndTimeWindow())));
-        }).sorted(Comparator.comparing(DepthRuleVo::getStartTimeWindowTimestamp)).collect(Collectors.toList());
+        }).sorted(Comparator.comparing(GatewayDepthRuleConfigVo::getStartTimeWindowTimestamp)).collect(Collectors.toList());
     }
     
     public long getTimeWindowTimestamp(String timeWindow){
@@ -253,7 +253,7 @@ public class ApiRestrictService {
     }
     
     public void saveApiData(ServerHttpRequest request, String apiUrl, Integer type){
-        ApiDataDto apiDataDto = new ApiDataDto();
+        GatewayApiCallRecordMessage apiDataDto = new GatewayApiCallRecordMessage();
         apiDataDto.setId(uidGenerator.getUid());
         apiDataDto.setApiAddress(getIpAddress(request));
         apiDataDto.setApiUrl(apiUrl);

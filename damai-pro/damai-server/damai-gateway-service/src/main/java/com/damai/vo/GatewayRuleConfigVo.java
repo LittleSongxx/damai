@@ -8,7 +8,7 @@ import lombok.Data;
  * @author: 阿星不是程序员
  **/
 @Data
-public class RuleVo {
+public class GatewayRuleConfigVo {
     
     private String id;
     

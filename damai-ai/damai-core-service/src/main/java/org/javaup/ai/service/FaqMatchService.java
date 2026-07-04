@@ -9,7 +9,7 @@ import io.qdrant.client.PointIdFactory;
 import io.qdrant.client.grpc.Points;
 import io.qdrant.client.grpc.Points.PointStruct;
 import lombok.extern.slf4j.Slf4j;
-import org.javaup.ai.cache.CacheManager;
+import org.javaup.ai.cache.EmbeddingCacheService;
 import org.javaup.ai.entity.FaqEntry;
 import org.javaup.ai.mapper.FaqEntryMapper;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
@@ -35,7 +35,7 @@ public class FaqMatchService {
     private final FaqEntryMapper faqEntryMapper;
     private final OpenAiEmbeddingModel embeddingModel;
     private final QdrantClient qdrantClient;
-    private final CacheManager cacheManager;
+    private final EmbeddingCacheService embeddingCacheService;
 
     @Value("${damai.ai.faq.alias:damai-ai-faq-current}")
     private String faqAlias;
@@ -46,11 +46,11 @@ public class FaqMatchService {
     public FaqMatchService(FaqEntryMapper faqEntryMapper,
                            OpenAiEmbeddingModel embeddingModel,
                            QdrantClient qdrantClient,
-                           CacheManager cacheManager) {
+                           EmbeddingCacheService embeddingCacheService) {
         this.faqEntryMapper = faqEntryMapper;
         this.embeddingModel = embeddingModel;
         this.qdrantClient = qdrantClient;
-        this.cacheManager = cacheManager;
+        this.embeddingCacheService = embeddingCacheService;
     }
 
     /**
@@ -197,10 +197,10 @@ public class FaqMatchService {
      */
     private FaqMatchResult semanticMatch(String query) {
         try {
-            float[] vector = cacheManager.getEmbedding(query);
+            float[] vector = embeddingCacheService.get(query);
             if (vector == null) {
                 vector = embeddingModel.embed(query);
-                cacheManager.putEmbedding(query, vector);
+                embeddingCacheService.put(query, vector);
             }
 
             List<Float> vectorList = new ArrayList<>(vector.length);

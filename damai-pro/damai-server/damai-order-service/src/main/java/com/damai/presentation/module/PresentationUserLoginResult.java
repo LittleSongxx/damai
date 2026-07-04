@@ -1,5 +1,6 @@
-package com.damai.simulation.module;
+package com.damai.presentation.module;
 
+import com.damai.vo.UserLoginVo;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -10,7 +11,7 @@ import lombok.EqualsAndHashCode;
  **/
 @EqualsAndHashCode(callSuper = true)
 @Data
-public class CreateProgramOrderResultModule extends ApiResponseModule{
+public class PresentationUserLoginResult extends PresentationApiResponse{
 
-    private String data;
+    private UserLoginVo data;
 }

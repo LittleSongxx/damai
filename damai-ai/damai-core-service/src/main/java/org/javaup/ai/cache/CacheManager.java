@@ -251,13 +251,40 @@ public class CacheManager {
         java.util.Map<String, Object> stats = new java.util.LinkedHashMap<>();
         var embedStats = embeddingCache.stats();
         stats.put("embedding", Map.of(
+                "enabled", properties.getEmbedding().isEnabled(),
+                "ttlMinutes", properties.getEmbedding().getTtlMinutes(),
+                "maxSize", properties.getEmbedding().getMaxSize(),
+                "redisPersistenceEnabled", properties.getEmbedding().isRedisPersistenceEnabled(),
                 "hitRate", String.format("%.2f%%", embedStats.hitRate() * 100),
                 "hitCount", embedStats.hitCount(),
                 "missCount", embedStats.missCount(),
-                "evictionCount", embedStats.evictionCount()
+                "evictionCount", embedStats.evictionCount(),
+                "estimatedSize", embeddingCache.estimatedSize()
         ));
+        var nl2sqlSchemaStats = nl2sqlSchemaCache.stats();
         stats.put("nl2sqlSchema", Map.of(
+                "enabled", properties.getNl2sqlSchema().isEnabled(),
+                "ttlMinutes", properties.getNl2sqlSchema().getTtlMinutes(),
+                "maxSize", properties.getNl2sqlSchema().getMaxSize(),
+                "hitRate", String.format("%.2f%%", nl2sqlSchemaStats.hitRate() * 100),
+                "hitCount", nl2sqlSchemaStats.hitCount(),
+                "missCount", nl2sqlSchemaStats.missCount(),
+                "evictionCount", nl2sqlSchemaStats.evictionCount(),
                 "estimatedSize", nl2sqlSchemaCache.estimatedSize()
+        ));
+        stats.put("redisBacked", Map.of(
+                "faqSearch", Map.of(
+                        "enabled", properties.getFaqSearch().isEnabled(),
+                        "ttlMinutes", properties.getFaqSearch().getTtlMinutes()),
+                "webSearch", Map.of(
+                        "enabled", properties.getWebSearch().isEnabled(),
+                        "ttlMinutes", properties.getWebSearch().getTtlMinutes()),
+                "userContext", Map.of(
+                        "enabled", properties.getUserContext().isEnabled(),
+                        "ttlMinutes", properties.getUserContext().getTtlMinutes()),
+                "nl2sqlResult", Map.of(
+                        "enabled", properties.getNl2sqlResult().isEnabled(),
+                        "ttlMinutes", properties.getNl2sqlResult().getTtlMinutes())
         ));
         return stats;
     }

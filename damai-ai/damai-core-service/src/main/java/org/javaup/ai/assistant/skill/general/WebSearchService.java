@@ -3,7 +3,7 @@ package org.javaup.ai.assistant.skill.general;
 import com.alibaba.fastjson2.JSON;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.javaup.ai.cache.CacheManager;
+import org.javaup.ai.cache.WebSearchCacheService;
 import org.javaup.ai.config.WebSearchProperties;
 import org.javaup.ai.resilience.CircuitBreakerService;
 import org.javaup.ai.resilience.DegradationService;
@@ -21,7 +21,7 @@ public class WebSearchService {
     private final WebSearchProperties properties;
     private final TavilyWebSearchClient tavilyWebSearchClient;
     private final BochaWebSearchClient bochaWebSearchClient;
-    private final CacheManager cacheManager;
+    private final WebSearchCacheService webSearchCacheService;
     private final CircuitBreakerService circuitBreakerService;
     private final DegradationService degradationService;
 
@@ -41,7 +41,7 @@ public class WebSearchService {
         }
 
         String cacheKey = request.getQuery();
-        String cached = cacheManager.getWebSearch(cacheKey);
+        String cached = webSearchCacheService.get(cacheKey);
         if (cached != null) {
             WebSearchResult cachedResult = JSON.parseObject(cached, WebSearchResult.class);
             if (cachedResult != null) {
@@ -54,7 +54,7 @@ public class WebSearchService {
                 WebSearchResult.empty("circuit_open", "联网搜索暂不可用"));
 
         if (result.hasDocuments()) {
-            cacheManager.putWebSearch(cacheKey, JSON.toJSONString(result));
+            webSearchCacheService.put(cacheKey, JSON.toJSONString(result));
         }
         return result;
     }

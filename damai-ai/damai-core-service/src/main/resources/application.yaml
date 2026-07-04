@@ -154,6 +154,29 @@ damai:
       faithfulness-threshold: ${DAMAI_AI_EVAL_FAITHFULNESS_THRESHOLD:0.90}
       answer-relevancy-threshold: ${DAMAI_AI_EVAL_ANSWER_RELEVANCY_THRESHOLD:0.80}
       answer-correctness-threshold: ${DAMAI_AI_EVAL_ANSWER_CORRECTNESS_THRESHOLD:0.75}
+      max-concurrency: ${DAMAI_AI_EVAL_MAX_CONCURRENCY:3}
+      worker-pool-size: ${DAMAI_AI_EVAL_WORKER_POOL_SIZE:3}
+      inner-pool-size: ${DAMAI_AI_EVAL_INNER_POOL_SIZE:4}
+      run-timeout-minutes: ${DAMAI_AI_EVAL_RUN_TIMEOUT_MINUTES:30}
+      stage-timeout-minutes: ${DAMAI_AI_EVAL_STAGE_TIMEOUT_MINUTES:10}
+    quality-gate:
+      nl2sql:
+        sql-validity-rate: ${DAMAI_AI_GATE_NL2SQL_VALIDITY_RATE:0.90}
+        execution-accuracy: ${DAMAI_AI_GATE_NL2SQL_EXECUTION_ACCURACY:0.80}
+        schema-link-recall: ${DAMAI_AI_GATE_NL2SQL_SCHEMA_RECALL:0.70}
+      customer-service:
+        min-events-for-strict-gate: ${DAMAI_AI_GATE_CS_MIN_EVENTS:10}
+        min-quick-answer-hit-rate: ${DAMAI_AI_GATE_CS_MIN_QUICK_HIT_RATE:0.25}
+        max-work-item-rate: ${DAMAI_AI_GATE_CS_MAX_WORK_ITEM_RATE:0.35}
+        max-negative-sentiment-rate: ${DAMAI_AI_GATE_CS_MAX_NEGATIVE_SENTIMENT_RATE:0.30}
+        min-satisfaction-rate: ${DAMAI_AI_GATE_CS_MIN_SATISFACTION_RATE:0.70}
+        required-p95-quick-answer-latency-ms: ${DAMAI_AI_GATE_CS_P95_QUICK_LATENCY_MS:300}
+      ai-ops:
+        min-healthy-providers: ${DAMAI_AI_GATE_AIOPS_MIN_HEALTHY_PROVIDERS:4}
+        required-signal-type: ${DAMAI_AI_GATE_AIOPS_REQUIRED_SIGNAL_TYPE:businessEvents}
+      red-team:
+        status: ${DAMAI_AI_GATE_RED_TEAM_STATUS:PASS}
+        test-class: ${DAMAI_AI_GATE_RED_TEAM_TEST_CLASS:RedTeamRegressionTest}
     security:
       admin-user-ids: ${DAMAI_AI_ADMIN_USER_IDS:}
     mcp:
@@ -249,6 +272,12 @@ damai:
       keyword-relative-score-floor: ${DAMAI_AI_RETRIEVAL_KEYWORD_RELATIVE_SCORE_FLOOR:0.35}
       rrf-k: ${DAMAI_AI_RETRIEVAL_RRF_K:60}
       candidate-multiplier: ${DAMAI_AI_RETRIEVAL_CANDIDATE_MULTIPLIER:5}
+      policy:
+        rerank-min-top-k: ${DAMAI_AI_RETRIEVAL_POLICY_RERANK_MIN_TOP_K:6}
+        corrective-top-k-multiplier: ${DAMAI_AI_RETRIEVAL_POLICY_CORRECTIVE_TOPK_MULTIPLIER:2}
+        high-risk-terms: ${DAMAI_AI_RETRIEVAL_POLICY_HIGH_RISK_TERMS:退票,退款,退钱,实名,身份证,入场,支付,扣款,订单,发票,投诉,赔偿,取消}
+        abstract-rule-terms: ${DAMAI_AI_RETRIEVAL_POLICY_ABSTRACT_RULE_TERMS:规则,政策,限制,条件,流程,怎么办,如何,能不能,可以吗}
+        business-key-terms: ${DAMAI_AI_RETRIEVAL_POLICY_BUSINESS_KEY_TERMS:订单,手机号,身份证,二维码,票档,座位,场次,节目,支付,退款}
       post-filter:
         enabled: ${DAMAI_AI_POST_FILTER_ENABLED:true}
         relevance-threshold: ${DAMAI_AI_POST_FILTER_THRESHOLD:0.35}
@@ -300,6 +329,9 @@ damai:
       ambiguity-margin: ${DAMAI_AI_INTENT_AMBIGUITY_MARGIN:0.20}
       min-score: ${DAMAI_AI_INTENT_MIN_SCORE:0.4}
       max-count: ${DAMAI_AI_INTENT_MAX_COUNT:3}
+    assistant-routing:
+      keyword-min-score: ${DAMAI_AI_ROUTING_KEYWORD_MIN_SCORE:0.1}
+      structured-clarification-confidence: ${DAMAI_AI_ROUTING_STRUCTURED_CLARIFICATION_CONFIDENCE:0.45}
     tracing:
       enabled: ${DAMAI_AI_TRACING_ENABLED:true}
       otlp-endpoint: ${DAMAI_AI_OTLP_ENDPOINT:http://127.0.0.1:4317}

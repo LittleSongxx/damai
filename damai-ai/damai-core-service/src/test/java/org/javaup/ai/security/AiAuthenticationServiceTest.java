@@ -1,7 +1,7 @@
 package org.javaup.ai.security;
 
 import org.javaup.ai.ai.function.call.UserCall;
-import org.javaup.ai.cache.CacheManager;
+import org.javaup.ai.cache.UserContextCacheService;
 import org.javaup.ai.context.AiUserContext;
 import org.javaup.ai.resilience.CircuitBreakerService;
 import org.javaup.ai.vo.UserDetailVo;
@@ -27,7 +27,7 @@ class AiAuthenticationServiceTest {
     private AiPermissionService aiPermissionService;
 
     @Mock
-    private CacheManager cacheManager;
+    private UserContextCacheService userContextCacheService;
 
     @Mock
     private CircuitBreakerService circuitBreakerService;

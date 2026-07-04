@@ -9,7 +9,7 @@ import io.qdrant.client.grpc.Points;
 import io.qdrant.client.grpc.Points.ScoredPoint;
 import io.qdrant.client.grpc.Points.SearchPoints;
 import lombok.extern.slf4j.Slf4j;
-import org.javaup.ai.cache.CacheManager;
+import org.javaup.ai.cache.EmbeddingCacheService;
 import org.javaup.ai.entity.RagChunk;
 import org.javaup.ai.mapper.RagChunkMapper;
 import org.javaup.ai.rag.channel.KnowledgeRetrievalFilter;
@@ -37,7 +37,7 @@ public class RagSearchBackendService {
     private final OpenAiEmbeddingModel embeddingModel;
     private final AdvancedQueryService advancedQueryService;
     private final QdrantClient qdrantClient;
-    private final CacheManager cacheManager;
+    private final EmbeddingCacheService embeddingCacheService;
     private final RagChunkMapper chunkMapper;
     private final DocumentIngestionService documentIngestionService;
     private final EsClientHelper esClient;
@@ -51,14 +51,14 @@ public class RagSearchBackendService {
     public RagSearchBackendService(OpenAiEmbeddingModel embeddingModel,
                                    AdvancedQueryService advancedQueryService,
                                    QdrantClient qdrantClient,
-                                   CacheManager cacheManager,
+                                   EmbeddingCacheService embeddingCacheService,
                                    RagChunkMapper chunkMapper,
                                    DocumentIngestionService documentIngestionService,
                                    EsClientHelper esClient) {
         this.embeddingModel = embeddingModel;
         this.advancedQueryService = advancedQueryService;
         this.qdrantClient = qdrantClient;
-        this.cacheManager = cacheManager;
+        this.embeddingCacheService = embeddingCacheService;
         this.chunkMapper = chunkMapper;
         this.documentIngestionService = documentIngestionService;
         this.esClient = esClient;
@@ -119,10 +119,10 @@ public class RagSearchBackendService {
 
     public List<RagSourceVo> denseSearch(String query, int topK, KnowledgeRetrievalFilter filter) {
         try {
-            float[] vector = cacheManager.getEmbedding(query);
+            float[] vector = embeddingCacheService.get(query);
             if (vector == null) {
                 vector = embeddingModel.embed(query);
-                cacheManager.putEmbedding(query, vector);
+                embeddingCacheService.put(query, vector);
             }
             List<Float> vectorList = new ArrayList<>(vector.length);
             for (float v : vector) {

@@ -10,7 +10,7 @@ import io.qdrant.client.grpc.Collections.VectorParams;
 import io.qdrant.client.grpc.Points.PointStruct;
 import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.ai.rag.MarkdownLoader;
-import org.javaup.ai.cache.CacheManager;
+import org.javaup.ai.cache.FaqSearchCacheService;
 import org.javaup.ai.entity.RagChunk;
 import org.javaup.ai.entity.RagDocument;
 import org.javaup.ai.entity.RagIngestionTask;
@@ -51,7 +51,7 @@ public class DocumentIngestionService {
     private final RagDocumentMapper documentMapper;
     private final RagChunkMapper chunkMapper;
     private final RagIngestionTaskMapper taskMapper;
-    private final CacheManager cacheManager;
+    private final FaqSearchCacheService faqSearchCacheService;
     private final HypotheticalQuestionService hypotheticalService;
     private final MultiChannelRetrievalEngine retrievalEngine;
 
@@ -80,7 +80,7 @@ public class DocumentIngestionService {
                                      RagDocumentMapper documentMapper,
                                      RagChunkMapper chunkMapper,
                                      RagIngestionTaskMapper taskMapper,
-                                     CacheManager cacheManager,
+                                     FaqSearchCacheService faqSearchCacheService,
                                      HypotheticalQuestionService hypotheticalService,
                                      @Lazy MultiChannelRetrievalEngine retrievalEngine,
                                      EsClientHelper esClient) {
@@ -90,7 +90,7 @@ public class DocumentIngestionService {
         this.documentMapper = documentMapper;
         this.chunkMapper = chunkMapper;
         this.taskMapper = taskMapper;
-        this.cacheManager = cacheManager;
+        this.faqSearchCacheService = faqSearchCacheService;
         this.hypotheticalService = hypotheticalService;
         this.retrievalEngine = retrievalEngine;
         this.esClient = esClient;
@@ -142,7 +142,7 @@ public class DocumentIngestionService {
             EsReindexResult esResult = recreateEsIndex(documents);
 
             // Invalidate FAQ search cache
-            cacheManager.invalidateFaqSearch();
+            faqSearchCacheService.invalidate();
 
             updateTaskStatus(task, "completed");
             task.setResultJson(JSON.toJSONString(Map.of(
@@ -208,7 +208,7 @@ public class DocumentIngestionService {
                 List<RagChunk> changedChunks = updateChunkMetadata(changed);
                 qdrantUpserted = batchUpsertQdrant(changed, changedChunks);
                 esUpserted = bulkUpsertEs(changed);
-                cacheManager.invalidateFaqSearch();
+                faqSearchCacheService.invalidate();
             }
 
             updateTaskStatus(task, "completed");

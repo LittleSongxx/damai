@@ -8,7 +8,7 @@ import com.damai.exception.DaMaiFrameException;
 import com.damai.jwt.TokenUtil;
 import com.damai.redis.RedisCache;
 import com.damai.redis.RedisKeyBuild;
-import com.damai.vo.UserVo;
+import com.damai.vo.GatewayUserSessionVo;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -21,7 +21,7 @@ import java.util.Optional;
  **/
 
 @Component
-public class TokenService {
+public class GatewayTokenService {
     
     @Autowired
     private RedisCache redisCache;
@@ -34,11 +34,11 @@ public class TokenService {
         return null;
     }
     
-    public UserVo getUser(String token,String code,String tokenSecret){
-        UserVo userVo = null;
+    public GatewayUserSessionVo getUser(String token,String code,String tokenSecret){
+        GatewayUserSessionVo userVo = null;
         String userId = parseToken(token,tokenSecret);
         if (StringUtil.isNotEmpty(userId)) {
-            userVo = redisCache.get(RedisKeyBuild.createRedisKey(RedisKeyManage.USER_LOGIN, code, userId), UserVo.class);
+            userVo = redisCache.get(RedisKeyBuild.createRedisKey(RedisKeyManage.USER_LOGIN, code, userId), GatewayUserSessionVo.class);
         }
         return Optional.ofNullable(userVo).orElseThrow(() -> new DaMaiFrameException(BaseCode.LOGIN_USER_NOT_EXIST));
     }

@@ -35,7 +35,7 @@ import static com.damai.constant.GatewayConstant.CODE;
  **/
 @Slf4j
 @Service
-public class ChannelDataService {
+public class GatewayChannelDataService {
     
     private final static String EXCEPTION_MESSAGE = "code参数为空";
     

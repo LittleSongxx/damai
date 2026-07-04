@@ -17,10 +17,10 @@ import com.damai.enums.DiscardOrderReason;
 import com.damai.redis.RedisCache;
 import com.damai.redis.RedisKeyBuild;
 import com.damai.service.OrderService;
-import com.damai.simulation.module.CreateProgramOrderResultModule;
-import com.damai.simulation.module.ProgramDetailResultModule;
-import com.damai.simulation.module.TickerUserListResultModule;
-import com.damai.simulation.module.UserLoginResultModule;
+import com.damai.presentation.module.PresentationCreateProgramOrderResult;
+import com.damai.presentation.module.PresentationProgramDetailResult;
+import com.damai.presentation.module.PresentationTicketUserListResult;
+import com.damai.presentation.module.PresentationUserLoginResult;
 import com.damai.util.DateUtils;
 import com.damai.util.StringUtil;
 import com.damai.vo.ProgramVo;
@@ -29,6 +29,7 @@ import com.damai.vo.UserLoginVo;
 import lombok.extern.slf4j.Slf4j;
 import org.jetbrains.annotations.NotNull;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -37,10 +38,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-import static com.damai.simulation.constant.SimulationOrderConstant.CREATE_PROGRAM_ORDER_URL;
-import static com.damai.simulation.constant.SimulationOrderConstant.PROGRAM_DETAIL_URL;
-import static com.damai.simulation.constant.SimulationOrderConstant.TICKET_USER_LIST_URL;
-import static com.damai.simulation.constant.SimulationOrderConstant.USER_LOGIN_URL;
+import static com.damai.presentation.constant.PresentationOrderConstant.CREATE_PROGRAM_ORDER_URL;
+import static com.damai.presentation.constant.PresentationOrderConstant.PROGRAM_DETAIL_URL;
+import static com.damai.presentation.constant.PresentationOrderConstant.TICKET_USER_LIST_URL;
+import static com.damai.presentation.constant.PresentationOrderConstant.USER_LOGIN_URL;
 
 /**
  * @program: 极度真实还原大麦网高并发实战项目。 添加 阿星不是程序员 微信，添加时备注 大麦 来获取项目的完整资料 
@@ -49,6 +50,7 @@ import static com.damai.simulation.constant.SimulationOrderConstant.USER_LOGIN_U
  **/
 @Slf4j
 @Component
+@ConditionalOnProperty(prefix = "damai.presentation-order", name = "enabled", havingValue = "true")
 public class PresentationOrderDataTask {
     
     @Autowired
@@ -64,13 +66,13 @@ public class PresentationOrderDataTask {
                 log.info("订单服务定时任务重置执行");
                 //真实删除所有的订单和购票人订单，购票人订单记录(大麦普通版本没有这步)
                 orderService.delOrderAndOrderTicketUser();
-                //模拟创建订单
-                simulationCreateOrder();
+                //演示环境补充订单数据
+                presentationCreateOrder();
                 //将原有的模拟废弃订单数据删除
                 redisCache.del(RedisKeyBuild.createRedisKey(RedisKeyManage.DISCARD_ORDER, 34));
                 //模拟废弃订单数据，放入Redis中
                 redisCache.leftPushForList(RedisKeyBuild.createRedisKey(RedisKeyManage.DISCARD_ORDER, 34),
-                        simulationDiscardOrder());
+                        presentationDiscardOrder());
             }catch (Exception e) {
                 log.error("executeTask error",e);
             }
@@ -80,8 +82,8 @@ public class PresentationOrderDataTask {
     /**
      * 模拟废弃订单数据
      */
-    private DiscardOrder simulationDiscardOrder(){
-        //模拟废弃订单数据
+    private DiscardOrder presentationDiscardOrder(){
+        //演示废弃订单数据
         OrderCreateMq orderCreateMq = new OrderCreateMq();
         orderCreateMq.setCreateOrderTime(DateUtils.now());
         orderCreateMq.setIdentifierId(1421864797540605952L);
@@ -114,7 +116,7 @@ public class PresentationOrderDataTask {
     }
     
     
-    public void simulationCreateOrder(){
+    public void presentationCreateOrder(){
         try {
             //先登录
             UserLoginDto userLoginDto = new UserLoginDto();
@@ -153,7 +155,7 @@ public class PresentationOrderDataTask {
                 log.info("模拟创建订单成功 orderNumber:{}",orderNumber);
             }
         }catch (Exception e) {
-            log.error("simulationCreateOrder error",e);   
+            log.error("presentationCreateOrder error",e);
         }
     }
     
@@ -178,11 +180,11 @@ public class PresentationOrderDataTask {
                 .timeout(20000)
                 .body(JSON.toJSONString(userLoginDto))
                 .execute().body();
-        UserLoginResultModule userLoginResultModule = JSON.parseObject(result, UserLoginResultModule.class);
-        if (!Objects.equals(userLoginResultModule.getCode(), BaseCode.SUCCESS.getCode())) {
+        PresentationUserLoginResult userLoginResult = JSON.parseObject(result, PresentationUserLoginResult.class);
+        if (!Objects.equals(userLoginResult.getCode(), BaseCode.SUCCESS.getCode())) {
             return null;
         }
-        return userLoginResultModule.getData();
+        return userLoginResult.getData();
     }
     
     public List<TicketUserVo> tickerUserListHttp(TicketUserListDto ticketUserListDto){
@@ -190,11 +192,11 @@ public class PresentationOrderDataTask {
                 .timeout(20000)
                 .body(JSON.toJSONString(ticketUserListDto))
                 .execute().body();
-        TickerUserListResultModule tickerUserListResultModule = JSON.parseObject(result, TickerUserListResultModule.class);
-        if (!Objects.equals(tickerUserListResultModule.getCode(), BaseCode.SUCCESS.getCode())) {
+        PresentationTicketUserListResult ticketUserListResult = JSON.parseObject(result, PresentationTicketUserListResult.class);
+        if (!Objects.equals(ticketUserListResult.getCode(), BaseCode.SUCCESS.getCode())) {
             return null;
         }
-        return tickerUserListResultModule.getData();
+        return ticketUserListResult.getData();
     }
     
     public ProgramVo programDetailHttp(ProgramGetDto programGetDto){
@@ -202,11 +204,11 @@ public class PresentationOrderDataTask {
                 .timeout(20000)
                 .body(JSON.toJSONString(programGetDto))
                 .execute().body();
-        ProgramDetailResultModule programDetailResultModule = JSON.parseObject(result, ProgramDetailResultModule.class);
-        if (!Objects.equals(programDetailResultModule.getCode(), BaseCode.SUCCESS.getCode())) {
+        PresentationProgramDetailResult programDetailResult = JSON.parseObject(result, PresentationProgramDetailResult.class);
+        if (!Objects.equals(programDetailResult.getCode(), BaseCode.SUCCESS.getCode())) {
             return null;
         }
-        return programDetailResultModule.getData();
+        return programDetailResult.getData();
     }
     
     public String createProgramOrder(ProgramOrderCreateDto programOrderCreateDto){
@@ -214,11 +216,11 @@ public class PresentationOrderDataTask {
                 .timeout(20000)
                 .body(JSON.toJSONString(programOrderCreateDto))
                 .execute().body();
-        CreateProgramOrderResultModule createProgramOrderResultModule = JSON.parseObject(result, CreateProgramOrderResultModule.class);
-        if (!Objects.equals(createProgramOrderResultModule.getCode(), BaseCode.SUCCESS.getCode())) {
+        PresentationCreateProgramOrderResult createProgramOrderResult = JSON.parseObject(result, PresentationCreateProgramOrderResult.class);
+        if (!Objects.equals(createProgramOrderResult.getCode(), BaseCode.SUCCESS.getCode())) {
             return null;
         }
-        return createProgramOrderResultModule.getData();
+        return createProgramOrderResult.getData();
         
     } 
 }

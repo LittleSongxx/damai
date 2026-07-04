@@ -13,14 +13,14 @@ import com.damai.pro.limit.RateLimiter;
 import com.damai.pro.limit.RateLimiterProperty;
 import com.damai.property.GatewayProperty;
 import com.damai.service.ApiRestrictService;
-import com.damai.service.ChannelDataService;
-import com.damai.service.TokenService;
+import com.damai.service.GatewayChannelDataService;
+import com.damai.service.GatewayTokenService;
 import com.damai.threadlocal.BaseParameterHolder;
 import com.damai.util.RsaSignTool;
 import com.damai.util.RsaTool;
 import com.damai.util.StringUtil;
 import com.damai.vo.GetChannelDataVo;
-import com.damai.vo.UserVo;
+import com.damai.vo.GatewayUserSessionVo;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -79,13 +79,13 @@ public class RequestValidationFilter implements GlobalFilter, Ordered {
     private ServerCodecConfigurer serverCodecConfigurer;
 
     @Autowired
-    private ChannelDataService channelDataService;
+    private GatewayChannelDataService channelDataService;
 
     @Autowired
     private ApiRestrictService apiRestrictService;
 
     @Autowired
-    private TokenService tokenService;
+    private GatewayTokenService tokenService;
 
     @Autowired
     private GatewayProperty gatewayProperty;
@@ -233,12 +233,12 @@ public class RequestValidationFilter implements GlobalFilter, Ordered {
             }
 
             if (!skipCheckTokenResult) {
-                UserVo userVo = tokenService.getUser(token,code,channelDataVo.getTokenSecret());
+                GatewayUserSessionVo userVo = tokenService.getUser(token,code,channelDataVo.getTokenSecret());
                 userId = userVo.getId();
             }
             
             if (StringUtil.isEmpty(userId) && checkNeedUserId(url) && StringUtil.isNotEmpty(token)) {
-                UserVo userVo = tokenService.getUser(token,code,channelDataVo.getTokenSecret());
+                GatewayUserSessionVo userVo = tokenService.getUser(token,code,channelDataVo.getTokenSecret());
                 userId = userVo.getId();
             }
             

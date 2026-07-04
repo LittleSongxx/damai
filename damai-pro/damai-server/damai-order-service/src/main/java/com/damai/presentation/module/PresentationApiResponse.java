@@ -1,4 +1,4 @@
-package com.damai.simulation.module;
+package com.damai.presentation.module;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
@@ -9,7 +9,7 @@ import lombok.Data;
  * @author: 阿星不是程序员
  **/
 @Data
-public class ApiResponseModule {
+public class PresentationApiResponse {
 
     @Schema(name ="code", type ="Integer", description ="响应码 0:成功 其余:失败")
     private Integer code;

@@ -5,6 +5,7 @@ import org.javaup.ai.assistant.mcp.McpGovernanceProperties;
 import org.javaup.ai.assistant.skill.ops.OpsEvidenceProvider;
 import org.javaup.ai.assistant.skill.ops.OpsProviderRegistry;
 import org.javaup.ai.assistant.skill.ops.OpsRcaRequest;
+import org.javaup.ai.config.AiQualityGateProperties;
 import org.javaup.ai.entity.AiNl2SqlEvalRun;
 import org.javaup.ai.entity.AiRagEvalRun;
 import org.javaup.ai.mapper.AiNl2SqlEvalRunMapper;
@@ -37,7 +38,7 @@ class AiQualityGateServiceTest {
                 "satisfactionRate", 0.9,
                 "avgFirstResponseLatencyMs", 120D));
         AiQualityGateService service = new AiQualityGateService(
-                ragMapper, nl2SqlMapper, mcp, opsRegistry(), metricsService);
+                ragMapper, nl2SqlMapper, mcp, opsRegistry(), metricsService, new AiQualityGateProperties());
 
         AiRagEvalRun ragRun = new AiRagEvalRun();
         ragRun.setEvalRunId("rag-1");
@@ -102,7 +103,7 @@ class AiQualityGateServiceTest {
         mcp.setExposeNl2Sql(true);
         when(metricsService.qualitySnapshot()).thenReturn(Map.of("totalEvents", 0));
         AiQualityGateService service = new AiQualityGateService(
-                ragMapper, nl2SqlMapper, mcp, opsRegistry(), metricsService);
+                ragMapper, nl2SqlMapper, mcp, opsRegistry(), metricsService, new AiQualityGateProperties());
 
         AiNl2SqlEvalRun sqlRun = new AiNl2SqlEvalRun();
         sqlRun.setEvalRunId("sql-bad");

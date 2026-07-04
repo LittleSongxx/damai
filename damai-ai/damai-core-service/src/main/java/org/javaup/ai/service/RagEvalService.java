@@ -23,6 +23,7 @@ import org.javaup.ai.rag.channel.KnowledgeRetrievalFilter;
 import org.javaup.ai.vo.RagEvalRunRequest;
 import org.javaup.ai.vo.RagSearchResultVo;
 import org.javaup.ai.vo.RagSourceVo;
+import jakarta.annotation.PreDestroy;
 import org.springframework.ai.document.Document;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
@@ -57,23 +58,8 @@ public class RagEvalService {
     private static final String DEFAULT_DATASET_ID = "default-golden";
     private static final String DEFAULT_DATASET_VERSION = "v1";
     private static final List<Integer> DEFAULT_K_VALUES = List.of(1, 3, 5, 10);
-    private static final ExecutorService EVAL_WORKER_POOL = Executors.newCachedThreadPool(r -> {
-        Thread t = new Thread(r, "eval-case-worker");
-        t.setDaemon(true);
-        return t;
-    });
-
-    private static final ExecutorService EVAL_INNER_POOL = Executors.newFixedThreadPool(4, r -> {
-        Thread t = new Thread(r, "eval-case-inner");
-        t.setDaemon(true);
-        return t;
-    });
-
     private static final int DEFAULT_EVAL_TOP_K = 5;
     private static final boolean DEFAULT_ENABLE_RERANK = true;
-    private static final int MAX_EVAL_CONCURRENCY = 3;
-    private static final int RUN_TIMEOUT_MINUTES = 30;
-    private static final int STAGE_TIMEOUT_MINUTES = 10;
 
     private final AiRagEvalCaseMapper caseMapper;
     private final AiRagEvalRunMapper runMapper;
@@ -82,6 +68,8 @@ public class RagEvalService {
     private final RagEvalScorer ragEvalScorer;
     private final RagChunkMapper ragChunkMapper;
     private final EvalConfig evalConfig;
+    private final ExecutorService evalWorkerPool;
+    private final ExecutorService evalInnerPool;
     private ApplicationContext applicationContext;
 
     @Autowired
@@ -103,6 +91,16 @@ public class RagEvalService {
         this.ragEvalScorer = ragEvalScorer;
         this.ragChunkMapper = ragChunkMapper;
         this.evalConfig = evalConfig;
+        this.evalWorkerPool = Executors.newFixedThreadPool(Math.max(1, evalConfig.getWorkerPoolSize()), r -> {
+            Thread t = new Thread(r, "eval-case-worker");
+            t.setDaemon(true);
+            return t;
+        });
+        this.evalInnerPool = Executors.newFixedThreadPool(Math.max(1, evalConfig.getInnerPoolSize()), r -> {
+            Thread t = new Thread(r, "eval-case-inner");
+            t.setDaemon(true);
+            return t;
+        });
     }
 
     public AiRagEvalRun startEvaluation() {
@@ -566,10 +564,10 @@ public class RagEvalService {
     @Async("aiTraceExecutor")
     public void executeEvalAsync(AiRagEvalRun evalRun, List<AiRagEvalCase> cases, RagEvalRunRequest request) {
         // Bounded concurrency: max 3 cases in parallel to avoid overwhelming DeepSeek API
-        int maxConcurrency = MAX_EVAL_CONCURRENCY;
+        int maxConcurrency = Math.max(1, evalConfig.getMaxConcurrency());
         Semaphore semaphore = new Semaphore(maxConcurrency);
 
-        ExecutorService executor = EVAL_WORKER_POOL;
+        ExecutorService executor = evalWorkerPool;
 
         AtomicInteger completed = new AtomicInteger(0);
         AtomicReference<Double> totalRecall = new AtomicReference<>(0.0);
@@ -618,7 +616,7 @@ public class RagEvalService {
         }
 
         // Wait for all cases to complete
-        long deadline = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(RUN_TIMEOUT_MINUTES);
+        long deadline = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(Math.max(1, evalConfig.getRunTimeoutMinutes()));
         for (int i = 0; i < futures.size(); i++) {
             Future<?> future = futures.get(i);
             long remaining = deadline - System.currentTimeMillis();
@@ -776,9 +774,9 @@ public class RagEvalService {
         String generationJudgeRaw = null;
 
         // ---- Step 3 + 4 in parallel: generateAnswer + evaluateContext + chunkRelevance (independent) ----
-        Future<String> answerFuture = EVAL_INNER_POOL.submit(() ->
+        Future<String> answerFuture = evalInnerPool.submit(() ->
                 ragEvalScorer.generateAnswer(evalCase.getQuestion(), retrievedDocs));
-        Future<RagEvalScorer.ContextEvalResult> ctxFuture = EVAL_INNER_POOL.submit(() -> {
+        Future<RagEvalScorer.ContextEvalResult> ctxFuture = evalInnerPool.submit(() -> {
             try {
                 return ragEvalScorer.evaluateContext(
                         evalCase.getQuestion(),
@@ -789,7 +787,7 @@ public class RagEvalService {
                 return new RagEvalScorer.ContextEvalResult(0, 0, 0);
             }
         });
-        Future<Map<Integer, Integer>> chunkRelFuture = EVAL_INNER_POOL.submit(() -> {
+        Future<Map<Integer, Integer>> chunkRelFuture = evalInnerPool.submit(() -> {
             try {
                 List<String> chunkTexts = retrievedDocs.stream()
                         .map(d -> d.getText() != null ? d.getText() : "")
@@ -804,7 +802,7 @@ public class RagEvalService {
 
         String generatedAnswer;
         try {
-            generatedAnswer = answerFuture.get(STAGE_TIMEOUT_MINUTES, TimeUnit.MINUTES);
+            generatedAnswer = answerFuture.get(stageTimeoutMinutes(), TimeUnit.MINUTES);
         } catch (TimeoutException e) {
             log.error("Answer generation TIMEOUT for caseId={}", evalCase.getCaseId());
             answerFuture.cancel(true);
@@ -817,7 +815,7 @@ public class RagEvalService {
 
         // Collect context eval result
         try {
-            RagEvalScorer.ContextEvalResult ctxResult = ctxFuture.get(STAGE_TIMEOUT_MINUTES, TimeUnit.MINUTES);
+            RagEvalScorer.ContextEvalResult ctxResult = ctxFuture.get(stageTimeoutMinutes(), TimeUnit.MINUTES);
             contextPrecision = ctxResult.contextPrecision();
             contextRecall = ctxResult.contextRecall();
             contextRelevance = ctxResult.contextRelevance();
@@ -838,7 +836,7 @@ public class RagEvalService {
 
         // Merge LLM chunk relevance grades with human-annotated weights and recompute NDCG
         try {
-            Map<Integer, Integer> llmGrades = chunkRelFuture.get(STAGE_TIMEOUT_MINUTES, TimeUnit.MINUTES);
+            Map<Integer, Integer> llmGrades = chunkRelFuture.get(stageTimeoutMinutes(), TimeUnit.MINUTES);
             if (!llmGrades.isEmpty()) {
                 Map<String, Integer> mergedWeights = new LinkedHashMap<>(chunkWeights);
                 for (int i = 0; i < retrievedChunks.size(); i++) {
@@ -1221,6 +1219,16 @@ public class RagEvalService {
         report.put("metrics", metrics);
         report.put("errorMessage", run.getErrorMessage());
         return report;
+    }
+
+    @PreDestroy
+    public void shutdownEvalExecutors() {
+        evalWorkerPool.shutdownNow();
+        evalInnerPool.shutdownNow();
+    }
+
+    private int stageTimeoutMinutes() {
+        return Math.max(1, evalConfig.getStageTimeoutMinutes());
     }
 
     private String buildRunErrorMessage(int totalCases, int completedCases, ConcurrentLinkedQueue<String> caseErrors) {

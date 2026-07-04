@@ -1,22 +1,23 @@
 package org.javaup.ai.rag;
 
 import org.javaup.ai.assistant.skill.knowledge.KnowledgeRetrievalPlan;
+import org.javaup.ai.config.RetrievalPolicyProperties;
 import org.javaup.ai.rag.channel.KnowledgeRetrievalFilter;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.util.List;
-
 @Service
 public class RetrievalStrategyPolicy {
 
-    private static final List<String> HIGH_RISK_TERMS = List.of(
-            "退票", "退款", "退钱", "实名", "身份证", "入场", "支付", "扣款", "订单", "发票", "投诉", "赔偿", "取消"
-    );
+    private final RetrievalPolicyProperties properties;
 
-    private static final List<String> ABSTRACT_RULE_TERMS = List.of(
-            "规则", "政策", "限制", "条件", "流程", "怎么办", "如何", "能不能", "可以吗"
-    );
+    public RetrievalStrategyPolicy(RetrievalPolicyProperties properties) {
+        this.properties = properties == null ? new RetrievalPolicyProperties() : properties;
+    }
+
+    public RetrievalStrategyPolicy() {
+        this(new RetrievalPolicyProperties());
+    }
 
     public RetrievalStrategy firstPass(KnowledgeRetrievalPlan plan, KnowledgeRetrievalFilter filter) {
         String query = plan == null ? "" : plan.normalizedQuery();
@@ -27,7 +28,7 @@ public class RetrievalStrategyPolicy {
         if (plan.complexity() == KnowledgeRetrievalPlan.Complexity.SIMPLE && !highRisk) {
             return RetrievalStrategy.fastExact(plan.topK(), "low-risk fast exact query");
         }
-        boolean rerank = plan.enableRerank() && plan.topK() >= 6;
+        boolean rerank = plan.enableRerank() && plan.topK() >= Math.max(1, properties.getRerankMinTopK());
         String reason = highRisk ? "high-risk customer service question" : "standard customer service hybrid retrieval";
         return RetrievalStrategy.standardHybrid(plan.topK(), rerank, highRisk, reason);
     }
@@ -48,20 +49,21 @@ public class RetrievalStrategyPolicy {
             return RetrievalStrategy.handoffOrClarify(true, "high-risk evidence is not recoverable");
         }
         boolean enableHyde = shouldUseHyde(query, missingInfo);
-        return RetrievalStrategy.enhancedRecovery(plan.topK() * 2, highRisk, enableHyde,
+        int topK = plan.topK() * Math.max(1, properties.getCorrectiveTopKMultiplier());
+        return RetrievalStrategy.enhancedRecovery(topK, highRisk, enableHyde,
                 "corrective retrieval uses missing-slot rewrite, step-back and structured support");
     }
 
     public boolean shouldUseHyde(String query, String missingInfo) {
         String text = ((query == null ? "" : query) + " " + (missingInfo == null ? "" : missingInfo)).trim();
         if (!StringUtils.hasText(text)) return false;
-        boolean hasBusinessKey = text.matches(".*(订单|手机号|身份证|二维码|票档|座位|场次|节目|支付|退款).*");
-        boolean abstractRule = ABSTRACT_RULE_TERMS.stream().anyMatch(text::contains);
+        boolean hasBusinessKey = properties.getBusinessKeyTerms().stream().anyMatch(text::contains);
+        boolean abstractRule = properties.getAbstractRuleTerms().stream().anyMatch(text::contains);
         return abstractRule && !hasBusinessKey;
     }
 
     public boolean isHighRisk(String query) {
         if (!StringUtils.hasText(query)) return false;
-        return HIGH_RISK_TERMS.stream().anyMatch(query::contains);
+        return properties.getHighRiskTerms().stream().anyMatch(query::contains);
     }
 }

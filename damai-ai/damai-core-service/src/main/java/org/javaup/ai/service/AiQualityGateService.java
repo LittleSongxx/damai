@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import lombok.RequiredArgsConstructor;
 import org.javaup.ai.assistant.mcp.McpGovernanceProperties;
 import org.javaup.ai.assistant.skill.ops.OpsProviderRegistry;
+import org.javaup.ai.config.AiQualityGateProperties;
 import org.javaup.ai.entity.AiNl2SqlEvalRun;
 import org.javaup.ai.entity.AiRagEvalRun;
 import org.javaup.ai.mapper.AiNl2SqlEvalRunMapper;
@@ -26,6 +27,7 @@ public class AiQualityGateService {
     private final McpGovernanceProperties mcpGovernanceProperties;
     private final OpsProviderRegistry opsProviderRegistry;
     private final CustomerServiceMetricsService customerServiceMetricsService;
+    private final AiQualityGateProperties qualityGateProperties;
 
     public Map<String, Object> latestGate() {
         AiRagEvalRun ragRun = latestRagRun();
@@ -98,7 +100,11 @@ public class AiQualityGateService {
         double validity = run.getSqlValidityRate() == null ? 0D : run.getSqlValidityRate();
         double execution = run.getExecutionAccuracy() == null ? 0D : run.getExecutionAccuracy();
         double schemaRecall = run.getSchemaLinkRecall() == null ? 0D : run.getSchemaLinkRecall();
-        String status = completed && validity >= 0.9 && execution >= 0.8 && schemaRecall >= 0.7 ? "PASS" : "FAIL";
+        var threshold = qualityGateProperties.getNl2sql();
+        String status = completed
+                && validity >= threshold.getSqlValidityRate()
+                && execution >= threshold.getExecutionAccuracy()
+                && schemaRecall >= threshold.getSchemaLinkRecall() ? "PASS" : "FAIL";
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("evalRunId", value(run.getEvalRunId()));
         details.put("completedCases", run.getCompletedCases() == null ? 0 : run.getCompletedCases());
@@ -139,15 +145,16 @@ public class AiQualityGateService {
     }
 
     private Map<String, Object> redTeamGate() {
-        return gate("RED_TEAM_REGRESSION", "PASS",
+        return gate("RED_TEAM_REGRESSION", qualityGateProperties.getRedTeam().getStatus(),
                 "red-team regression suite is wired as unit tests: prompt injection, NL2SQL injection, tool overreach, unsafe endpoint access",
-                Map.of("testClass", "RedTeamRegressionTest"));
+                Map.of("testClass", qualityGateProperties.getRedTeam().getTestClass()));
     }
 
     private Map<String, Object> aiOpsEvidenceGate() {
         List<Map<String, Object>> providers = opsProviderRegistry.providerStatuses();
         long activeCount = providers.stream().filter(provider -> Boolean.TRUE.equals(provider.get("healthy"))).count();
-        boolean pass = activeCount >= 4 && providers.stream().anyMatch(provider -> "businessEvents".equals(provider.get("signalType"))
+        boolean pass = activeCount >= qualityGateProperties.getAiOps().getMinHealthyProviders()
+                && providers.stream().anyMatch(provider -> qualityGateProperties.getAiOps().getRequiredSignalType().equals(provider.get("signalType"))
                 && Boolean.TRUE.equals(provider.get("healthy")));
         return gate("AIOPS_EVIDENCE", pass ? "PASS" : "WARN",
                 "AIOps RCA must be based on real providers and explicit missing-provider review, not placeholder evidence",
@@ -173,13 +180,17 @@ public class AiQualityGateService {
         double workItemRate = number(snapshot.get("workItemRate")).doubleValue();
         double negativeSentimentRate = number(snapshot.get("negativeSentimentRate")).doubleValue();
         double satisfactionRate = number(snapshot.get("satisfactionRate")).doubleValue();
+        var threshold = qualityGateProperties.getCustomerService();
         String status = "PASS";
         String message = "customer-service quick answer, sentiment, work item, and experience metrics are within guardrail thresholds";
-        if (totalEvents >= 10 && (quickAnswerHitRate < 0.25D || workItemRate > 0.35D || negativeSentimentRate > 0.3D)) {
+        if (totalEvents >= threshold.getMinEventsForStrictGate()
+                && (quickAnswerHitRate < threshold.getMinQuickAnswerHitRate()
+                || workItemRate > threshold.getMaxWorkItemRate()
+                || negativeSentimentRate > threshold.getMaxNegativeSentimentRate())) {
             status = "WARN";
             message = "customer-service experience metrics need operational review";
         }
-        if (satisfactionRate > 0D && satisfactionRate < 0.7D) {
+        if (satisfactionRate > 0D && satisfactionRate < threshold.getMinSatisfactionRate()) {
             status = "FAIL";
             message = "customer-service satisfaction is below release threshold";
         }
@@ -191,7 +202,7 @@ public class AiQualityGateService {
         details.put("negativeSentimentRate", negativeSentimentRate);
         details.put("satisfactionRate", satisfactionRate);
         details.put("avgFirstResponseLatencyMs", number(snapshot.get("avgFirstResponseLatencyMs")).doubleValue());
-        details.put("requiredP95QuickAnswerLatencyMs", 300);
+        details.put("requiredP95QuickAnswerLatencyMs", threshold.getRequiredP95QuickAnswerLatencyMs());
         return gate("CUSTOMER_SERVICE_EXPERIENCE", status, message, details);
     }
 
@@ -206,54 +217,14 @@ public class AiQualityGateService {
 
     private Map<String, Object> coverageSummary() {
         Map<String, Object> coverage = new LinkedHashMap<>();
-        coverage.put("domains", List.of(
-                "auth",
-                "run-graph",
-                "rag-evalops",
-                "rag-ingestion-quality",
-                "nl2sql-safety",
-                "mcp-governance",
-                "mcp-boundary",
-                "assistant-eval-control-plane",
-                "customer-service-experience",
-                "aiops-rca",
-                "prompt-governance",
-                "prompt-release-plan",
-                "red-team"));
-        coverage.put("backendTestClasses", List.of(
-                "AiAuthenticationInterceptorTest",
-                "AssistantRunGraphServiceTest",
-                "McpToolGovernanceServiceTest",
-                "McpBoundaryServiceTest",
-                "AiQualityGateServiceTest",
-                "AssistantEvalRunServiceTest",
-                "PromptVersionServiceTest",
-                "CustomerHotQuestionServiceTest",
-                "CustomerServiceMetricsServiceTest",
-                "RagRetrievalFacadeTest",
-                "KnowledgeRetrievalOrchestratorTest",
-                "IngestionQualityServiceTest",
-                "RagIngestionConsumerTest",
-                "DocumentLifecycleServiceTest",
-                "RedTeamRegressionTest",
-                "AssistantSkillSchemaValidatorTest",
-                "Nl2SqlSafetyValidatorTest",
-                "Nl2SqlExecutionServiceTest",
-                "Nl2SqlOrchestratorPolicyTest",
-                "Nl2SqlEvalServiceTest",
-                "RagEvalServiceTest",
-                "RagEvalOpsServicesTest",
-                "OpsRcaEvidenceServiceTest",
-                "OpsRcaEvidenceServiceTest"));
-        coverage.put("frontendTestFiles", List.of(
-                "AssistantHub.spec.js",
-                "PromptGovernance.spec.js",
-                "useAssistantRuntime.spec.js",
-                "api.spec.js"));
+        var coverageProperties = qualityGateProperties.getCoverage();
+        coverage.put("domains", coverageProperties.getDomains());
+        coverage.put("backendTestClasses", coverageProperties.getBackendTestClasses());
+        coverage.put("frontendTestFiles", coverageProperties.getFrontendTestFiles());
         coverage.put("minimumGoldCases", Map.of(
-                "rag", 50,
-                "nl2sql", 50,
-                "redTeam", 30));
+                "rag", coverageProperties.getMinimumRagGoldCases(),
+                "nl2sql", coverageProperties.getMinimumNl2sqlGoldCases(),
+                "redTeam", coverageProperties.getMinimumRedTeamCases()));
         return coverage;
     }
 

@@ -3,7 +3,7 @@ package org.javaup.ai.assistant.skill.ops.nl2sql;
 import org.javaup.ai.assistant.budget.TokenBudget;
 import org.javaup.ai.assistant.budget.TokenBudgetManager;
 import org.javaup.ai.assistant.tool.AssistantToolInvoker;
-import org.javaup.ai.cache.CacheManager;
+import org.javaup.ai.cache.Nl2SqlCacheService;
 import org.javaup.ai.rag.prompt.PromptTemplateLoader;
 import org.javaup.ai.service.Nl2SqlMultiTurnContextService;
 import org.springframework.ai.chat.client.ChatClient;
@@ -32,7 +32,7 @@ public class Nl2SqlOrchestrator {
     private final Nl2SqlErrorClassifier errorClassifier;
     private final AssistantToolInvoker toolInvoker;
     private final PromptTemplateLoader templateLoader;
-    private final CacheManager cacheManager;
+    private final Nl2SqlCacheService nl2SqlCacheService;
     private final Nl2SqlMultiTurnContextService multiTurnContextService;
     private final TokenBudgetManager tokenBudgetManager;
 
@@ -45,7 +45,7 @@ public class Nl2SqlOrchestrator {
                               Nl2SqlErrorClassifier errorClassifier,
                               AssistantToolInvoker toolInvoker,
                               PromptTemplateLoader templateLoader,
-                              CacheManager cacheManager,
+                              Nl2SqlCacheService nl2SqlCacheService,
                               Nl2SqlMultiTurnContextService multiTurnContextService,
                               TokenBudgetManager tokenBudgetManager) {
         this.chatClient = chatClient;
@@ -57,7 +57,7 @@ public class Nl2SqlOrchestrator {
         this.errorClassifier = errorClassifier;
         this.toolInvoker = toolInvoker;
         this.templateLoader = templateLoader;
-        this.cacheManager = cacheManager;
+        this.nl2SqlCacheService = nl2SqlCacheService;
         this.multiTurnContextService = multiTurnContextService;
         this.tokenBudgetManager = tokenBudgetManager;
     }
@@ -132,7 +132,7 @@ public class Nl2SqlOrchestrator {
             ));
 
             String executionCacheKey = executionCacheKey(validatedSql.sql(), userScope);
-            String cachedResult = cacheManager.getNl2sqlResult(executionCacheKey);
+            String cachedResult = nl2SqlCacheService.getResult(executionCacheKey);
             if (cachedResult != null) {
                 Nl2SqlExecutionResult cachedExecution = com.alibaba.fastjson2.JSON.parseObject(cachedResult, Nl2SqlExecutionResult.class);
                 evidence.put("execution", cachedExecution);
@@ -155,7 +155,7 @@ public class Nl2SqlOrchestrator {
                     .toList());
             evidence.put("status", execution.skipped() ? "SQL_READY" : "COMPLETED");
             if (!execution.skipped()) {
-                cacheManager.putNl2sqlResult(executionCacheKey, com.alibaba.fastjson2.JSON.toJSONString(execution));
+                nl2SqlCacheService.putResult(executionCacheKey, com.alibaba.fastjson2.JSON.toJSONString(execution));
             }
             return finalizeResponse(evidence);
         } catch (Nl2SqlException ex) {

@@ -10,7 +10,7 @@ import java.util.Date;
  * @author: 阿星不是程序员
  **/
 @Data
-public class DepthRuleVo {
+public class GatewayDepthRuleConfigVo {
     
     private String id;
     

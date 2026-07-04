@@ -1,6 +1,6 @@
 package org.javaup.ai.assistant.skill.ops.nl2sql;
 
-import org.javaup.ai.cache.CacheManager;
+import org.javaup.ai.cache.Nl2SqlCacheService;
 import org.javaup.ai.service.Nl2SqlSemanticCatalogService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -15,7 +15,7 @@ import static org.mockito.Mockito.when;
 
 class Nl2SqlSchemaServiceTest {
 
-    private final CacheManager cacheManager = mock(CacheManager.class);
+    private final Nl2SqlCacheService nl2SqlCacheService = mock(Nl2SqlCacheService.class);
 
     @Test
     void shouldRetrieveRelevantOrderSchema() {
@@ -43,7 +43,7 @@ class Nl2SqlSchemaServiceTest {
         schemaService.retrieve("接口错误率和平均耗时怎么样", "admin:1");
 
         ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
-        verify(cacheManager, times(2)).putNl2sqlSchema(keyCaptor.capture(), org.mockito.ArgumentMatchers.any());
+        verify(nl2SqlCacheService, times(2)).putSchema(keyCaptor.capture(), org.mockito.ArgumentMatchers.any());
 
         assertNotEquals(keyCaptor.getAllValues().get(0), keyCaptor.getAllValues().get(1));
     }
@@ -51,6 +51,6 @@ class Nl2SqlSchemaServiceTest {
     private Nl2SqlSchemaService schemaService() {
         Nl2SqlSemanticCatalogService catalogService = mock(Nl2SqlSemanticCatalogService.class);
         when(catalogService.activeSnapshot()).thenReturn(Nl2SqlTestCatalog.snapshot());
-        return new Nl2SqlSchemaService(new Nl2SqlProperties(), cacheManager, catalogService);
+        return new Nl2SqlSchemaService(new Nl2SqlProperties(), nl2SqlCacheService, catalogService);
     }
 }

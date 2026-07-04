@@ -1,6 +1,6 @@
 package org.javaup.ai.assistant.skill.ops.nl2sql;
 
-import org.javaup.ai.cache.CacheManager;
+import org.javaup.ai.cache.Nl2SqlCacheService;
 import org.javaup.ai.service.Nl2SqlSemanticCatalogService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,7 +21,7 @@ class Nl2SqlSafetyValidatorTest {
         Nl2SqlSemanticCatalogService catalogService = mock(Nl2SqlSemanticCatalogService.class);
         when(catalogService.activeSnapshot()).thenReturn(Nl2SqlTestCatalog.snapshot());
         validator = new Nl2SqlSafetyValidator(properties,
-                new Nl2SqlSchemaService(properties, mock(CacheManager.class), catalogService));
+                new Nl2SqlSchemaService(properties, mock(Nl2SqlCacheService.class), catalogService));
     }
 
     @Test

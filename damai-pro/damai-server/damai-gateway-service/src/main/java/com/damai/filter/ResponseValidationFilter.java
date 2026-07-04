@@ -3,7 +3,7 @@ package com.damai.filter;
 import com.alibaba.fastjson.JSON;
 import com.damai.common.ApiResponse;
 import com.damai.util.StringUtil;
-import com.damai.service.ChannelDataService;
+import com.damai.service.GatewayChannelDataService;
 import com.damai.util.RsaTool;
 import com.damai.vo.GetChannelDataVo;
 import lombok.extern.slf4j.Slf4j;
@@ -53,7 +53,7 @@ public class ResponseValidationFilter implements GlobalFilter, Ordered {
     private String aesVector;
 
     @Autowired
-    private ChannelDataService channelDataService;
+    private GatewayChannelDataService channelDataService;
 
     @Override
     public int getOrder() {

@@ -2,7 +2,7 @@ package org.javaup.ai.assistant.skill.ops.nl2sql;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.javaup.ai.cache.CacheManager;
+import org.javaup.ai.cache.Nl2SqlCacheService;
 import org.javaup.ai.service.Nl2SqlSemanticCatalogService;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -26,7 +26,7 @@ import java.util.stream.Collectors;
 public class Nl2SqlSchemaService {
 
     private final Nl2SqlProperties properties;
-    private final CacheManager cacheManager;
+    private final Nl2SqlCacheService nl2SqlCacheService;
     private final Nl2SqlSemanticCatalogService semanticCatalogService;
 
     public Nl2SqlSchemaContext retrieve(String question) {
@@ -35,12 +35,12 @@ public class Nl2SqlSchemaService {
 
     public Nl2SqlSchemaContext retrieve(String question, String userScope) {
         String cacheKey = schemaLinkingCacheKey(question, userScope);
-        Nl2SqlSchemaContext cached = cacheManager.getNl2sqlSchema(cacheKey);
+        Nl2SqlSchemaContext cached = nl2SqlCacheService.getSchema(cacheKey);
         if (cached != null) {
             return cached;
         }
         Nl2SqlSchemaContext context = doRetrieve(question, semanticCatalogService.activeSnapshot());
-        cacheManager.putNl2sqlSchema(cacheKey, context);
+        nl2SqlCacheService.putSchema(cacheKey, context);
         return context;
     }
 
