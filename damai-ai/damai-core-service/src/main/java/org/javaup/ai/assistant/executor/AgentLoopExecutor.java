@@ -19,12 +19,13 @@ import org.springframework.stereotype.Component;
 
 import io.opentelemetry.api.trace.Span;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 @Slf4j
 @Component
@@ -37,6 +38,7 @@ public class AgentLoopExecutor implements AssistantExecutor {
     private final ChatClient chatClient;
     private final List<ToolCallback> toolCallbacks;
     private final PromptTemplateLoader templateLoader;
+    private final Executor assistantRunExecutor;
 
     public AgentLoopExecutor(AgentLoopProperties properties,
                              AssistantRunService runService,
@@ -45,13 +47,15 @@ public class AgentLoopExecutor implements AssistantExecutor {
                              @Qualifier("unifiedChatClient") ChatClient baseChatClient,
                              @Qualifier("openAiChatModel") ChatModel chatModel,
                              List<ToolCallback> toolCallbacks,
-                             PromptTemplateLoader templateLoader) {
+                             PromptTemplateLoader templateLoader,
+                             @Qualifier("assistantRunExecutor") Executor assistantRunExecutor) {
         this.properties = properties;
         this.runService = runService;
         this.messageEmitter = messageEmitter;
         this.spanService = spanService;
         this.toolCallbacks = toolCallbacks;
         this.templateLoader = templateLoader;
+        this.assistantRunExecutor = assistantRunExecutor;
         this.chatClient = toolCallbacks.isEmpty()
                 ? baseChatClient
                 : ChatClient.builder(chatModel)
@@ -130,36 +134,7 @@ public class AgentLoopExecutor implements AssistantExecutor {
         planPayload.put("plan", planSteps);
         runService.appendEvent(run.getRunId(), AssistantEventTypes.AGENT_STEP, planPayload);
 
-        StringBuilder observations = new StringBuilder();
-        int stepNum = 1;
-        for (String planStep : planSteps) {
-            if (stepNum > properties.getMaxSteps()) break;
-            String toolName = extractToolName(planStep);
-            if (toolName == null) continue;
-
-            try {
-                Map<String, Object> stepPayload = new HashMap<>();
-                stepPayload.put("step", stepNum);
-                stepPayload.put("action", "planned_tool");
-                stepPayload.put("tool", toolName);
-
-                String result = executeToolCall(toolName, "");
-                observations.append("[").append(toolName).append("] ").append(result).append("\n");
-                stepPayload.put("observation", result);
-                runService.appendEvent(run.getRunId(), AssistantEventTypes.AGENT_STEP, stepPayload);
-                stepNum++;
-            } catch (Exception e) {
-                log.warn("Planned step failed, falling back to ReAct: tool={}, error={}", toolName, e.getMessage());
-                try {
-                    executeReActLoop(run, userMessage, rootSpan);
-                } catch (Exception ex) {
-                    log.error("ReAct fallback also failed", ex);
-                }
-                return;
-            }
-        }
-
-        synthesizeFinalAnswer(run, userMessage, observations.toString());
+        executeReActLoop(run, userMessage, rootSpan, planSteps);
     }
 
     private String extractToolName(String planStep) {
@@ -199,7 +174,18 @@ public class AgentLoopExecutor implements AssistantExecutor {
     }
 
     private void executeReActLoop(AiRun run, String userMessage, io.opentelemetry.api.trace.Span rootSpan) throws Exception {
+        executeReActLoop(run, userMessage, rootSpan, List.of());
+    }
+
+    private void executeReActLoop(AiRun run, String userMessage, Span rootSpan, List<String> plannedSteps) throws Exception {
         List<Map<String, Object>> stepHistory = new ArrayList<>();
+        if (plannedSteps != null && !plannedSteps.isEmpty()) {
+            Map<String, Object> planHint = new LinkedHashMap<>();
+            planHint.put("step", 0);
+            planHint.put("action", "planner_hint");
+            planHint.put("observation", String.join("\n", plannedSteps));
+            stepHistory.add(planHint);
+        }
         for (int step = 1; step <= properties.getMaxSteps(); step++) {
             var stepSpan = spanService.startSpan("agent_step_" + step, rootSpan);
 
@@ -247,7 +233,7 @@ public class AgentLoopExecutor implements AssistantExecutor {
     private ChatResponse callWithTimeout(String prompt) throws Exception {
         long timeoutMs = properties.getStepTimeoutMs() > 0 ? properties.getStepTimeoutMs() : 30000;
         CompletableFuture<ChatResponse> future = CompletableFuture.supplyAsync(() ->
-                chatClient.prompt().user(prompt).call().chatResponse());
+                chatClient.prompt().user(prompt).call().chatResponse(), assistantRunExecutor);
         return future.get(timeoutMs, TimeUnit.MILLISECONDS);
     }
 

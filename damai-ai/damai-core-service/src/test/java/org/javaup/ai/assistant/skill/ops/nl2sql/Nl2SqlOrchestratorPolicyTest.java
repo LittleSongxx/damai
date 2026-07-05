@@ -16,7 +16,7 @@ class Nl2SqlOrchestratorPolicyTest {
         Nl2SqlProperties properties = new Nl2SqlProperties();
         properties.setMinSqlConfidence(0.7D);
         Nl2SqlOrchestrator orchestrator = new Nl2SqlOrchestrator(
-                null, properties, null, null, null, null, null, null, null, null, null, null);
+                null, properties, null, null, null, null, null, null, null, null, null, null, null);
         Nl2SqlGenerationResult generation = new Nl2SqlGenerationResult();
         generation.setNeedSql(true);
         generation.setSql("select stat_date from v_order_daily_summary limit 10");
@@ -46,7 +46,7 @@ class Nl2SqlOrchestratorPolicyTest {
         Nl2SqlProperties properties = new Nl2SqlProperties();
         properties.setMinSqlConfidence(0.5D);
         Nl2SqlOrchestrator orchestrator = new Nl2SqlOrchestrator(
-                null, properties, null, null, null, null, null, null, null, null, null, null);
+                null, properties, null, null, null, null, null, null, null, null, null, null, null);
         Nl2SqlGenerationResult generation = new Nl2SqlGenerationResult();
         generation.setNeedSql(true);
         generation.setConfidence(0.8D);
@@ -58,7 +58,7 @@ class Nl2SqlOrchestratorPolicyTest {
     void shouldFinalizeFailureWithStructuredSafetyContract() {
         Nl2SqlProperties properties = new Nl2SqlProperties();
         Nl2SqlOrchestrator orchestrator = new Nl2SqlOrchestrator(
-                null, properties, null, null, null, null, null, null, null, null, null, null);
+                null, properties, null, null, null, null, null, null, null, null, null, null, null);
         Map<String, Object> response = new java.util.LinkedHashMap<>();
         response.put("status", "FAILED");
         response.put("message", "字段不在 NL2SQL 白名单内: mobile");
@@ -89,7 +89,7 @@ class Nl2SqlOrchestratorPolicyTest {
         properties.getCostGuard().setMaxEstimatedRows(5000);
         properties.getCostGuard().setMaxQueryCost(100D);
         Nl2SqlOrchestrator orchestrator = new Nl2SqlOrchestrator(
-                null, properties, null, null, null, null, null, null, null, null, null, null);
+                null, properties, null, null, null, null, null, null, null, null, null, null, null);
         Map<String, Object> response = new java.util.LinkedHashMap<>();
         response.put("status", "COMPLETED");
         response.put("sql", "select stat_date from v_order_daily_summary limit 20");

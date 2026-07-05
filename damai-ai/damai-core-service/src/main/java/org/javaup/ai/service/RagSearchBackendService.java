@@ -173,18 +173,7 @@ public class RagSearchBackendService {
     public List<RagSourceVo> sparseSearch(String query, int topK, KnowledgeRetrievalFilter filter) {
         try {
             KnowledgeRetrievalFilter effectiveFilter = filter == null ? KnowledgeRetrievalFilter.empty() : filter;
-            JSONObject multiMatch = new JSONObject();
-            multiMatch.put("query", query);
-            multiMatch.put("fields", List.of("searchText^4", "question^3", "keywords^2", "text^2", "docTitle^1"));
-
-            JSONObject boolQuery = new JSONObject(Map.of("must", List.of(
-                    Map.of("multi_match", multiMatch)
-            )));
-            boolQuery.put("filter", buildEsFilters(effectiveFilter));
-
-            JSONObject body = new JSONObject();
-            body.put("size", effectiveLimit(topK, effectiveFilter));
-            body.put("query", boolQuery);
+            JSONObject body = buildSparseSearchBody(query, topK, effectiveFilter);
 
             JSONObject response = esClient.execute("/" + faqAlias + "/_search", body.toJSONString(), "POST");
             JSONObject hitsObj = response.getJSONObject("hits");
@@ -220,6 +209,23 @@ public class RagSearchBackendService {
             log.warn("Elasticsearch sparse search failed, returning empty results", ex);
             return List.of();
         }
+    }
+
+    JSONObject buildSparseSearchBody(String query, int topK, KnowledgeRetrievalFilter filter) {
+        KnowledgeRetrievalFilter effectiveFilter = filter == null ? KnowledgeRetrievalFilter.empty() : filter;
+
+        JSONObject multiMatch = new JSONObject();
+        multiMatch.put("query", query);
+        multiMatch.put("fields", List.of("searchText^4", "question^3", "keywords^2", "text^2", "docTitle^1"));
+
+        JSONObject boolQuery = new JSONObject();
+        boolQuery.put("must", List.of(Map.of("multi_match", multiMatch)));
+        boolQuery.put("filter", buildEsFilters(effectiveFilter));
+
+        JSONObject body = new JSONObject();
+        body.put("size", effectiveLimit(topK, effectiveFilter));
+        body.put("query", Map.of("bool", boolQuery));
+        return body;
     }
 
     private List<Document> resolveDocumentsFromAllSources(List<RagSourceVo> sources) {

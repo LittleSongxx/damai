@@ -78,6 +78,14 @@ public class ParentBlockElevationPostProcessor implements SearchResultPostProces
                     .score(aggregatedScore)
                     .parentBlockId(best.getParentBlockId())
                     .channelName(best.getChannelName())
+                    .validUntil(best.getValidUntil())
+                    .version(best.getVersion())
+                    .scope(best.getScope())
+                    .topic(best.getTopic())
+                    .documentId(best.getDocumentId())
+                    .audience(best.getAudience())
+                    .region(best.getRegion())
+                    .docStatus(best.getDocStatus())
                     .build();
             elevated.add(elevatedBlock);
         }

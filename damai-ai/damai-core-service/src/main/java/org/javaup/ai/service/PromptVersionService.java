@@ -15,7 +15,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.Duration;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Date;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 
@@ -34,7 +38,8 @@ public class PromptVersionService {
             .build();
 
     public String resolve(String promptKey, String defaultTemplate) {
-        String cached = cache.getIfPresent(promptKey);
+        String stickyKey = stickyBucketKey(promptKey);
+        String cached = cache.getIfPresent(stickyKey);
         if (cached != null) {
             return cached;
         }
@@ -47,17 +52,19 @@ public class PromptVersionService {
         if (activeVersions.isEmpty()) {
             return defaultTemplate;
         }
-        AiPromptVersion selected = selectVersion(activeVersions);
+        AiPromptVersion selected = selectVersion(activeVersions, stickyKey);
         if (selected != null) {
-            if (!hasGradualRollout(activeVersions)) {
-                cache.put(promptKey, selected.getTemplate());
-            }
+            cache.put(stickyKey, selected.getTemplate());
             return selected.getTemplate();
         }
         return defaultTemplate;
     }
 
     private AiPromptVersion selectVersion(List<AiPromptVersion> versions) {
+        return selectVersion(versions, "global");
+    }
+
+    private AiPromptVersion selectVersion(List<AiPromptVersion> versions, String stickyKey) {
         if (versions.size() == 1) return versions.get(0);
 
         AiPromptVersion latest = versions.get(0);
@@ -72,7 +79,7 @@ public class PromptVersionService {
         if ("GRADUAL".equals(latest.getRolloutStatus()) && previousStable != null
                 && latest.getTrafficPercent() != null && latest.getTrafficPercent() > 0
                 && latest.getTrafficPercent() < 100) {
-            double roll = Math.random() * 100;
+            int roll = stableRolloutBucket(stickyKey);
             if (roll < latest.getTrafficPercent()) {
                 return latest;
             }
@@ -86,6 +93,20 @@ public class PromptVersionService {
                 && version.getTrafficPercent() != null
                 && version.getTrafficPercent() > 0
                 && version.getTrafficPercent() < 100);
+    }
+
+    private String stickyBucketKey(String promptKey) {
+        org.javaup.ai.context.AiRequestContext context = org.javaup.ai.context.AiRequestContextHolder.get();
+        String subject = context == null || context.getUser() == null || context.getUser().getUserId() == null
+                ? "anonymous"
+                : String.valueOf(context.getUser().getUserId());
+        return promptKey + ":subject:" + subject;
+    }
+
+    private int stableRolloutBucket(String value) {
+        String hash = sha256(value == null ? "" : value);
+        long parsed = Long.parseUnsignedLong(hash.substring(0, 8), 16);
+        return (int) (parsed % 100);
     }
 
     public void invalidateCache(String promptKey) {
@@ -103,7 +124,8 @@ public class PromptVersionService {
             invalidateAllLocal();
             return;
         }
-        cache.invalidate(promptKey);
+        String subjectPrefix = promptKey + ":subject:";
+        cache.asMap().keySet().removeIf(key -> promptKey.equals(key) || key.startsWith(subjectPrefix));
     }
 
     public void invalidateAllLocal() {
@@ -400,5 +422,14 @@ public class PromptVersionService {
         record.setEditTime(new Date());
         record.setStatus(1);
         releaseRecordMapper.insert(record);
+    }
+
+    private String sha256(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(digest.digest((value == null ? "" : value).getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 algorithm is not available", ex);
+        }
     }
 }

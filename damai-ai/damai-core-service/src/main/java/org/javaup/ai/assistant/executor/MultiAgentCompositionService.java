@@ -1,6 +1,5 @@
 package org.javaup.ai.assistant.executor;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.assistant.AssistantEventTypes;
 import org.javaup.ai.assistant.AssistantRunService;
@@ -8,7 +7,9 @@ import org.javaup.ai.assistant.AssistantSkill;
 import org.javaup.ai.assistant.AssistantSkillContext;
 import org.javaup.ai.assistant.AssistantSkillRegistry;
 import org.javaup.ai.assistant.AssistantSkillResult;
+import org.javaup.ai.context.AiRequestContext;
 import org.javaup.ai.context.AiRequestContextHolder;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -16,8 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
@@ -43,15 +43,22 @@ import java.util.function.Predicate;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class MultiAgentCompositionService {
 
     private final AssistantSkillRegistry skillRegistry;
     private final AssistantRunService runService;
     private final AssistantMessageEmitter messageEmitter;
+    private final Executor assistantRunExecutor;
 
-    private static final ExecutorService PARALLEL_EXECUTOR = Executors.newCachedThreadPool(
-            r -> { Thread t = new Thread(r, "multi-agent-parallel"); t.setDaemon(true); return t; });
+    public MultiAgentCompositionService(AssistantSkillRegistry skillRegistry,
+                                        AssistantRunService runService,
+                                        AssistantMessageEmitter messageEmitter,
+                                        @Qualifier("assistantRunExecutor") Executor assistantRunExecutor) {
+        this.skillRegistry = skillRegistry;
+        this.runService = runService;
+        this.messageEmitter = messageEmitter;
+        this.assistantRunExecutor = assistantRunExecutor;
+    }
 
     /**
      * 顺序执行。
@@ -140,11 +147,14 @@ public class MultiAgentCompositionService {
     private String executeParallel(String runId, String chatId, List<CompositionStep> steps,
                                     AssistantSkillContext baseContext) {
         List<CompletableFuture<String>> futures = new ArrayList<>();
+        AiRequestContext parentContext = AiRequestContextHolder.get();
         for (int i = 0; i < steps.size(); i++) {
             final int stepIndex = i;
             final CompositionStep step = steps.get(i);
             futures.add(CompletableFuture.supplyAsync(() -> {
-                AiRequestContextHolder.set(AiRequestContextHolder.get());
+                if (parentContext != null) {
+                    AiRequestContextHolder.set(parentContext);
+                }
                 try {
                     AssistantSkill skill = skillRegistry.getRequired(step.skillId);
                     AssistantSkillResult result = skill.execute(baseContext);
@@ -161,8 +171,10 @@ public class MultiAgentCompositionService {
                 } catch (Exception e) {
                     log.warn("Parallel composition step failed: skillId={}, error={}", step.skillId, e.getMessage());
                     return String.format("[%s] ERROR: %s", step.label, e.getMessage());
+                } finally {
+                    AiRequestContextHolder.clear();
                 }
-            }, PARALLEL_EXECUTOR));
+            }, assistantRunExecutor));
         }
 
         List<String> results = new ArrayList<>();

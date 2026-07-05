@@ -14,7 +14,7 @@ import java.util.List;
  * This post-processor places the highest-relevance documents at both ends,
  * pushing lower-relevance documents to the middle where they cause less harm.
  *
- * Order: [best, 2nd, 4th, 5th, ..., 3rd] — best at start, 2nd-best at end
+ * Order: [best, 3rd, 4th, ..., worst, 2nd] — strongest evidence at both edges.
  */
 @Component
 public class LostInMiddleReorderingPostProcessor implements SearchResultPostProcessor {
@@ -33,21 +33,11 @@ public class LostInMiddleReorderingPostProcessor implements SearchResultPostProc
 
         List<RagSourceVo> reordered = new ArrayList<>(sources.size());
 
-        // Interleave: best first, second-best last, then fill middle
-        int left = 0;
-        int right = sources.size() - 1;
-        boolean takeFromLeft = true;
-
-        for (int i = 0; i < sources.size(); i++) {
-            if (takeFromLeft) {
-                reordered.add(sources.get(left));
-                left++;
-            } else {
-                reordered.add(sources.get(right));
-                right--;
-            }
-            takeFromLeft = !takeFromLeft;
+        reordered.add(sources.get(0));
+        for (int i = 2; i < sources.size(); i++) {
+            reordered.add(sources.get(i));
         }
+        reordered.add(sources.get(1));
 
         return reordered;
     }

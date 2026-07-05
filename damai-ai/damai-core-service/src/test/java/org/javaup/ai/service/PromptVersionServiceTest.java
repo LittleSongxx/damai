@@ -7,6 +7,9 @@ import org.javaup.ai.assistant.skill.ops.OpsEvidenceProvider;
 import org.javaup.ai.assistant.skill.ops.OpsProviderRegistry;
 import org.javaup.ai.assistant.skill.ops.OpsRcaRequest;
 import org.javaup.ai.config.AiQualityGateProperties;
+import org.javaup.ai.context.AiRequestContext;
+import org.javaup.ai.context.AiRequestContextHolder;
+import org.javaup.ai.context.AiUserContext;
 import org.javaup.ai.entity.AiNl2SqlEvalRun;
 import org.javaup.ai.entity.AiRagEvalRun;
 import org.javaup.ai.mapper.AiNl2SqlEvalRunMapper;
@@ -55,6 +58,47 @@ class PromptVersionServiceTest {
         assertEquals("DRAFT", draft.getRolloutStatus());
         assertEquals(0, draft.getTrafficPercent());
         assertEquals("stable-template", service.resolve("knowledge.answer", "default"));
+    }
+
+    @Test
+    void resolveShouldKeepGradualRolloutStickyPerUser() {
+        AiPromptVersion candidate = version(2, "candidate-template", true, "GRADUAL", 50);
+        AiPromptVersion stable = version(1, "stable-template", true, "STABLE", 50);
+        when(versionMapper.selectList(any())).thenReturn(List.of(candidate, stable));
+
+        try {
+            AiRequestContextHolder.set(AiRequestContext.builder()
+                    .user(AiUserContext.builder().userId(1001L).build())
+                    .build());
+
+            String first = service.resolve("knowledge.answer", "default");
+            String second = service.resolve("knowledge.answer", "default");
+
+            assertEquals(first, second);
+            assertTrue(List.of("candidate-template", "stable-template").contains(first));
+        } finally {
+            AiRequestContextHolder.clear();
+        }
+    }
+
+    @Test
+    void invalidateCacheLocalShouldClearStickyUserPromptEntries() {
+        AiPromptVersion oldStable = version(1, "old-template", true, "STABLE", 100);
+        AiPromptVersion newStable = version(2, "new-template", true, "STABLE", 100);
+        when(versionMapper.selectList(any())).thenReturn(List.of(oldStable), List.of(newStable));
+
+        try {
+            AiRequestContextHolder.set(AiRequestContext.builder()
+                    .user(AiUserContext.builder().userId(2002L).build())
+                    .build());
+
+            assertEquals("old-template", service.resolve("knowledge.answer", "default"));
+            service.invalidateCacheLocal("knowledge.answer");
+
+            assertEquals("new-template", service.resolve("knowledge.answer", "default"));
+        } finally {
+            AiRequestContextHolder.clear();
+        }
     }
 
     @Test

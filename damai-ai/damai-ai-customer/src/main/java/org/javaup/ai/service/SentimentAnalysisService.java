@@ -14,6 +14,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * 情感分析服务 - 实时分析用户情感并触发升级策略。
@@ -25,6 +26,7 @@ public class SentimentAnalysisService {
 
     private final SentimentRecordMapper recordMapper;
     private final ChatClient chatClient;
+    private final Executor assistantRunExecutor;
 
     // 升级触发条件 — 参考行业标准
     private static final double NEGATIVE_ESCALATION_THRESHOLD = 0.7;
@@ -38,9 +40,11 @@ public class SentimentAnalysisService {
             "谢谢", "感谢", "满意", "不错", "很好", "靠谱", "解决了");
 
     public SentimentAnalysisService(SentimentRecordMapper recordMapper,
-                                     @Qualifier("unifiedGeneralChatClient") ChatClient chatClient) {
+                                     @Qualifier("unifiedGeneralChatClient") ChatClient chatClient,
+                                     @Qualifier("assistantRunExecutor") Executor assistantRunExecutor) {
         this.recordMapper = recordMapper;
         this.chatClient = chatClient;
+        this.assistantRunExecutor = assistantRunExecutor;
     }
 
     /**
@@ -77,7 +81,7 @@ public class SentimentAnalysisService {
                 || result.shouldEscalate;
 
         // 保存情感记录
-        saveRecord(runId, conversationId, userId, userMessage, result, shouldEscalate);
+        saveRecord(runId, conversationId, userId, userMessage, result, shouldEscalate, "FULL_LLM");
 
         return new SentimentResult(result.sentiment, result.intensity, result.isUrgent,
                 result.emotionTags, shouldEscalate,
@@ -105,7 +109,7 @@ public class SentimentAnalysisService {
                 ? "命中投诉/维权高危词"
                 : (negativeStreak ? "连续" + NEGATIVE_STREAK_THRESHOLD + "轮负面情绪" : null);
         SentimentResult result = new SentimentResult(sentiment, intensity, crisis, tags, shouldEscalate, reason);
-        saveRecord(runId, conversationId, userId, userMessage, result, shouldEscalate);
+        saveRecord(runId, conversationId, userId, userMessage, result, shouldEscalate, "QUICK_RULE");
         return result;
     }
 
@@ -115,11 +119,12 @@ public class SentimentAnalysisService {
     public void analyzeAsync(String userMessage, String runId, String conversationId, Long userId) {
         CompletableFuture.runAsync(() -> {
             try {
-                analyze(userMessage, runId, conversationId, userId);
+                SentimentResult result = analyzeWithLLM(userMessage);
+                saveRecord(runId, conversationId, userId, userMessage, result, false, "ASYNC_LLM");
             } catch (Exception e) {
                 log.warn("Async sentiment analysis failed: {}", e.getMessage());
             }
-        });
+        }, assistantRunExecutor);
     }
 
     /**
@@ -177,7 +182,7 @@ public class SentimentAnalysisService {
     }
 
     private void saveRecord(String runId, String conversationId, Long userId,
-                            String userMessage, SentimentResult result, boolean escalated) {
+                            String userMessage, SentimentResult result, boolean escalated, String analysisStage) {
         try {
             if (recordMapper == null) {
                 return;
@@ -193,7 +198,9 @@ public class SentimentAnalysisService {
             record.setIsUrgent(result.isUrgent ? 1 : 0);
             record.setEmotionTagsJson(JSON.toJSONString(result.emotionTags));
             record.setEscalationTriggered(escalated ? 1 : 0);
-            record.setEscalationReason(result.escalationReason);
+            record.setEscalationReason(StringUtils.hasText(result.escalationReason)
+                    ? result.escalationReason
+                    : analysisStage);
             record.setCreateTime(new Date());
             record.setEditTime(new Date());
             record.setStatus(1);

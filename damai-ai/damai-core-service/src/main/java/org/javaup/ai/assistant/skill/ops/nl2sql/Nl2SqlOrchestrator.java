@@ -5,6 +5,7 @@ import org.javaup.ai.assistant.budget.TokenBudgetManager;
 import org.javaup.ai.assistant.tool.AssistantToolInvoker;
 import org.javaup.ai.cache.Nl2SqlCacheService;
 import org.javaup.ai.rag.prompt.PromptTemplateLoader;
+import org.javaup.ai.service.Nl2SqlSemanticCatalogService;
 import org.javaup.ai.service.Nl2SqlMultiTurnContextService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -35,6 +36,7 @@ public class Nl2SqlOrchestrator {
     private final Nl2SqlCacheService nl2SqlCacheService;
     private final Nl2SqlMultiTurnContextService multiTurnContextService;
     private final TokenBudgetManager tokenBudgetManager;
+    private final Nl2SqlSemanticCatalogService semanticCatalogService;
 
     public Nl2SqlOrchestrator(@Qualifier("unifiedOpsChatClient") ChatClient chatClient,
                               Nl2SqlProperties properties,
@@ -47,7 +49,8 @@ public class Nl2SqlOrchestrator {
                               PromptTemplateLoader templateLoader,
                               Nl2SqlCacheService nl2SqlCacheService,
                               Nl2SqlMultiTurnContextService multiTurnContextService,
-                              TokenBudgetManager tokenBudgetManager) {
+                              TokenBudgetManager tokenBudgetManager,
+                              Nl2SqlSemanticCatalogService semanticCatalogService) {
         this.chatClient = chatClient;
         this.properties = properties;
         this.schemaService = schemaService;
@@ -60,6 +63,7 @@ public class Nl2SqlOrchestrator {
         this.nl2SqlCacheService = nl2SqlCacheService;
         this.multiTurnContextService = multiTurnContextService;
         this.tokenBudgetManager = tokenBudgetManager;
+        this.semanticCatalogService = semanticCatalogService;
     }
 
     public Map<String, Object> answer(String runId, String question, String conversationKey) {
@@ -320,7 +324,39 @@ public class Nl2SqlOrchestrator {
         return "nl2sql:result:"
                 + "sql:" + sha256(sql)
                 + ":scope:" + sha256(StringUtils.hasText(userScope) ? userScope : "global")
+                + ":catalog:" + catalogHash()
                 + ":policy:" + policyHash();
+    }
+
+    private String catalogHash() {
+        if (semanticCatalogService == null) {
+            return "unknown";
+        }
+        Nl2SqlSemanticCatalogService.CatalogSnapshot snapshot = semanticCatalogService.activeSnapshot();
+        Map<String, Object> catalog = new LinkedHashMap<>();
+        catalog.put("datasourceKey", nullToEmpty(snapshot.datasourceKey()));
+        catalog.put("schemaVersion", snapshot.schemaVersion());
+        catalog.put("tables", snapshot.tables().stream().map(table -> {
+                    Map<String, Object> tableFingerprint = new LinkedHashMap<>();
+                    tableFingerprint.put("name", nullToEmpty(table.getName()));
+                    tableFingerprint.put("allowed", table.isAllowed());
+                    tableFingerprint.put("columns", table.getColumns() == null ? List.of() : table.getColumns().stream()
+                            .map(column -> {
+                                Map<String, Object> columnFingerprint = new LinkedHashMap<>();
+                                columnFingerprint.put("name", nullToEmpty(column.getName()));
+                                columnFingerprint.put("type", nullToEmpty(column.getType()));
+                                columnFingerprint.put("sensitive", column.isSensitive());
+                                return columnFingerprint;
+                            })
+                            .toList());
+                    return tableFingerprint;
+                })
+                .toList());
+        return sha256(com.alibaba.fastjson2.JSON.toJSONString(catalog));
+    }
+
+    private String nullToEmpty(String value) {
+        return value == null ? "" : value;
     }
 
     private String userScope(String conversationKey) {

@@ -28,6 +28,10 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -128,18 +132,18 @@ public class DocumentIngestionService {
                 log.info("Skipping hypothetical question generation (damai.ai.ingestion.skip-hypothetical-questions=true)");
             }
 
-            // Recreate Qdrant collection
+            // Build new physical Qdrant collection first, but publish it only after ES succeeds.
             recreateQdrantCollection();
 
             // Batch embed and upsert Qdrant
-            int qdrantCount = batchUpsertQdrant(documents, ragChunks);
-            switchQdrantAlias();
+            int qdrantCount = batchUpsertQdrant(documents, ragChunks, qdrantCollectionForFullReindex());
             task.setCompletedChunks(qdrantCount);
             taskMapper.updateById(task);
 
             // Recreate ES index
             updateTaskStatus(task, "indexing");
             EsReindexResult esResult = recreateEsIndex(documents);
+            switchQdrantAlias();
 
             // Invalidate FAQ search cache
             faqSearchCacheService.invalidate();
@@ -206,7 +210,7 @@ public class DocumentIngestionService {
 
             if (!changed.isEmpty()) {
                 List<RagChunk> changedChunks = updateChunkMetadata(changed);
-                qdrantUpserted = batchUpsertQdrant(changed, changedChunks);
+                qdrantUpserted = batchUpsertQdrant(changed, changedChunks, qdrantCollectionForIncrementalReindex());
                 esUpserted = bulkUpsertEs(changed);
                 faqSearchCacheService.invalidate();
             }
@@ -473,7 +477,7 @@ public class DocumentIngestionService {
             log.info("Qdrant collection '{}' created (dim={}, Cosine)", newCollection, embeddingDimensions);
         } catch (Exception ex) {
             log.error("Qdrant collection creation failed", ex);
-            return;
+            throw new IllegalStateException("Qdrant collection creation failed: " + newCollection, ex);
         }
         // Record the new collection name for upserts
         this.currentQdrantCollection = newCollection;
@@ -496,14 +500,25 @@ public class DocumentIngestionService {
             log.info("Qdrant alias '{}' switched to collection '{}'", qdrantAlias, currentQdrantCollection);
         } catch (Exception ex) {
             log.error("Qdrant alias switch failed", ex);
+            throw new IllegalStateException("Qdrant alias switch failed: " + qdrantAlias, ex);
         }
     }
 
-    private String qdrantCollection() {
-        return currentQdrantCollection != null ? currentQdrantCollection : qdrantCollection;
+    private String qdrantCollectionForFullReindex() {
+        if (!StringUtils.hasText(currentQdrantCollection)) {
+            throw new IllegalStateException("Qdrant full reindex collection has not been created");
+        }
+        return currentQdrantCollection;
     }
 
-    private int batchUpsertQdrant(List<Document> documents, List<RagChunk> chunks) {
+    private String qdrantCollectionForIncrementalReindex() {
+        return StringUtils.hasText(qdrantAlias) ? qdrantAlias : qdrantCollection;
+    }
+
+    private int batchUpsertQdrant(List<Document> documents, List<RagChunk> chunks, String targetCollection) {
+        if (!StringUtils.hasText(targetCollection)) {
+            throw new IllegalArgumentException("Qdrant target collection must not be empty");
+        }
         Map<String, Long> chunkIdToDbId = new LinkedHashMap<>();
         for (RagChunk rc : chunks) {
             chunkIdToDbId.put(rc.getChunkUid(), rc.getId());
@@ -511,7 +526,6 @@ public class DocumentIngestionService {
 
         // Collect valid documents for batch embedding
         List<Document> validDocs = new ArrayList<>();
-        String targetCollection = qdrantCollection();
         for (Document doc : documents) {
             String cid = chunkId(doc);
             if (StringUtils.hasText(cid) && StringUtils.hasText(doc.getText())) {
@@ -523,6 +537,7 @@ public class DocumentIngestionService {
         Map<String, float[]> embeddingMap = batchEmbed(validDocs);
 
         List<PointStruct> points = new ArrayList<>();
+        Map<String, Long> pointIdByChunkId = new LinkedHashMap<>();
         for (Document doc : validDocs) {
             String cid = chunkId(doc);
             float[] vector = embeddingMap.get(cid);
@@ -553,23 +568,13 @@ public class DocumentIngestionService {
             putPayloadValue(payloadMap, "userScope", doc.getMetadata().get("userScope"));
             putPayloadValue(payloadMap, "docStatus", doc.getMetadata().get("docStatus"));
 
-            long pointId = cid.hashCode() & 0xFFFFFFFFL;
+            long pointId = stablePointId(cid);
+            pointIdByChunkId.put(cid, pointId);
             points.add(PointStruct.newBuilder()
                     .setId(io.qdrant.client.PointIdFactory.id(pointId))
                     .setVectors(io.qdrant.client.VectorsFactory.vectors(vectorList))
                     .putAllPayload(payloadMap)
                     .build());
-
-            // Update chunk with Qdrant point ID
-            Long dbId = chunkIdToDbId.get(cid);
-            if (dbId != null) {
-                RagChunk rc = chunkMapper.selectById(dbId);
-                if (rc != null) {
-                    rc.setQdrantPointId(pointId);
-                    rc.setEmbeddingCached(true);
-                    chunkMapper.updateById(rc);
-                }
-            }
         }
 
         if (points.isEmpty()) return 0;
@@ -577,8 +582,34 @@ public class DocumentIngestionService {
             qdrantClient.upsertAsync(targetCollection, points).get();
         } catch (Exception ex) {
             log.error("Qdrant bulk upsert failed", ex);
+            throw new IllegalStateException("Qdrant bulk upsert failed: " + targetCollection, ex);
+        }
+
+        for (Map.Entry<String, Long> entry : pointIdByChunkId.entrySet()) {
+            Long dbId = chunkIdToDbId.get(entry.getKey());
+            if (dbId != null) {
+                RagChunk rc = chunkMapper.selectById(dbId);
+                if (rc != null) {
+                    rc.setQdrantPointId(entry.getValue());
+                    rc.setEmbeddingCached(true);
+                    chunkMapper.updateById(rc);
+                }
+            }
         }
         return points.size();
+    }
+
+    static long stablePointId(String chunkId) {
+        if (!StringUtils.hasText(chunkId)) {
+            throw new IllegalArgumentException("chunkId must not be empty");
+        }
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(chunkId.getBytes(StandardCharsets.UTF_8));
+            return ByteBuffer.wrap(digest).getLong() & Long.MAX_VALUE;
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 digest is not available", ex);
+        }
     }
 
     private void putPayloadValue(Map<String, io.qdrant.client.grpc.JsonWithInt.Value> payloadMap,
