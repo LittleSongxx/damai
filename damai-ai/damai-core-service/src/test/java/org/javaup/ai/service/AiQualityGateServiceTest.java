@@ -7,8 +7,10 @@ import org.javaup.ai.assistant.skill.ops.OpsProviderRegistry;
 import org.javaup.ai.assistant.skill.ops.OpsRcaRequest;
 import org.javaup.ai.config.AiQualityGateProperties;
 import org.javaup.ai.entity.AiNl2SqlEvalRun;
+import org.javaup.ai.entity.AiPurchaseAgentEvalRun;
 import org.javaup.ai.entity.AiRagEvalRun;
 import org.javaup.ai.mapper.AiNl2SqlEvalRunMapper;
+import org.javaup.ai.mapper.AiPurchaseAgentEvalRunMapper;
 import org.javaup.ai.mapper.AiRagEvalRunMapper;
 import org.junit.jupiter.api.Test;
 
@@ -27,6 +29,7 @@ class AiQualityGateServiceTest {
     void shouldReturnPassWhenLatestEvalRunsAndMcpGovernancePass() {
         AiRagEvalRunMapper ragMapper = mock(AiRagEvalRunMapper.class);
         AiNl2SqlEvalRunMapper nl2SqlMapper = mock(AiNl2SqlEvalRunMapper.class);
+        AiPurchaseAgentEvalRunMapper purchaseMapper = mock(AiPurchaseAgentEvalRunMapper.class);
         CustomerServiceMetricsService metricsService = mock(CustomerServiceMetricsService.class);
         McpGovernanceProperties mcp = new McpGovernanceProperties();
         when(metricsService.qualitySnapshot()).thenReturn(Map.of(
@@ -38,7 +41,7 @@ class AiQualityGateServiceTest {
                 "satisfactionRate", 0.9,
                 "avgFirstResponseLatencyMs", 120D));
         AiQualityGateService service = new AiQualityGateService(
-                ragMapper, nl2SqlMapper, mcp, opsRegistry(), metricsService, new AiQualityGateProperties());
+                ragMapper, nl2SqlMapper, purchaseMapper, mcp, opsRegistry(), metricsService, new AiQualityGateProperties());
 
         AiRagEvalRun ragRun = new AiRagEvalRun();
         ragRun.setEvalRunId("rag-1");
@@ -69,11 +72,13 @@ class AiQualityGateServiceTest {
 
         when(ragMapper.selectOne(any())).thenReturn(ragRun);
         when(nl2SqlMapper.selectOne(any())).thenReturn(sqlRun);
+        when(purchaseMapper.selectOne(any())).thenReturn(passingPurchaseRun());
 
         Map<String, Object> gate = service.latestGate();
 
         assertEquals("PASS", gate.get("status"));
         assertEquals("rag-1", gate.get("latestRagRunId"));
+        assertEquals("purchase-1", gate.get("latestPurchaseAgentRunId"));
         assertEquals("sql-1", gate.get("latestNl2SqlRunId"));
         assertEquals("READY", ((Map<?, ?>) gate.get("releaseReadiness")).get("status"));
         assertEquals(true, ((Map<?, ?>) gate.get("coverageSummary")).containsKey("domains"));
@@ -98,12 +103,13 @@ class AiQualityGateServiceTest {
     void shouldFailWhenMcpExposesNl2SqlByDefaultOrSqlEvalFails() {
         AiRagEvalRunMapper ragMapper = mock(AiRagEvalRunMapper.class);
         AiNl2SqlEvalRunMapper nl2SqlMapper = mock(AiNl2SqlEvalRunMapper.class);
+        AiPurchaseAgentEvalRunMapper purchaseMapper = mock(AiPurchaseAgentEvalRunMapper.class);
         CustomerServiceMetricsService metricsService = mock(CustomerServiceMetricsService.class);
         McpGovernanceProperties mcp = new McpGovernanceProperties();
         mcp.setExposeNl2Sql(true);
         when(metricsService.qualitySnapshot()).thenReturn(Map.of("totalEvents", 0));
         AiQualityGateService service = new AiQualityGateService(
-                ragMapper, nl2SqlMapper, mcp, opsRegistry(), metricsService, new AiQualityGateProperties());
+                ragMapper, nl2SqlMapper, purchaseMapper, mcp, opsRegistry(), metricsService, new AiQualityGateProperties());
 
         AiNl2SqlEvalRun sqlRun = new AiNl2SqlEvalRun();
         sqlRun.setEvalRunId("sql-bad");
@@ -113,6 +119,7 @@ class AiQualityGateServiceTest {
 
         when(ragMapper.selectOne(any())).thenReturn(null);
         when(nl2SqlMapper.selectOne(any())).thenReturn(sqlRun);
+        when(purchaseMapper.selectOne(any())).thenReturn(null);
 
         Map<String, Object> gate = service.latestGate();
 
@@ -122,6 +129,22 @@ class AiQualityGateServiceTest {
         assertEquals(true, String.valueOf(gate.get("failureSamples")).contains("MCP_GOVERNANCE"));
         assertEquals("MISSING_EVAL", ((Map<?, ?>) gate.get("ragClosure")).get("status"));
         assertEquals("ACTION_REQUIRED", ((Map<?, ?>) gate.get("nl2SqlContract")).get("status"));
+    }
+
+    private AiPurchaseAgentEvalRun passingPurchaseRun() {
+        AiPurchaseAgentEvalRun run = new AiPurchaseAgentEvalRun();
+        run.setEvalRunId("purchase-1");
+        run.setRunStatus("COMPLETED");
+        run.setCompletedCases(20);
+        run.setSlotAccuracy(0.95D);
+        run.setToolCallAccuracy(0.94D);
+        run.setParameterAccuracy(0.92D);
+        run.setTrajectoryPassRate(0.9D);
+        run.setApprovalBypassCount(0);
+        run.setIdempotencyPassRate(1D);
+        run.setReservationReleaseRate(1D);
+        run.setP95LatencyMs(2200D);
+        return run;
     }
 
     private OpsProviderRegistry opsRegistry() {

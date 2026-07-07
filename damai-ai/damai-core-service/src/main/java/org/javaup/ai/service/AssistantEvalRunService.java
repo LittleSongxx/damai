@@ -2,9 +2,11 @@ package org.javaup.ai.service;
 
 import lombok.RequiredArgsConstructor;
 import org.javaup.ai.entity.AiNl2SqlEvalRun;
+import org.javaup.ai.entity.AiPurchaseAgentEvalRun;
 import org.javaup.ai.entity.AiRagEvalRun;
 import org.javaup.ai.vo.AssistantEvalRunRequest;
 import org.javaup.ai.vo.AssistantEvalRunVo;
+import org.javaup.ai.vo.EvaluationRunRequest;
 import org.javaup.ai.vo.RagEvalRunRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -18,6 +20,7 @@ public class AssistantEvalRunService {
 
     private final RagEvalService ragEvalService;
     private final Nl2SqlEvalService nl2SqlEvalService;
+    private final PurchaseAgentEvalService purchaseAgentEvalService;
     private final AiQualityGateService qualityGateService;
 
     public AssistantEvalRunVo runSuite(String suite, AssistantEvalRunRequest request) {
@@ -26,6 +29,7 @@ public class AssistantEvalRunService {
         return switch (normalizedSuite) {
             case "RAG" -> runRag(normalizedRequest);
             case "NL2SQL" -> runNl2Sql(normalizedRequest);
+            case "PURCHASE_AGENT" -> runPurchaseAgent(normalizedRequest);
             case "RED_TEAM" -> runGovernanceSnapshot("RED_TEAM", "QUALITY_GATE_RED_TEAM");
             case "QUALITY_GATE" -> runGovernanceSnapshot("QUALITY_GATE", "QUALITY_GATE_SNAPSHOT");
             default -> throw new IllegalArgumentException("Unsupported eval suite: " + suite);
@@ -37,6 +41,7 @@ public class AssistantEvalRunService {
         return switch (normalizedSuite) {
             case "RAG" -> buildRagStatus(evalRunId);
             case "NL2SQL" -> buildNl2SqlStatus(evalRunId);
+            case "PURCHASE_AGENT" -> buildPurchaseAgentStatus(evalRunId);
             case "RED_TEAM" -> runGovernanceSnapshot("RED_TEAM", "QUALITY_GATE_RED_TEAM");
             case "QUALITY_GATE" -> runGovernanceSnapshot("QUALITY_GATE", "QUALITY_GATE_SNAPSHOT");
             default -> throw new IllegalArgumentException("Unsupported eval suite: " + suite);
@@ -91,6 +96,31 @@ public class AssistantEvalRunService {
                         "Poll /assistant/admin/nl2sql-eval/status/" + run.getEvalRunId(),
                         "Inspect schema-link precision/recall",
                         "Block release if unsafe rejection or execution accuracy regresses"))
+                .build();
+    }
+
+    private AssistantEvalRunVo runPurchaseAgent(AssistantEvalRunRequest request) {
+        EvaluationRunRequest purchaseRequest = new EvaluationRunRequest();
+        purchaseRequest.setDomain("PURCHASE_AGENT");
+        purchaseRequest.setDatasetId(request.getDatasetId());
+        purchaseRequest.setDatasetVersion(request.getDatasetVersion());
+        purchaseRequest.setCaseIds(request.getCaseIds());
+        purchaseRequest.setLimit(request.getLimit());
+        AiPurchaseAgentEvalRun run = purchaseAgentEvalService.startEvaluation(purchaseRequest);
+        return AssistantEvalRunVo.builder()
+                .suite("PURCHASE_AGENT")
+                .status(run.getRunStatus())
+                .evalRunId(run.getEvalRunId())
+                .totalCases(run.getTotalCases())
+                .completedCases(run.getCompletedCases())
+                .progress(progress(run.getCompletedCases(), run.getTotalCases()))
+                .metrics(purchaseMetrics(run))
+                .resultType("PURCHASE_AGENT_EVAL_RUN")
+                .qualityGate(purchaseAgentEvalService.buildQualityGate(run))
+                .nextActions(List.of(
+                        "Inspect slot, tool, trajectory, idempotency, and reservation-release metrics",
+                        "Replay failed mock-fixture cases before changing purchase prompts or tools",
+                        "Keep evalMode isolated from real order creation"))
                 .build();
     }
 
@@ -162,6 +192,37 @@ public class AssistantEvalRunService {
                 .qualityGate(Map.of("status", nl2SqlGateStatus(run)))
                 .nextActions(nl2SqlNextActions(run))
                 .build();
+    }
+
+    private AssistantEvalRunVo buildPurchaseAgentStatus(String evalRunId) {
+        AiPurchaseAgentEvalRun run = purchaseAgentEvalService.getRunStatus(evalRunId);
+        if (run == null) {
+            return null;
+        }
+        return AssistantEvalRunVo.builder()
+                .suite("PURCHASE_AGENT")
+                .status(run.getRunStatus())
+                .evalRunId(run.getEvalRunId())
+                .totalCases(run.getTotalCases())
+                .completedCases(run.getCompletedCases())
+                .progress(progress(run.getCompletedCases(), run.getTotalCases()))
+                .resultType("PURCHASE_AGENT_EVAL_RUN")
+                .metrics(purchaseMetrics(run))
+                .qualityGate(purchaseAgentEvalService.buildQualityGate(run))
+                .nextActions(List.of("Review failed purchase trajectories and idempotency violations"))
+                .build();
+    }
+
+    private Map<String, Object> purchaseMetrics(AiPurchaseAgentEvalRun run) {
+        return Map.of(
+                "slotAccuracy", zeroIfNull(run.getSlotAccuracy()),
+                "toolCallAccuracy", zeroIfNull(run.getToolCallAccuracy()),
+                "parameterAccuracy", zeroIfNull(run.getParameterAccuracy()),
+                "trajectoryPassRate", zeroIfNull(run.getTrajectoryPassRate()),
+                "idempotencyPassRate", zeroIfNull(run.getIdempotencyPassRate()),
+                "reservationReleaseRate", zeroIfNull(run.getReservationReleaseRate()),
+                "approvalBypassCount", run.getApprovalBypassCount() == null ? 0 : run.getApprovalBypassCount(),
+                "p95LatencyMs", zeroIfNull(run.getP95LatencyMs()));
     }
 
     private List<String> ragNextActions(AiRagEvalRun run) {

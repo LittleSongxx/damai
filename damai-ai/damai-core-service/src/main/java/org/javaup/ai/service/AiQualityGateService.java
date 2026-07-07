@@ -8,8 +8,10 @@ import org.javaup.ai.assistant.mcp.McpGovernanceProperties;
 import org.javaup.ai.assistant.skill.ops.OpsProviderRegistry;
 import org.javaup.ai.config.AiQualityGateProperties;
 import org.javaup.ai.entity.AiNl2SqlEvalRun;
+import org.javaup.ai.entity.AiPurchaseAgentEvalRun;
 import org.javaup.ai.entity.AiRagEvalRun;
 import org.javaup.ai.mapper.AiNl2SqlEvalRunMapper;
+import org.javaup.ai.mapper.AiPurchaseAgentEvalRunMapper;
 import org.javaup.ai.mapper.AiRagEvalRunMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -24,6 +26,7 @@ public class AiQualityGateService {
 
     private final AiRagEvalRunMapper ragEvalRunMapper;
     private final AiNl2SqlEvalRunMapper nl2SqlEvalRunMapper;
+    private final AiPurchaseAgentEvalRunMapper purchaseAgentEvalRunMapper;
     private final McpGovernanceProperties mcpGovernanceProperties;
     private final OpsProviderRegistry opsProviderRegistry;
     private final CustomerServiceMetricsService customerServiceMetricsService;
@@ -32,8 +35,10 @@ public class AiQualityGateService {
     public Map<String, Object> latestGate() {
         AiRagEvalRun ragRun = latestRagRun();
         AiNl2SqlEvalRun nl2SqlRun = latestNl2SqlRun();
+        AiPurchaseAgentEvalRun purchaseRun = latestPurchaseRun();
         List<Map<String, Object>> gates = List.of(
                 ragGate(ragRun),
+                purchaseAgentGate(purchaseRun),
                 nl2SqlGate(nl2SqlRun),
                 customerServiceGate(),
                 mcpGate(),
@@ -44,10 +49,11 @@ public class AiQualityGateService {
         report.put("status", status);
         report.put("gates", gates);
         report.put("latestRagRunId", ragRun == null ? "" : ragRun.getEvalRunId());
+        report.put("latestPurchaseAgentRunId", purchaseRun == null ? "" : purchaseRun.getEvalRunId());
         report.put("latestNl2SqlRunId", nl2SqlRun == null ? "" : nl2SqlRun.getEvalRunId());
         report.put("coverageSummary", coverageSummary());
         report.put("capabilityEvidence", capabilityEvidence());
-        report.put("failureSamples", failureSamples(gates, ragRun, nl2SqlRun));
+        report.put("failureSamples", failureSamples(gates, ragRun, purchaseRun, nl2SqlRun));
         report.put("releaseReadiness", releaseReadiness(status, gates));
         report.put("trendSummary", trendSummary(ragRun, nl2SqlRun));
         report.put("ragClosure", ragClosure(ragRun));
@@ -66,6 +72,13 @@ public class AiQualityGateService {
         return nl2SqlEvalRunMapper.selectOne(Wrappers.lambdaQuery(AiNl2SqlEvalRun.class)
                 .eq(AiNl2SqlEvalRun::getStatus, 1)
                 .orderByDesc(AiNl2SqlEvalRun::getId)
+                .last("limit 1"));
+    }
+
+    private AiPurchaseAgentEvalRun latestPurchaseRun() {
+        return purchaseAgentEvalRunMapper.selectOne(Wrappers.lambdaQuery(AiPurchaseAgentEvalRun.class)
+                .eq(AiPurchaseAgentEvalRun::getStatus, 1)
+                .orderByDesc(AiPurchaseAgentEvalRun::getId)
                 .last("limit 1"));
     }
 
@@ -120,6 +133,43 @@ public class AiQualityGateService {
         details.put("avgEstimatedCost", run.getAvgEstimatedCost() == null ? 0D : run.getAvgEstimatedCost());
         return gate("NL2SQL_EVAL", status, "latest NL2SQL execution/safety quality gate",
                 details);
+    }
+
+    private Map<String, Object> purchaseAgentGate(AiPurchaseAgentEvalRun run) {
+        if (run == null) {
+            return gate("PURCHASE_AGENT_EVAL", "WARN", "no purchase-agent eval run found", Map.of());
+        }
+        boolean completed = "COMPLETED".equals(run.getRunStatus());
+        double toolAccuracy = run.getToolCallAccuracy() == null ? 0D : run.getToolCallAccuracy();
+        double trajectoryRate = run.getTrajectoryPassRate() == null ? 0D : run.getTrajectoryPassRate();
+        double idempotencyRate = run.getIdempotencyPassRate() == null ? 0D : run.getIdempotencyPassRate();
+        double releaseRate = run.getReservationReleaseRate() == null ? 0D : run.getReservationReleaseRate();
+        long approvalBypassCount = run.getApprovalBypassCount() == null ? 0L : run.getApprovalBypassCount();
+        var threshold = qualityGateProperties.getPurchaseAgent();
+        String status = completed
+                && approvalBypassCount <= threshold.getMaxApprovalBypassCount()
+                && idempotencyRate >= threshold.getIdempotencyPassRate()
+                && releaseRate >= threshold.getReservationReleaseRate()
+                && toolAccuracy >= threshold.getToolCallAccuracy()
+                && trajectoryRate >= threshold.getTrajectoryPassRate() ? "PASS" : "WARN";
+        if (!completed
+                || approvalBypassCount > threshold.getMaxApprovalBypassCount()
+                || idempotencyRate < threshold.getIdempotencyPassRate()
+                || releaseRate < threshold.getReservationReleaseRate()) {
+            status = "FAIL";
+        }
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("evalRunId", value(run.getEvalRunId()));
+        details.put("completedCases", run.getCompletedCases() == null ? 0 : run.getCompletedCases());
+        details.put("slotAccuracy", run.getSlotAccuracy() == null ? 0D : run.getSlotAccuracy());
+        details.put("toolCallAccuracy", toolAccuracy);
+        details.put("parameterAccuracy", run.getParameterAccuracy() == null ? 0D : run.getParameterAccuracy());
+        details.put("trajectoryPassRate", trajectoryRate);
+        details.put("approvalBypassCount", approvalBypassCount);
+        details.put("idempotencyPassRate", idempotencyRate);
+        details.put("reservationReleaseRate", releaseRate);
+        details.put("p95LatencyMs", run.getP95LatencyMs() == null ? 0L : run.getP95LatencyMs());
+        return gate("PURCHASE_AGENT_EVAL", status, "latest purchase-agent trajectory and transaction-safety quality gate", details);
     }
 
     private Map<String, Object> mcpGate() {
@@ -223,6 +273,7 @@ public class AiQualityGateService {
         coverage.put("frontendTestFiles", coverageProperties.getFrontendTestFiles());
         coverage.put("minimumGoldCases", Map.of(
                 "rag", coverageProperties.getMinimumRagGoldCases(),
+                "purchaseAgent", coverageProperties.getMinimumPurchaseAgentGoldCases(),
                 "nl2sql", coverageProperties.getMinimumNl2sqlGoldCases(),
                 "redTeam", coverageProperties.getMinimumRedTeamCases()));
         return coverage;
@@ -231,9 +282,9 @@ public class AiQualityGateService {
     private List<Map<String, Object>> capabilityEvidence() {
         return List.of(
                 capability("assistant-eval-control-plane",
-                        "Unified EvalOps start/status interface for RAG, NL2SQL, red-team, and quality-gate suites",
-                        List.of("POST /assistant/evals/{suite}/run", "GET /assistant/evals/{suite}/runs/{evalRunId}"),
-                        List.of("AssistantEvalRunServiceTest", "AssistantHub.spec.js", "api.spec.js")),
+                        "Unified EvalOps start/status interface for RAG, purchase Agent, NL2SQL, red-team, and quality-gate suites",
+                        List.of("POST /assistant/admin/evals/runs", "GET /assistant/admin/evals/runs/{evalRunId}", "GET /assistant/admin/evals/dashboard"),
+                        List.of("AssistantEvalRunServiceTest", "PurchaseAgentEvalServiceTest", "AssistantHub.spec.js", "api.spec.js")),
                 capability("rag-reindex-jobs",
                         "Async knowledge-base reindex jobs with task history surfaced in the admin workspace",
                         List.of("POST /assistant/admin/knowledge/reindex-jobs", "GET /assistant/admin/knowledge/ingestion/tasks"),
@@ -250,6 +301,10 @@ public class AiQualityGateService {
                         "NL2SQL returns a stable status/sql/evidence/safetyReport/executionPlan/resultPreview/maskedColumns/repairTrace contract",
                         List.of("POST /assistant/evals/nl2sql/run", "GET /assistant/admin/quality-gates/latest"),
                         List.of("Nl2SqlOrchestratorPolicyTest", "Nl2SqlEvalServiceTest", "AiQualityGateServiceTest")),
+                capability("purchase-agent-eval",
+                        "Purchase-agent eval verifies slot filling, tool parameters, approval boundary, idempotency, and reservation release without touching production orders",
+                        List.of("POST /assistant/admin/evals/runs", "POST /assistant/admin/evals/runs/{evalRunId}/replay-failed"),
+                        List.of("PurchaseAgentEvalServiceTest", "AiQualityGateServiceTest")),
                 capability("customer-service-experience",
                         "Customer-service quick answers, sentiment triage, work items, and experience metrics are wired into the unified Assistant Runtime entry",
                         List.of("GET /assistant/customer-service/starter-prompts", "POST /assistant/customer-service/quick-answer", "POST /assistant/customer-service/handoff", "GET /assistant/admin/customer-service/dashboard"),
@@ -290,15 +345,17 @@ public class AiQualityGateService {
 
     private List<Map<String, Object>> failureSamples(List<Map<String, Object>> gates,
                                                      AiRagEvalRun ragRun,
+                                                     AiPurchaseAgentEvalRun purchaseRun,
                                                      AiNl2SqlEvalRun nl2SqlRun) {
         return gates.stream()
                 .filter(gate -> !"PASS".equals(gate.get("status")))
-                .map(gate -> failureSample(gate, ragRun, nl2SqlRun))
+                .map(gate -> failureSample(gate, ragRun, purchaseRun, nl2SqlRun))
                 .toList();
     }
 
     private Map<String, Object> failureSample(Map<String, Object> gate,
                                               AiRagEvalRun ragRun,
+                                              AiPurchaseAgentEvalRun purchaseRun,
                                               AiNl2SqlEvalRun nl2SqlRun) {
         String name = String.valueOf(gate.get("name"));
         Map<String, Object> sample = new LinkedHashMap<>();
@@ -314,6 +371,10 @@ public class AiQualityGateService {
             sample.put("runId", value(nl2SqlRun.getEvalRunId()));
             sample.put("errorMessage", value(nl2SqlRun.getErrorMessage()));
             sample.put("nextAction", "inspect unsafe rejection, schema-link recall, execution accuracy, and repair traces");
+        } else if ("PURCHASE_AGENT_EVAL".equals(name) && purchaseRun != null) {
+            sample.put("runId", value(purchaseRun.getEvalRunId()));
+            sample.put("errorMessage", value(purchaseRun.getErrorMessage()));
+            sample.put("nextAction", "replay failed purchase cases with mock fixtures and inspect slot, tool, approval, and reservation traces");
         } else if ("MCP_GOVERNANCE".equals(name)) {
             sample.put("nextAction", "keep MCP allowlist explicit, require admin, and keep high-risk tools confirmation-gated");
         } else if ("AIOPS_EVIDENCE".equals(name)) {

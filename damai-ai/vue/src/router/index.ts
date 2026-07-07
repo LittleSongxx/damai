@@ -20,6 +20,11 @@ const routes: RouteRecordRaw[] = [
     path: '/assistant/prompts',
     name: 'PromptGovernance',
     component: () => import('../views/PromptGovernance.vue')
+  },
+  {
+    path: '/assistant/evals',
+    name: 'EvaluationCenter',
+    component: () => import('../views/EvaluationCenter.vue')
   }
 ]
 

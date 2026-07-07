@@ -11,6 +11,7 @@ import io.qdrant.client.grpc.Points.PointStruct;
 import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.ai.rag.MarkdownLoader;
 import org.javaup.ai.cache.FaqSearchCacheService;
+import org.javaup.ai.cache.RagEvidenceCacheService;
 import org.javaup.ai.entity.RagChunk;
 import org.javaup.ai.entity.RagDocument;
 import org.javaup.ai.entity.RagIngestionTask;
@@ -56,6 +57,7 @@ public class DocumentIngestionService {
     private final RagChunkMapper chunkMapper;
     private final RagIngestionTaskMapper taskMapper;
     private final FaqSearchCacheService faqSearchCacheService;
+    private final RagEvidenceCacheService ragEvidenceCacheService;
     private final HypotheticalQuestionService hypotheticalService;
     private final MultiChannelRetrievalEngine retrievalEngine;
 
@@ -85,6 +87,7 @@ public class DocumentIngestionService {
                                      RagChunkMapper chunkMapper,
                                      RagIngestionTaskMapper taskMapper,
                                      FaqSearchCacheService faqSearchCacheService,
+                                     RagEvidenceCacheService ragEvidenceCacheService,
                                      HypotheticalQuestionService hypotheticalService,
                                      @Lazy MultiChannelRetrievalEngine retrievalEngine,
                                      EsClientHelper esClient) {
@@ -95,6 +98,7 @@ public class DocumentIngestionService {
         this.chunkMapper = chunkMapper;
         this.taskMapper = taskMapper;
         this.faqSearchCacheService = faqSearchCacheService;
+        this.ragEvidenceCacheService = ragEvidenceCacheService;
         this.hypotheticalService = hypotheticalService;
         this.retrievalEngine = retrievalEngine;
         this.esClient = esClient;
@@ -147,6 +151,7 @@ public class DocumentIngestionService {
 
             // Invalidate FAQ search cache
             faqSearchCacheService.invalidate();
+            ragEvidenceCacheService.invalidate();
 
             updateTaskStatus(task, "completed");
             task.setResultJson(JSON.toJSONString(Map.of(
@@ -213,6 +218,7 @@ public class DocumentIngestionService {
                 qdrantUpserted = batchUpsertQdrant(changed, changedChunks, qdrantCollectionForIncrementalReindex());
                 esUpserted = bulkUpsertEs(changed);
                 faqSearchCacheService.invalidate();
+                ragEvidenceCacheService.invalidate();
             }
 
             updateTaskStatus(task, "completed");

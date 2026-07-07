@@ -438,6 +438,36 @@ export const ragEvalAPI = {
   }
 }
 
+export const evaluationCenterAPI = {
+  async createRun(payload = {}) {
+    return requestJson('/assistant/admin/evals/runs', {
+      method: 'POST',
+      body: payload
+    })
+  },
+
+  async getRun(evalRunId) {
+    const response = await fetchWithTimeout(buildUrl(`/assistant/admin/evals/runs/${evalRunId}`))
+    return response.json()
+  },
+
+  async getRunResults(evalRunId) {
+    const response = await fetchWithTimeout(buildUrl(`/assistant/admin/evals/runs/${evalRunId}/results`))
+    return response.json()
+  },
+
+  async getDashboard() {
+    const response = await fetchWithTimeout(buildUrl('/assistant/admin/evals/dashboard'))
+    return response.json()
+  },
+
+  async replayFailed(evalRunId) {
+    return requestJson(`/assistant/admin/evals/runs/${evalRunId}/replay-failed`, {
+      method: 'POST'
+    })
+  }
+}
+
 export const aiOpsAdminAPI = {
   async listProviders() {
     const response = await fetchWithTimeout(buildUrl('/assistant/admin/ops/providers'))

@@ -1002,6 +1002,63 @@ CREATE TABLE IF NOT EXISTS `d_ai_nl2sql_eval_result` (
   KEY `idx_ai_nl2sql_eval_result_case` (`case_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='NL2SQL评测结果表';
 
+CREATE TABLE IF NOT EXISTS `d_ai_purchase_agent_eval_run` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `eval_run_id` varchar(128) NOT NULL COMMENT '购票Agent评测运行ID',
+  `dataset_id` varchar(128) DEFAULT 'purchase-agent-golden' COMMENT '数据集ID',
+  `dataset_version` varchar(64) DEFAULT 'v1' COMMENT '数据集版本',
+  `total_cases` int DEFAULT 0 COMMENT '总用例数',
+  `completed_cases` int DEFAULT 0 COMMENT '完成用例数',
+  `slot_accuracy` double DEFAULT NULL COMMENT '槽位命中率',
+  `tool_call_accuracy` double DEFAULT NULL COMMENT '工具调用准确率',
+  `parameter_accuracy` double DEFAULT NULL COMMENT '工具参数准确率',
+  `trajectory_pass_rate` double DEFAULT NULL COMMENT '轨迹通过率',
+  `idempotency_pass_rate` double DEFAULT NULL COMMENT '幂等检查通过率',
+  `reservation_release_rate` double DEFAULT NULL COMMENT '预留释放通过率',
+  `approval_bypass_count` int DEFAULT 0 COMMENT '审批绕过次数',
+  `p95_latency_ms` double DEFAULT NULL COMMENT 'P95端到端耗时',
+  `run_status` varchar(32) DEFAULT 'RUNNING' COMMENT '状态',
+  `quality_gate_json` text DEFAULT NULL COMMENT '质量门禁JSON',
+  `request_json` text DEFAULT NULL COMMENT '请求参数JSON',
+  `report_json` mediumtext DEFAULT NULL COMMENT '评测报告JSON',
+  `error_message` text DEFAULT NULL COMMENT '错误信息',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ai_purchase_agent_eval_run_id` (`eval_run_id`),
+  KEY `idx_ai_purchase_agent_eval_dataset` (`dataset_id`,`dataset_version`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='购票Agent评测运行表';
+
+CREATE TABLE IF NOT EXISTS `d_ai_purchase_agent_eval_result` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
+  `eval_run_id` varchar(128) NOT NULL COMMENT '购票Agent评测运行ID',
+  `case_id` varchar(128) NOT NULL COMMENT '用例ID',
+  `question` text DEFAULT NULL COMMENT '用户问题',
+  `final_status` varchar(32) DEFAULT NULL COMMENT '最终状态',
+  `slot_accuracy` double DEFAULT NULL COMMENT '槽位命中率',
+  `tool_call_accuracy` double DEFAULT NULL COMMENT '工具调用准确率',
+  `parameter_accuracy` double DEFAULT NULL COMMENT '工具参数准确率',
+  `trajectory_passed` tinyint(1) DEFAULT NULL COMMENT '轨迹是否通过',
+  `approval_bypassed` tinyint(1) DEFAULT 0 COMMENT '是否绕过审批',
+  `idempotency_passed` tinyint(1) DEFAULT NULL COMMENT '幂等检查是否通过',
+  `reservation_released` tinyint(1) DEFAULT NULL COMMENT '预留释放是否通过',
+  `latency_ms` bigint DEFAULT NULL COMMENT '耗时ms',
+  `expected_trace_json` text DEFAULT NULL COMMENT '期望轨迹JSON',
+  `actual_trace_json` text DEFAULT NULL COMMENT '实际轨迹JSON',
+  `expected_slots_json` text DEFAULT NULL COMMENT '期望槽位JSON',
+  `actual_slots_json` text DEFAULT NULL COMMENT '实际槽位JSON',
+  `failure_reason` text DEFAULT NULL COMMENT '失败原因',
+  `judge_raw_output` mediumtext DEFAULT NULL COMMENT 'Judge原始输出',
+  `eval_method` varchar(32) DEFAULT NULL COMMENT '评估方法',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
+  `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+  PRIMARY KEY (`id`),
+  KEY `idx_ai_purchase_agent_eval_result_run` (`eval_run_id`),
+  KEY `idx_ai_purchase_agent_eval_result_case` (`case_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='购票Agent评测结果表';
+
 CREATE TABLE IF NOT EXISTS `d_ai_episodic_memory` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键id',
   `user_id` bigint NOT NULL COMMENT '用户ID',

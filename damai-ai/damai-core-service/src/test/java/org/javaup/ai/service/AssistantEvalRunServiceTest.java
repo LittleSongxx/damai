@@ -1,6 +1,7 @@
 package org.javaup.ai.service;
 
 import org.javaup.ai.entity.AiNl2SqlEvalRun;
+import org.javaup.ai.entity.AiPurchaseAgentEvalRun;
 import org.javaup.ai.entity.AiRagEvalRun;
 import org.javaup.ai.vo.AssistantEvalRunRequest;
 import org.javaup.ai.vo.AssistantEvalRunVo;
@@ -23,9 +24,10 @@ class AssistantEvalRunServiceTest {
 
     private final RagEvalService ragEvalService = mock(RagEvalService.class);
     private final Nl2SqlEvalService nl2SqlEvalService = mock(Nl2SqlEvalService.class);
+    private final PurchaseAgentEvalService purchaseAgentEvalService = mock(PurchaseAgentEvalService.class);
     private final AiQualityGateService qualityGateService = mock(AiQualityGateService.class);
     private final AssistantEvalRunService service = new AssistantEvalRunService(
-            ragEvalService, nl2SqlEvalService, qualityGateService);
+            ragEvalService, nl2SqlEvalService, purchaseAgentEvalService, qualityGateService);
 
     @Test
     void shouldStartRagEvalSuiteThroughUnifiedControlPlane() {
@@ -90,6 +92,31 @@ class AssistantEvalRunServiceTest {
         assertEquals(20, result.getTotalCases());
         assertEquals("NL2SQL_EVAL_RUN", result.getResultType());
         assertEquals(true, result.getNextActions().stream().anyMatch(action -> action.contains("unsafe rejection")));
+    }
+
+    @Test
+    void shouldStartPurchaseAgentEvalSuiteThroughUnifiedControlPlane() {
+        AiPurchaseAgentEvalRun run = new AiPurchaseAgentEvalRun();
+        run.setEvalRunId("purchase-eval-1");
+        run.setRunStatus("COMPLETED");
+        run.setTotalCases(12);
+        run.setCompletedCases(12);
+        run.setToolCallAccuracy(0.93D);
+        run.setTrajectoryPassRate(0.88D);
+        run.setApprovalBypassCount(0);
+        run.setIdempotencyPassRate(1D);
+        run.setReservationReleaseRate(1D);
+        when(purchaseAgentEvalService.startEvaluation(any())).thenReturn(run);
+        when(purchaseAgentEvalService.buildQualityGate(run)).thenReturn(Map.of("status", "PASS"));
+
+        AssistantEvalRunVo result = service.runSuite("purchase-agent", new AssistantEvalRunRequest());
+
+        assertEquals("PURCHASE_AGENT", result.getSuite());
+        assertEquals("COMPLETED", result.getStatus());
+        assertEquals("purchase-eval-1", result.getEvalRunId());
+        assertEquals(12, result.getTotalCases());
+        assertEquals("PURCHASE_AGENT_EVAL_RUN", result.getResultType());
+        assertEquals("PASS", result.getQualityGate().get("status"));
     }
 
     @Test

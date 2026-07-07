@@ -11,8 +11,10 @@ import org.javaup.ai.context.AiRequestContext;
 import org.javaup.ai.context.AiRequestContextHolder;
 import org.javaup.ai.context.AiUserContext;
 import org.javaup.ai.entity.AiNl2SqlEvalRun;
+import org.javaup.ai.entity.AiPurchaseAgentEvalRun;
 import org.javaup.ai.entity.AiRagEvalRun;
 import org.javaup.ai.mapper.AiNl2SqlEvalRunMapper;
+import org.javaup.ai.mapper.AiPurchaseAgentEvalRunMapper;
 import org.javaup.ai.mapper.AiPromptReleaseRecordMapper;
 import org.javaup.ai.mapper.AiPromptVersionMapper;
 import org.javaup.ai.mapper.AiRagEvalRunMapper;
@@ -166,10 +168,11 @@ class PromptVersionServiceTest {
     void releasePlanShouldBindQualityGateBaselineAndRollbackEvidence() {
         AiRagEvalRunMapper ragMapper = mock(AiRagEvalRunMapper.class);
         AiNl2SqlEvalRunMapper sqlMapper = mock(AiNl2SqlEvalRunMapper.class);
+        AiPurchaseAgentEvalRunMapper purchaseMapper = mock(AiPurchaseAgentEvalRunMapper.class);
         CustomerServiceMetricsService metricsService = mock(CustomerServiceMetricsService.class);
         when(metricsService.qualitySnapshot()).thenReturn(passingCustomerServiceSnapshot());
         AiQualityGateService qualityGateService = new AiQualityGateService(
-                ragMapper, sqlMapper, new McpGovernanceProperties(), opsRegistry(), metricsService, new AiQualityGateProperties());
+                ragMapper, sqlMapper, purchaseMapper, new McpGovernanceProperties(), opsRegistry(), metricsService, new AiQualityGateProperties());
         PromptReleasePlanService releasePlanService = new PromptReleasePlanService(service, qualityGateService);
 
         List<AiPromptVersion> versions = new ArrayList<>();
@@ -178,6 +181,7 @@ class PromptVersionServiceTest {
         when(versionMapper.selectList(any())).thenReturn(versions);
         when(ragMapper.selectOne(any())).thenReturn(passingRagRun());
         when(sqlMapper.selectOne(any())).thenReturn(passingSqlRun());
+        when(purchaseMapper.selectOne(any())).thenReturn(passingPurchaseRun());
 
         Map<String, Object> plan = releasePlanService.buildPlan(
                 "knowledge.answer", 2, "GRADUAL", 25, "rag-baseline-1");
@@ -194,10 +198,11 @@ class PromptVersionServiceTest {
     void requirePublishablePlanShouldReturnServerGeneratedEvidencePlan() {
         AiRagEvalRunMapper ragMapper = mock(AiRagEvalRunMapper.class);
         AiNl2SqlEvalRunMapper sqlMapper = mock(AiNl2SqlEvalRunMapper.class);
+        AiPurchaseAgentEvalRunMapper purchaseMapper = mock(AiPurchaseAgentEvalRunMapper.class);
         CustomerServiceMetricsService metricsService = mock(CustomerServiceMetricsService.class);
         when(metricsService.qualitySnapshot()).thenReturn(passingCustomerServiceSnapshot());
         AiQualityGateService qualityGateService = new AiQualityGateService(
-                ragMapper, sqlMapper, new McpGovernanceProperties(), opsRegistry(), metricsService, new AiQualityGateProperties());
+                ragMapper, sqlMapper, purchaseMapper, new McpGovernanceProperties(), opsRegistry(), metricsService, new AiQualityGateProperties());
         PromptReleasePlanService releasePlanService = new PromptReleasePlanService(service, qualityGateService);
 
         List<AiPromptVersion> versions = new ArrayList<>();
@@ -206,6 +211,7 @@ class PromptVersionServiceTest {
         when(versionMapper.selectList(any())).thenReturn(versions);
         when(ragMapper.selectOne(any())).thenReturn(passingRagRun());
         when(sqlMapper.selectOne(any())).thenReturn(passingSqlRun());
+        when(purchaseMapper.selectOne(any())).thenReturn(passingPurchaseRun());
 
         Map<String, Object> plan = releasePlanService.requirePublishablePlan(
                 "knowledge.answer", 2, "GRADUAL", 25, "rag-baseline-1");
@@ -221,17 +227,19 @@ class PromptVersionServiceTest {
     void releasePlanShouldBlockMissingBaselineAndFailedGate() {
         AiRagEvalRunMapper ragMapper = mock(AiRagEvalRunMapper.class);
         AiNl2SqlEvalRunMapper sqlMapper = mock(AiNl2SqlEvalRunMapper.class);
+        AiPurchaseAgentEvalRunMapper purchaseMapper = mock(AiPurchaseAgentEvalRunMapper.class);
         McpGovernanceProperties mcp = new McpGovernanceProperties();
         mcp.setExposeNl2Sql(true);
         CustomerServiceMetricsService metricsService = mock(CustomerServiceMetricsService.class);
         when(metricsService.qualitySnapshot()).thenReturn(Map.of("totalEvents", 0));
         AiQualityGateService qualityGateService = new AiQualityGateService(
-                ragMapper, sqlMapper, mcp, opsRegistry(), metricsService, new AiQualityGateProperties());
+                ragMapper, sqlMapper, purchaseMapper, mcp, opsRegistry(), metricsService, new AiQualityGateProperties());
         PromptReleasePlanService releasePlanService = new PromptReleasePlanService(service, qualityGateService);
 
         when(versionMapper.selectList(any())).thenReturn(List.of(version(2, "candidate", false, "DRAFT", 0)));
         when(ragMapper.selectOne(any())).thenReturn(null);
         when(sqlMapper.selectOne(any())).thenReturn(null);
+        when(purchaseMapper.selectOne(any())).thenReturn(null);
 
         Map<String, Object> plan = releasePlanService.buildPlan(
                 "knowledge.answer", 2, "GRADUAL", 50, "");
@@ -300,6 +308,22 @@ class PromptVersionServiceTest {
         sqlRun.setUnsafeRejectionRate(1.0);
         sqlRun.setLowConfidenceClarificationRate(0.2);
         return sqlRun;
+    }
+
+    private AiPurchaseAgentEvalRun passingPurchaseRun() {
+        AiPurchaseAgentEvalRun run = new AiPurchaseAgentEvalRun();
+        run.setEvalRunId("purchase-1");
+        run.setRunStatus("COMPLETED");
+        run.setCompletedCases(20);
+        run.setSlotAccuracy(0.95D);
+        run.setToolCallAccuracy(0.94D);
+        run.setParameterAccuracy(0.92D);
+        run.setTrajectoryPassRate(0.9D);
+        run.setApprovalBypassCount(0);
+        run.setIdempotencyPassRate(1D);
+        run.setReservationReleaseRate(1D);
+        run.setP95LatencyMs(2200D);
+        return run;
     }
 
     private OpsProviderRegistry opsRegistry() {

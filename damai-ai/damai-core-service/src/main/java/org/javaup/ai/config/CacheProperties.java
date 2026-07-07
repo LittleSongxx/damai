@@ -15,6 +15,7 @@ public class CacheProperties {
     private UserContext userContext = new UserContext();
     private Nl2sqlSchema nl2sqlSchema = new Nl2sqlSchema();
     private Nl2sqlResult nl2sqlResult = new Nl2sqlResult();
+    private RagEvidence ragEvidence = new RagEvidence();
 
     @Data
     public static class Embedding {
@@ -56,5 +57,15 @@ public class CacheProperties {
     public static class Nl2sqlResult {
         private boolean enabled = true;
         private int ttlMinutes = 3;
+    }
+
+    @Data
+    public static class RagEvidence {
+        private boolean enabled = true;
+        private int ttlMinutes = 15;
+        private int maxSize = 1000;
+        private boolean semanticEnabled = true;
+        private double semanticThreshold = 0.93D;
+        private int semanticMaxSize = 1000;
     }
 }

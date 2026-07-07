@@ -19,6 +19,12 @@ public class CacheMetrics {
     private final Counter nl2sqlSchemaMiss;
     private final Counter nl2sqlResultHit;
     private final Counter nl2sqlResultMiss;
+    private final Counter ragEvidenceExactHit;
+    private final Counter ragEvidenceExactMiss;
+    private final Counter ragEvidenceSemanticHit;
+    private final Counter ragEvidenceSemanticMiss;
+    private final Counter ragEvidencePut;
+    private final Counter ragEvidenceInvalidate;
 
     public CacheMetrics(MeterRegistry registry) {
         this.embeddingHit = Counter.builder("damai.cache.embedding.hit")
@@ -45,6 +51,18 @@ public class CacheMetrics {
                 .description("NL2SQL result cache hits").register(registry);
         this.nl2sqlResultMiss = Counter.builder("damai.cache.nl2sql_result.miss")
                 .description("NL2SQL result cache misses").register(registry);
+        this.ragEvidenceExactHit = Counter.builder("damai.cache.rag_evidence.exact.hit")
+                .description("RAG evidence exact cache hits").register(registry);
+        this.ragEvidenceExactMiss = Counter.builder("damai.cache.rag_evidence.exact.miss")
+                .description("RAG evidence exact cache misses").register(registry);
+        this.ragEvidenceSemanticHit = Counter.builder("damai.cache.rag_evidence.semantic.hit")
+                .description("RAG evidence semantic cache hits").register(registry);
+        this.ragEvidenceSemanticMiss = Counter.builder("damai.cache.rag_evidence.semantic.miss")
+                .description("RAG evidence semantic cache misses").register(registry);
+        this.ragEvidencePut = Counter.builder("damai.cache.rag_evidence.put")
+                .description("RAG evidence cache writes").register(registry);
+        this.ragEvidenceInvalidate = Counter.builder("damai.cache.rag_evidence.invalidate")
+                .description("RAG evidence cache invalidations").register(registry);
     }
 
     public void recordEmbedding(boolean hit) { if (hit) embeddingHit.increment(); else embeddingMiss.increment(); }
@@ -53,4 +71,8 @@ public class CacheMetrics {
     public void recordUserContext(boolean hit) { if (hit) userContextHit.increment(); else userContextMiss.increment(); }
     public void recordNl2sqlSchema(boolean hit) { if (hit) nl2sqlSchemaHit.increment(); else nl2sqlSchemaMiss.increment(); }
     public void recordNl2sqlResult(boolean hit) { if (hit) nl2sqlResultHit.increment(); else nl2sqlResultMiss.increment(); }
+    public void recordRagEvidenceExact(boolean hit) { if (hit) ragEvidenceExactHit.increment(); else ragEvidenceExactMiss.increment(); }
+    public void recordRagEvidenceSemantic(boolean hit) { if (hit) ragEvidenceSemanticHit.increment(); else ragEvidenceSemanticMiss.increment(); }
+    public void recordRagEvidencePut() { ragEvidencePut.increment(); }
+    public void recordRagEvidenceInvalidate() { ragEvidenceInvalidate.increment(); }
 }

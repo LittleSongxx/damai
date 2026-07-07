@@ -1,10 +1,12 @@
 package org.javaup.ai.rag;
 
 import lombok.RequiredArgsConstructor;
+import org.javaup.ai.cache.RagEvidenceCacheService;
 import org.javaup.ai.rag.channel.KnowledgeRetrievalFilter;
 import org.javaup.ai.rag.channel.SearchContext;
 import org.javaup.ai.rag.engine.MultiChannelRetrievalEngine;
 import org.javaup.ai.service.AdvancedQueryService;
+import org.javaup.ai.service.KnowledgeIndexVersionService;
 import org.javaup.ai.service.RagSearchBackendService;
 import org.javaup.ai.service.SentenceWindowService;
 import org.javaup.ai.vo.RagSearchResultVo;
@@ -27,6 +29,8 @@ public class RagRetrievalFacade {
     private final AdvancedQueryService advancedQueryService;
     private final RagSearchBackendService searchBackendService;
     private final SentenceWindowService sentenceWindowService;
+    private final RagEvidenceCacheService ragEvidenceCacheService;
+    private final KnowledgeIndexVersionService knowledgeIndexVersionService;
 
     public RagSearchResultVo retrieve(String query, RetrievalStrategy strategy, KnowledgeRetrievalFilter filter) {
         RetrievalStrategy effectiveStrategy = strategy == null
@@ -72,7 +76,20 @@ public class RagRetrievalFacade {
                         "strategyReason", effectiveStrategy.reason(),
                         "enabledChannels", effectiveStrategy.enabledChannels()))
                 .build();
-        return withResolvedDocuments(retrievalEngine.retrieve(context), effectiveStrategy.profile().name(),
+        String knowledgeVersion = knowledgeIndexVersionService.currentVersion();
+        RagEvidenceCacheService.RagEvidenceCacheKey cacheKey = ragEvidenceCacheService.buildKey(
+                query, primary, effectiveStrategy, context.getFilter(), knowledgeVersion);
+        RagEvidenceCacheService.CacheLookup cached = ragEvidenceCacheService.get(cacheKey);
+        if (cached.hit()) {
+            RagSearchResultVo cachedResult = ragEvidenceCacheService.withCacheMetadata(
+                    cached.result(), cacheKey, true, cached.hitType(), cached.similarity());
+            return withResolvedDocuments(cachedResult, effectiveStrategy.profile().name(),
+                    effectiveStrategy.enableRerank(), effectiveStrategy);
+        }
+        RagSearchResultVo retrieved = retrievalEngine.retrieve(context);
+        retrieved = ragEvidenceCacheService.withCacheMetadata(retrieved, cacheKey, false, "miss", null);
+        ragEvidenceCacheService.put(cacheKey, retrieved);
+        return withResolvedDocuments(retrieved, effectiveStrategy.profile().name(),
                 effectiveStrategy.enableRerank(), effectiveStrategy);
     }
 

@@ -12,6 +12,7 @@ import java.util.List;
 public class AiQualityGateProperties {
 
     private Nl2sql nl2sql = new Nl2sql();
+    private PurchaseAgent purchaseAgent = new PurchaseAgent();
     private CustomerService customerService = new CustomerService();
     private AiOps aiOps = new AiOps();
     private RedTeam redTeam = new RedTeam();
@@ -22,6 +23,15 @@ public class AiQualityGateProperties {
         private double sqlValidityRate = 0.90D;
         private double executionAccuracy = 0.80D;
         private double schemaLinkRecall = 0.70D;
+    }
+
+    @Data
+    public static class PurchaseAgent {
+        private double toolCallAccuracy = 0.90D;
+        private double trajectoryPassRate = 0.85D;
+        private double idempotencyPassRate = 1.00D;
+        private double reservationReleaseRate = 1.00D;
+        private long maxApprovalBypassCount = 0L;
     }
 
     @Data
@@ -53,6 +63,7 @@ public class AiQualityGateProperties {
                 "run-graph",
                 "rag-evalops",
                 "rag-ingestion-quality",
+                "purchase-agent-eval",
                 "nl2sql-safety",
                 "mcp-governance",
                 "mcp-boundary",
@@ -85,6 +96,7 @@ public class AiQualityGateProperties {
                 "Nl2SqlEvalServiceTest",
                 "RagEvalServiceTest",
                 "RagEvalOpsServicesTest",
+                "PurchaseAgentEvalServiceTest",
                 "OpsRcaEvidenceServiceTest");
         private List<String> frontendTestFiles = List.of(
                 "AssistantHub.spec.js",
@@ -92,6 +104,7 @@ public class AiQualityGateProperties {
                 "useAssistantRuntime.spec.js",
                 "api.spec.js");
         private int minimumRagGoldCases = 50;
+        private int minimumPurchaseAgentGoldCases = 30;
         private int minimumNl2sqlGoldCases = 50;
         private int minimumRedTeamCases = 30;
     }

@@ -10,6 +10,7 @@ import io.qdrant.client.grpc.Points;
 import io.qdrant.client.grpc.Points.PointStruct;
 import lombok.extern.slf4j.Slf4j;
 import org.javaup.ai.cache.EmbeddingCacheService;
+import org.javaup.ai.cache.FaqSearchCacheService;
 import org.javaup.ai.entity.FaqEntry;
 import org.javaup.ai.mapper.FaqEntryMapper;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
@@ -36,6 +37,7 @@ public class FaqMatchService {
     private final OpenAiEmbeddingModel embeddingModel;
     private final QdrantClient qdrantClient;
     private final EmbeddingCacheService embeddingCacheService;
+    private final FaqSearchCacheService faqSearchCacheService;
 
     @Value("${damai.ai.faq.alias:damai-ai-faq-current}")
     private String faqAlias;
@@ -46,11 +48,13 @@ public class FaqMatchService {
     public FaqMatchService(FaqEntryMapper faqEntryMapper,
                            OpenAiEmbeddingModel embeddingModel,
                            QdrantClient qdrantClient,
-                           EmbeddingCacheService embeddingCacheService) {
+                           EmbeddingCacheService embeddingCacheService,
+                           FaqSearchCacheService faqSearchCacheService) {
         this.faqEntryMapper = faqEntryMapper;
         this.embeddingModel = embeddingModel;
         this.qdrantClient = qdrantClient;
         this.embeddingCacheService = embeddingCacheService;
+        this.faqSearchCacheService = faqSearchCacheService;
     }
 
     /**
@@ -60,11 +64,18 @@ public class FaqMatchService {
         if (!StringUtils.hasText(query)) {
             return null;
         }
+        String normalizedQuery = normalize(query);
+        FaqMatchResult cached = getCachedMatch(normalizedQuery);
+        if (cached != null) {
+            log.debug("FAQ cache hit: faqId={}, method={}", cached.faqId(), cached.matchMethod());
+            return cached;
+        }
 
         // 第一层：关键词精确匹配（毫秒级）
         FaqMatchResult keywordResult = keywordMatch(query);
         if (keywordResult != null) {
             log.debug("FAQ keyword match: faqId={}", keywordResult.faqId());
+            putCachedMatch(normalizedQuery, keywordResult);
             return keywordResult;
         }
 
@@ -72,6 +83,7 @@ public class FaqMatchService {
         FaqMatchResult semanticResult = semanticMatch(query);
         if (semanticResult != null) {
             log.debug("FAQ semantic match: faqId={}", semanticResult.faqId());
+            putCachedMatch(normalizedQuery, semanticResult);
             return semanticResult;
         }
 
@@ -84,6 +96,7 @@ public class FaqMatchService {
      */
     public void indexFaq(FaqEntry entry) {
         if (entry.getQuestion() == null || entry.getQuestion().isBlank()) {
+            faqSearchCacheService.invalidate();
             return;
         }
         List<String> textsToIndex = new ArrayList<>();
@@ -127,9 +140,12 @@ public class FaqMatchService {
             try {
                 qdrantClient.upsertAsync(faqAlias, points).get();
                 log.info("FAQ indexed to Qdrant: faqId={}, points={}", entry.getFaqId(), points.size());
+                faqSearchCacheService.invalidate();
             } catch (Exception e) {
                 log.error("Failed to upsert FAQ to Qdrant: faqId={}", entry.getFaqId(), e);
             }
+        } else {
+            faqSearchCacheService.invalidate();
         }
     }
 
@@ -152,8 +168,30 @@ public class FaqMatchService {
                             .build()
             ).get();
             log.info("FAQ deleted from Qdrant: faqId={}", faqId);
+            faqSearchCacheService.invalidate();
         } catch (Exception e) {
-            log.warn("Failed to delete FAQ from Qdrant: faqId={}", faqId, e.getMessage());
+            log.warn("Failed to delete FAQ from Qdrant: faqId={}, error={}", faqId, e.getMessage());
+            faqSearchCacheService.invalidate();
+        }
+    }
+
+    private FaqMatchResult getCachedMatch(String normalizedQuery) {
+        try {
+            String cached = faqSearchCacheService.get(normalizedQuery);
+            return StringUtils.hasText(cached) ? JSON.parseObject(cached, FaqMatchResult.class) : null;
+        } catch (Exception e) {
+            log.warn("Failed to read FAQ match cache: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private void putCachedMatch(String normalizedQuery, FaqMatchResult result) {
+        try {
+            if (result != null) {
+                faqSearchCacheService.put(normalizedQuery, JSON.toJSONString(result));
+            }
+        } catch (Exception e) {
+            log.warn("Failed to write FAQ match cache: {}", e.getMessage());
         }
     }
 

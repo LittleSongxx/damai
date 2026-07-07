@@ -35,6 +35,7 @@ public class CacheManager {
     private static final String WEB_SEARCH_PREFIX = "damai:cache:web:";
     private static final String USER_CTX_PREFIX = "damai:cache:user:";
     private static final String NL2SQL_RESULT_PREFIX = "damai:cache:nl2sql:";
+    private static final String RAG_EVIDENCE_PREFIX = "damai:cache:rag:evidence:";
 
     @Value("${spring.ai.openai.chat.options.model:unknown}")
     private String chatModel;
@@ -245,6 +246,43 @@ public class CacheManager {
         }
     }
 
+    // --- RAG evidence cache (Redis) ---
+
+    public String getRagEvidence(String cacheKey) {
+        if (!properties.getRagEvidence().isEnabled() || !StringUtils.hasText(cacheKey)) return null;
+        String result = (String) redisTemplate.opsForValue().get(ragEvidenceKey(cacheKey));
+        metrics.recordRagEvidenceExact(result != null);
+        return result;
+    }
+
+    public void putRagEvidence(String cacheKey, String jsonResult) {
+        if (properties.getRagEvidence().isEnabled() && StringUtils.hasText(cacheKey) && StringUtils.hasText(jsonResult)) {
+            redisTemplate.opsForValue().set(ragEvidenceKey(cacheKey), jsonResult,
+                    Duration.ofMinutes(properties.getRagEvidence().getTtlMinutes()));
+            metrics.recordRagEvidencePut();
+        }
+    }
+
+    public void invalidateRagEvidence() {
+        var connectionFactory = redisTemplate.getConnectionFactory();
+        if (connectionFactory == null) return;
+        try (var connection = connectionFactory.getConnection()) {
+            var cursor = connection.keyCommands().scan(
+                    org.springframework.data.redis.core.ScanOptions.scanOptions()
+                            .match(RAG_EVIDENCE_PREFIX + "*")
+                            .count(100)
+                            .build());
+            while (cursor.hasNext()) {
+                byte[] key = cursor.next();
+                redisTemplate.delete(new String(key, java.nio.charset.StandardCharsets.UTF_8));
+            }
+            metrics.recordRagEvidenceInvalidate();
+        } catch (Exception e) {
+            log.warn("Failed to scan-invalidate RAG evidence cache: {}", e.getMessage());
+        }
+        log.info("RAG evidence cache invalidated");
+    }
+
     // --- stats ---
 
     public java.util.Map<String, Object> getStats() {
@@ -284,9 +322,18 @@ public class CacheManager {
                         "ttlMinutes", properties.getUserContext().getTtlMinutes()),
                 "nl2sqlResult", Map.of(
                         "enabled", properties.getNl2sqlResult().isEnabled(),
-                        "ttlMinutes", properties.getNl2sqlResult().getTtlMinutes())
+                        "ttlMinutes", properties.getNl2sqlResult().getTtlMinutes()),
+                "ragEvidence", Map.of(
+                        "enabled", properties.getRagEvidence().isEnabled(),
+                        "ttlMinutes", properties.getRagEvidence().getTtlMinutes(),
+                        "semanticEnabled", properties.getRagEvidence().isSemanticEnabled(),
+                        "semanticThreshold", properties.getRagEvidence().getSemanticThreshold())
         ));
         return stats;
+    }
+
+    private String ragEvidenceKey(String cacheKey) {
+        return RAG_EVIDENCE_PREFIX + sha256(cacheKey);
     }
 
     private String faqSearchKey(String query) {

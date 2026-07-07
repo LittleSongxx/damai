@@ -2,9 +2,13 @@ package org.javaup.ai.vo;
 
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
 
 @Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class RagSourceVo {
 
     private String chunkId;

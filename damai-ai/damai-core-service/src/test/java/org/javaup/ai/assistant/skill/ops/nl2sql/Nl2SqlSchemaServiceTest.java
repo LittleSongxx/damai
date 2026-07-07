@@ -5,6 +5,8 @@ import org.javaup.ai.service.Nl2SqlSemanticCatalogService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.lang.reflect.Method;
+
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -48,9 +50,33 @@ class Nl2SqlSchemaServiceTest {
         assertNotEquals(keyCaptor.getAllValues().get(0), keyCaptor.getAllValues().get(1));
     }
 
+    @Test
+    void shouldPartitionResultCacheBySqlScopeCatalogAndPolicy() throws Exception {
+        Nl2SqlSemanticCatalogService catalogService = mock(Nl2SqlSemanticCatalogService.class);
+        when(catalogService.activeSnapshot()).thenReturn(Nl2SqlTestCatalog.snapshot());
+        Nl2SqlProperties properties = new Nl2SqlProperties();
+        Nl2SqlOrchestrator orchestrator = new Nl2SqlOrchestrator(
+                null, properties, null, null, null, null, null, null, null, null, null, null, catalogService);
+
+        String sql = "select stat_date, order_count from v_order_daily_summary limit 100";
+        String adminOne = executionCacheKey(orchestrator, sql, "admin:1");
+        String adminTwo = executionCacheKey(orchestrator, sql, "admin:2");
+        properties.setMaxRows(10);
+        String policyChanged = executionCacheKey(orchestrator, sql, "admin:1");
+
+        assertNotEquals(adminOne, adminTwo);
+        assertNotEquals(adminOne, policyChanged);
+    }
+
     private Nl2SqlSchemaService schemaService() {
         Nl2SqlSemanticCatalogService catalogService = mock(Nl2SqlSemanticCatalogService.class);
         when(catalogService.activeSnapshot()).thenReturn(Nl2SqlTestCatalog.snapshot());
         return new Nl2SqlSchemaService(new Nl2SqlProperties(), nl2SqlCacheService, catalogService);
+    }
+
+    private String executionCacheKey(Nl2SqlOrchestrator orchestrator, String sql, String userScope) throws Exception {
+        Method method = Nl2SqlOrchestrator.class.getDeclaredMethod("executionCacheKey", String.class, String.class);
+        method.setAccessible(true);
+        return (String) method.invoke(orchestrator, sql, userScope);
     }
 }

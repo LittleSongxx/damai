@@ -19,5 +19,7 @@ export function parseSseChunk<T = unknown>(chunk: string): SseEvent<T> | null
 export const assistantAPI: Record<string, (...args: any[]) => Promise<any>>
 export const customerServiceAPI: Record<string, (...args: any[]) => Promise<any>>
 export const ragEvalAPI: Record<string, (...args: any[]) => Promise<any>>
+export const evaluationCenterAPI: Record<string, (...args: any[]) => Promise<any>>
 export const aiOpsAdminAPI: Record<string, (...args: any[]) => Promise<any>>
 export const promptVersionAPI: Record<string, (...args: any[]) => Promise<any>>
+export const dataOpsAdminAPI: Record<string, (...args: any[]) => Promise<any>>
